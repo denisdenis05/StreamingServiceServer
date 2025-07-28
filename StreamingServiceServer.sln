@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.API", "StreamingServiceServer.API\StreamingServiceServer.API.csproj", "{41E038A6-FCF0-4B80-A8DA-664821D63B01}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.Data", "StreamingServiceServer.Data\StreamingServiceServer.Data.csproj", "{AB1A2925-D6E9-41D0-B2E0-832070ED3EE1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{41E038A6-FCF0-4B80-A8DA-664821D63B01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41E038A6-FCF0-4B80-A8DA-664821D63B01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41E038A6-FCF0-4B80-A8DA-664821D63B01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41E038A6-FCF0-4B80-A8DA-664821D63B01}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AB1A2925-D6E9-41D0-B2E0-832070ED3EE1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AB1A2925-D6E9-41D0-B2E0-832070ED3EE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AB1A2925-D6E9-41D0-B2E0-832070ED3EE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AB1A2925-D6E9-41D0-B2E0-832070ED3EE1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,14 +1,18 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using StreamingServiceServer.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddApplicationServices();
 builder.Services.AddControllers();
+builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer(); 
-/*builder.Services.AddDbContext<SocialMediaDbContext>(options =>
+builder.Services.AddDbContext<StreamingDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-*/
+
 builder.Services.AddSwaggerGen(c =>
 {
     // Add a Bearer token authorization definition to Swagger

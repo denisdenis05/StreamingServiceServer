@@ -4,10 +4,10 @@ namespace StreamingServiceServer.Data.Configurations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-public class ArticlesConfiguration: IEntityTypeConfiguration<Album>
+public class RecordingConfiguration: IEntityTypeConfiguration<Recording>
 {
-    public void Configure(EntityTypeBuilder<Album> builder)
+    public void Configure(EntityTypeBuilder<Recording> builder)
     {
-        builder.HasKey(album => album.Id);
+        builder.HasIndex(a => a.Title);
     }
 }

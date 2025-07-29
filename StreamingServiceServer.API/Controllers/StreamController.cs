@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using StreamingServiceServer.Business.Services.MusicSearch;
 
 namespace StreamingServiceServer.API.Controllers;
 
@@ -6,24 +7,19 @@ namespace StreamingServiceServer.API.Controllers;
 [Route("[controller]")]
 public class StreamController : ControllerBase
 {
-    private readonly IConfiguration _configuration;
+    private readonly IStreamingService _streamingService;
     
-    public StreamController(ILogger<StreamController> logger, IConfiguration configuration)
+    public StreamController(IStreamingService streamingService, IMetadataService metadataService, IConfiguration configuration)
     {
-        _configuration = configuration;
+        _streamingService = streamingService;
     }
     
     [HttpGet]
-    public IActionResult StreamAudio([FromQuery] string id)
+    public async Task<IActionResult> StreamAudio([FromQuery] Guid id)
     {
-        Console.WriteLine("hI");
-        var audioPath = $"{_configuration["Music:Path"]}{id}.mp3";
-
-        if (!System.IO.File.Exists(audioPath))
-            return NotFound();
-
+        var path = await _streamingService.GetStreamingPath(id);
         var mime = "audio/mpeg"; 
 
-        return PhysicalFile(audioPath, mime, enableRangeProcessing: true);
+        return PhysicalFile(path, mime, enableRangeProcessing: true);
     }
 }

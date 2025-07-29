@@ -10,7 +10,12 @@ public class StreamingDbContext : DbContext
     {
     }
 
-    public virtual DbSet<Album> Albums { get; set; }
+    public DbSet<Artist> Artists { get; set; }
+    public DbSet<Recording> Recordings { get; set; }
+    public DbSet<ArtistAlias> ArtistAliases { get; set; }
+    public DbSet<ArtistTag> ArtistTags { get; set; }
+    public DbSet<RecordingArtistCredit> RecordingArtistCredits { get; set; }
+    public DbSet<Release> Releases { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

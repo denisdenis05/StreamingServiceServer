@@ -1,0 +1,18 @@
+using StreamingServiceServer.Business.Models.MusicSearch;
+using StreamingServiceServer.Data.Models;
+
+namespace StreamingServiceServer.Business.Services.MusicSearch;
+
+public interface IMetadataService
+{
+    Task<List<Artist>> SearchArtistsAsync(string query);
+    Task<List<RecordingResponse>> SearchRecordingsAsync(string query);
+    Task<List<RecordingResponse>> SearchAlbumRecordingsAsync(string query);
+    Task SearchAndSaveRecordingAsync(string query);
+    Task SearchAndSaveArtistAsync(string query);
+    Task SearchAndSaveAlbumRecordingsAsync(string query);
+    
+    Task<List<string>> GetAllArtistNames();
+    Task<List<RecordingResponse>> GetAllRecordings();
+    Task<RecordingResponse> GetRecordingById(Guid id);
+}

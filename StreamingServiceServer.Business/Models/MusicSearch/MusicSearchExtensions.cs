@@ -83,6 +83,7 @@ public static class MusicBrainzMapper
         {
             Id = dto.Id,
             Title = dto.Title,
+            Artist = dto.Artist.ToEntity()
         };
 
     public static Release ToEntity(this ReleaseDto dto, ICollection<TrackDto> tracks)
@@ -92,6 +93,7 @@ public static class MusicBrainzMapper
             Id = dto.Id,
             Title = dto.Title,
             Recordings = tracks.Select(track=>track.Recording.ToEntity()).ToList(),
+            Artist = dto.Artist.ToEntity()
         };
     }
 
@@ -101,7 +103,7 @@ public static class MusicBrainzMapper
             Id = recording.Id,
             Title = recording.Title,
             ArtistName = recording.ArtistCredit.Select(ac => ac.Name).FirstOrDefault(),
-            ReleasseTitle = recording.Release?.Title ?? string.Empty,
+            ReleaseTitle = recording.Release?.Title ?? string.Empty,
             Cover = null
         };
     
@@ -111,8 +113,25 @@ public static class MusicBrainzMapper
             Id = recording.Id,
             Title = recording.Title,
             ArtistName = recording.ArtistCredit.Select(ac => ac.Name).FirstOrDefault(),
-            ReleasseTitle = recording.Releases?.FirstOrDefault()?.Title,
+            ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,
             Cover = null
         };
-    
+
+    public static ReleaseResponse ToResponse(this ReleaseDto release) =>
+        new ReleaseResponse
+        {
+            Id = release.Id,
+            Title = release.Title,
+            ArtistName = release.Artist?.Name ?? string.Empty,
+            Cover = null
+        };
+
+    public static ReleaseResponse ToResponse(this Release release) =>
+        new ReleaseResponse
+        {
+            Id = release.Id,
+            Title = release.Title,
+            ArtistName = release.Artist?.Name ?? string.Empty,
+            Cover = null
+        };
 }

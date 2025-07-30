@@ -33,7 +33,7 @@ public class StreamingService : IStreamingService
     private string GetRelativePathForRecording(RecordingResponse recording)
     {
         var artistFolder = recording.ArtistName.Replace(" ", "%").ToUpper();
-        var albumFolder = recording.ReleasseTitle.Replace(" ", "%").ToUpper();
+        var albumFolder = recording.ReleaseTitle.Replace(" ", "%").ToUpper();
         var song = recording.Id.ToString() + ".mp3";
         
         return $"{artistFolder}/{albumFolder}/{song}";

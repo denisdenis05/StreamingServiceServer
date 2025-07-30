@@ -14,5 +14,6 @@ public interface IMetadataService
     
     Task<List<string>> GetAllArtistNames();
     Task<List<RecordingResponse>> GetAllRecordings();
+    Task<List<ReleaseResponse>> GetAllAlbums();
     Task<RecordingResponse> GetRecordingById(Guid id);
 }

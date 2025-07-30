@@ -78,4 +78,12 @@ public class MetadataController : ControllerBase
         
         return Ok(response);
     }
+    
+    [HttpGet("get-available-albums")]
+    public async Task<IActionResult> GetAllAlbums()
+    {
+        var response = await _metadataService.GetAllAlbums();
+        
+        return Ok(response);
+    }
 }

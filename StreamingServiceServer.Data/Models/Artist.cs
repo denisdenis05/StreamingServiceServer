@@ -12,4 +12,5 @@ public class Artist
     public string? Country { get; set; }
     public virtual ICollection<ArtistAlias> Aliases { get; set; } = new List<ArtistAlias>();
     public virtual ICollection<ArtistTag> Tags { get; set; } = new List<ArtistTag>();
+    public virtual ICollection<Release> Releases { get; set; } = new List<Release>();
 }

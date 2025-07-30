@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Microsoft.Extensions.Configuration;
 using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
@@ -8,22 +9,23 @@ using Microsoft.EntityFrameworkCore;
 
 public class MusicBrainzService : IExternalMusicSearchService
 {
-    private readonly StreamingDbContext _dbContext;
     private readonly HttpClient _httpClient;
-    private const string BaseUrl = "https://musicbrainz.org/ws/2/";
+    private readonly IConfiguration _configuration;
+    private readonly string _baseUrl;
 
-    public MusicBrainzService(StreamingDbContext dbContext, HttpClient httpClient)
+    public MusicBrainzService(HttpClient httpClient, IConfiguration configuration)
     {
-        _dbContext = dbContext;
         _httpClient = httpClient;
+        _configuration = configuration;
+        _baseUrl = _configuration["Music:External:MusicBrainz:BaseUrl"];
 
         _httpClient.DefaultRequestHeaders.Add("User-Agent",
-            "StreamingService/1.0 (tessadt@tesasdast.com)"); 
+            _configuration["Music:External:MusicBrainz:User-Agent"]); 
     }
 
     public async Task<List<ArtistDto>> SearchArtistsAsync(string query)
     {
-        var url = $"{BaseUrl}artist?query={Uri.EscapeDataString(query)}&fmt=json";
+        var url = $"{_baseUrl}artist?query={Uri.EscapeDataString(query)}&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(url);
 
         return response.Artists.ToList();
@@ -31,7 +33,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     
     public async Task<List<RecordingDto>> SearchRecordingsAsync(string query)
     {
-        var url = $"{BaseUrl}recording?query={Uri.EscapeDataString(query)}&fmt=json";
+        var url = $"{_baseUrl}recording?query={Uri.EscapeDataString(query)}&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(url);
         
         return response.Recordings.ToList();
@@ -53,15 +55,22 @@ public class MusicBrainzService : IExternalMusicSearchService
 
     private async Task<ICollection<ReleaseDto>> GetReleasesFromQuery(string query)
     {
-        var releaseGroupUrl = $"{BaseUrl}release-group?query={Uri.EscapeDataString(query)}&fmt=json";
+        var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(query)}&fmt=json";
         var searchResponse = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(releaseGroupUrl);
 
-        return searchResponse.ReleaseGroups.First().Releases;
+        var releaseGroup = searchResponse.ReleaseGroups.First();
+        return releaseGroup.Releases
+            .Select(release => 
+                { release.Artist = releaseGroup.ArtistCredits.First().Artist; 
+                    return release; 
+                }
+                )
+            .ToList();
     }
 
     private async Task<ICollection<RecordingDto>> GetRecordingsFromAlbum(Guid albumId)
     {
-        var releaseUrl = $"{BaseUrl}release/{albumId}?inc=recordings+artist-credits&fmt=json";
+        var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzLookupResponse>(releaseUrl);
 
         var recordings = response

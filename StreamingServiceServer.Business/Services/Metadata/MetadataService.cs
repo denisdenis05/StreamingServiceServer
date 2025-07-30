@@ -38,6 +38,16 @@ public class MetadataService : IMetadataService
         return recordings;
     }
     
+    public async Task<List<ReleaseResponse>> GetAllAlbums()
+    {
+        var releases = await _dbContext.Releases
+            .Include(release => release.Artist)
+            .Select(release => release.ToResponse())
+            .ToListAsync();
+
+        return releases;
+    }
+    
     public async Task<RecordingResponse> GetRecordingById(Guid id)
     {
         var recordings = await _dbContext.Recordings
@@ -92,9 +102,38 @@ public class MetadataService : IMetadataService
     {
         var recordings =  await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
         var release = recordings.First().Releases.First().ToEntity();
+        await AddReleaseToDatabase(release);
         
+        await AddArtistsToDatabaseFromRecordings(recordings);
+        
+        await _dbContext.Recordings.AddRangeAsync(recordings.Select(recording =>
+        {
+            var recordingToAdd = recording.ToEntity();
+            recordingToAdd.Release = release;
+            
+            return recordingToAdd;
+        }).ToList());
+        await _dbContext.SaveChangesAsync();
+    }
+
+    private async Task AddReleaseToDatabase(Release release)
+    {
+        var releaseArtist = release.Artist;
+
+        if (releaseArtist != null)
+        {
+            var artistExists = await _dbContext.Artists.AnyAsync(a => a.Id == releaseArtist.Id);
+            if (!artistExists)
+            {
+                await _dbContext.Artists.AddAsync(releaseArtist);
+            }
+        }
         await _dbContext.Releases.AddAsync(release);
-        
+        await _dbContext.SaveChangesAsync();
+    }
+
+    private async Task AddArtistsToDatabaseFromRecordings(ICollection<RecordingDto> recordings)
+    {
         var uniqueArtists = recordings
             .SelectMany(r => r.ArtistCredit)
             .Where(ac => ac.Artist != null)
@@ -115,13 +154,6 @@ public class MetadataService : IMetadataService
             }
         }
         
-        await _dbContext.Recordings.AddRangeAsync(recordings.Select(recording =>
-        {
-            var recordingToAdd = recording.ToEntity();
-            recordingToAdd.Release = release;
-            
-            return recordingToAdd;
-        }).ToList());
         await _dbContext.SaveChangesAsync();
     }
 }

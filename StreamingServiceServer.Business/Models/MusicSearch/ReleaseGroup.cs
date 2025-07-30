@@ -10,4 +10,7 @@ public class ReleaseGroup
     
     [JsonPropertyName("releases")]
     public ICollection<ReleaseDto> Releases { get; set; } =  new List<ReleaseDto>();
+    
+    [JsonPropertyName("artist-credit")]
+    public ICollection<ArtistCreditDto> ArtistCredits { get; set; } =  new List<ArtistCreditDto>();
 }

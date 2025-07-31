@@ -102,7 +102,7 @@ public static class MusicBrainzMapper
         {
             Id = recording.Id,
             Title = recording.Title,
-            ArtistName = recording.ArtistCredit.Select(ac => ac.Name).FirstOrDefault(),
+            ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
             Cover = null
         };
@@ -112,7 +112,7 @@ public static class MusicBrainzMapper
         {
             Id = recording.Id,
             Title = recording.Title,
-            ArtistName = recording.ArtistCredit.Select(ac => ac.Name).FirstOrDefault(),
+            ArtistName = recording.Releases.FirstOrDefault()?.Artist.Name,
             ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,
             Cover = null
         };

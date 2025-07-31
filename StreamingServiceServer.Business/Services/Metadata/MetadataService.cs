@@ -48,10 +48,24 @@ public class MetadataService : IMetadataService
         return releases;
     }
     
+    public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id)
+    {
+        var recordings = await _dbContext.Recordings
+            .Where(recording => recording.Release.Id == id)
+            .Include(recording => recording.Release)
+            .Include(recording => recording.Release.Artist)
+            .Select(recording => recording.ToResponse())
+            .ToListAsync();
+        
+        return recordings;
+    }
+    
     public async Task<RecordingResponse> GetRecordingById(Guid id)
     {
         var recordings = await _dbContext.Recordings
-            .Include(recording => recording.ArtistCredit)
+            .Where(recording => recording.Id == id)
+            .Include(recording => recording.Release)
+            .Include(recording => recording.Release.Artist)
             .Select(recording => recording.ToResponse())
             .FirstOrDefaultAsync();
 

@@ -79,6 +79,14 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
+    [HttpGet("get-recordings")]
+    public async Task<IActionResult> GetAllRecordings([FromQuery] Guid albumId)
+    {
+        var response = await _metadataService.GetRecordingsByAlbumId(albumId);
+        
+        return Ok(response);
+    }
+    
     [HttpGet("get-available-albums")]
     public async Task<IActionResult> GetAllAlbums()
     {

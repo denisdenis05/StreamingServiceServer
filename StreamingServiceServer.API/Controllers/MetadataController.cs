@@ -94,4 +94,12 @@ public class MetadataController : ControllerBase
         
         return Ok(response);
     }
+    
+    [HttpPost("queue-to-download")]
+    public async Task<IActionResult> QueueToDownload([FromBody] Guid albumId)
+    {
+        await _metadataService.QueueToDownload(albumId);
+        
+        return Ok();
+    }
 }

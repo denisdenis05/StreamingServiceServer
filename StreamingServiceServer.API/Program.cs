@@ -7,8 +7,24 @@ using StreamingServiceServer.Data;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddApplicationServices();
+builder.Services.AddHostedService<MusicDownloader>();
+
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("unsafeHttp", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(10);
+        client.DefaultRequestHeaders.Add("User-Agent", "Torrent/1.0");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        return new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = 
+                (message, cert, chain, errors) => true
+        };
+    });
+
 builder.Services.AddEndpointsApiExplorer(); 
 builder.Services.AddDbContext<StreamingDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));

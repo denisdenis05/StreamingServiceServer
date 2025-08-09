@@ -17,4 +17,6 @@ public interface IMetadataService
     Task<List<ReleaseResponse>> GetAllAlbums();
     Task<RecordingResponse> GetRecordingById(Guid id);
     Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id);
+
+    Task QueueToDownload(Guid id);
 }

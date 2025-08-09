@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StreamingServiceServer.Data;
@@ -11,9 +12,11 @@ using StreamingServiceServer.Data;
 namespace StreamingServiceServer.Data.Migrations
 {
     [DbContext(typeof(StreamingDbContext))]
-    partial class StreamingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250808090250_AddedCoverAndPosition")]
+    partial class AddedCoverAndPosition
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -120,21 +123,6 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("ArtistTags");
                 });
 
-            modelBuilder.Entity("StreamingServiceServer.Data.Models.PendingDownload", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("SourceName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("PendingDownloads");
-                });
-
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>
                 {
                     b.Property<Guid>("Id")
@@ -212,25 +200,6 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasIndex("ArtistId");
 
                     b.ToTable("Releases");
-                });
-
-            modelBuilder.Entity("StreamingServiceServer.Data.Models.ReleaseToDownload", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Artist")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ReleasesToDownload");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.ArtistAlias", b =>

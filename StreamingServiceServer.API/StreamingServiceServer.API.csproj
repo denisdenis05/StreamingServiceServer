@@ -18,5 +18,10 @@
         <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.13.0" />
         <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
     </ItemGroup>
+    <ItemGroup>
+      <None Update="temp.txt">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
 
 </Project>

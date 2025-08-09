@@ -8,6 +8,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\StreamingServiceServer.Data\StreamingServiceServer.Data.csproj" />
+        <ProjectReference Include="..\StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj" />
     </ItemGroup>
 
 

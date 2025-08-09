@@ -24,4 +24,7 @@ public class RecordingDto
     
     [JsonPropertyName("releases")] 
     public ICollection<ReleaseDto> Releases { get; set; } = new List<ReleaseDto>();
+    
+    public string Cover { get; set; }
+    public int PositionInAlbum { get; set; }
 }

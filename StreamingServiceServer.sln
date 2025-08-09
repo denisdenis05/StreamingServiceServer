@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.Data
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.Business", "StreamingServiceServer.Business\StreamingServiceServer.Business.csproj", "{332C2C4B-435F-454A-9304-D2C3306EC8C1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.Downloader", "StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj", "{F48FAF0D-5708-4436-8405-176D462A78D9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{332C2C4B-435F-454A-9304-D2C3306EC8C1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{332C2C4B-435F-454A-9304-D2C3306EC8C1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{332C2C4B-435F-454A-9304-D2C3306EC8C1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F48FAF0D-5708-4436-8405-176D462A78D9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F48FAF0D-5708-4436-8405-176D462A78D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F48FAF0D-5708-4436-8405-176D462A78D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F48FAF0D-5708-4436-8405-176D462A78D9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

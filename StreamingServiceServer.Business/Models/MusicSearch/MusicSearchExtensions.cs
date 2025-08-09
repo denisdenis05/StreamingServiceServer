@@ -58,6 +58,8 @@ public static class MusicBrainzMapper
             Id = dto.Id,
             Title = dto.Title,
             Length = dto.Length,
+            Cover =  dto.Cover,
+            PositionInAlbum = dto.PositionInAlbum,
         };
 
         if (dto.ArtistCredit != null)
@@ -83,7 +85,8 @@ public static class MusicBrainzMapper
         {
             Id = dto.Id,
             Title = dto.Title,
-            Artist = dto.Artist.ToEntity()
+            Artist = dto.Artist.ToEntity(),
+            Cover =  dto.Cover
         };
 
     public static Release ToEntity(this ReleaseDto dto, ICollection<TrackDto> tracks)
@@ -93,7 +96,8 @@ public static class MusicBrainzMapper
             Id = dto.Id,
             Title = dto.Title,
             Recordings = tracks.Select(track=>track.Recording.ToEntity()).ToList(),
-            Artist = dto.Artist.ToEntity()
+            Artist = dto.Artist.ToEntity(),
+            Cover =  dto.Cover
         };
     }
 
@@ -104,7 +108,7 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
-            Cover = null
+            Cover =  recording.Cover
         };
     
     public static RecordingResponse ToResponse(this RecordingDto recording) =>
@@ -114,7 +118,7 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.Releases.FirstOrDefault()?.Artist.Name,
             ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,
-            Cover = null
+            Cover =  recording.Cover,
         };
 
     public static ReleaseResponse ToResponse(this ReleaseDto release) =>
@@ -123,7 +127,7 @@ public static class MusicBrainzMapper
             Id = release.Id,
             Title = release.Title,
             ArtistName = release.Artist?.Name ?? string.Empty,
-            Cover = null
+            Cover = release.Cover
         };
 
     public static ReleaseResponse ToResponse(this Release release) =>
@@ -132,6 +136,6 @@ public static class MusicBrainzMapper
             Id = release.Id,
             Title = release.Title,
             ArtistName = release.Artist?.Name ?? string.Empty,
-            Cover = null
+            Cover = release.Cover
         };
 }

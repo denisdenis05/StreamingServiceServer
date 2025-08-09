@@ -54,6 +54,7 @@ public class MetadataService : IMetadataService
             .Where(recording => recording.Release.Id == id)
             .Include(recording => recording.Release)
             .Include(recording => recording.Release.Artist)
+            .OrderBy(recording => recording.PositionInAlbum)
             .Select(recording => recording.ToResponse())
             .ToListAsync();
         
@@ -72,10 +73,25 @@ public class MetadataService : IMetadataService
         return recordings;
     }
     
+    public async Task QueueToDownload(Guid id)
+    {
+        var release = await _externalMusicSearchService.GetAlbumDetails(id);
+        
+        await _dbContext.ReleasesToDownload.AddAsync(
+            new ReleaseToDownload
+            {
+                Id = id,
+                Title = release.Title,
+                Artist = release.ArtistName
+            });
+        await _dbContext.SaveChangesAsync();
+    }
+    
     public async Task<List<Artist>> SearchArtistsAsync(string query)
     {
         // TODO get artists from local database and also add relevant external artists 
         var artists = await _externalMusicSearchService.SearchArtistsAsync(query);
+        // TODO check if artists are not duplicate with the already saved ones
         
         return artists.Select(artist => artist.ToEntity()).ToList();
     }
@@ -84,6 +100,7 @@ public class MetadataService : IMetadataService
     {
         // TODO get Recordings from local database and also add relevant external Recordings 
         var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
+        // TODO check if recordings are not duplicate with the already saved ones
         
         return recordings.Select(recording => recording.ToResponse()).ToList();
     }
@@ -92,7 +109,7 @@ public class MetadataService : IMetadataService
     {
         // TODO get Albums from local database and also add relevant external Albums 
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
-        
+        // TODO check if recordings are not duplicate with the already saved ones
         return recordings.Select(recording => recording.ToResponse()).ToList();
     }
     

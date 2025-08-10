@@ -39,6 +39,14 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
+    [HttpGet("search-album-recordings-by-id")]
+    public async Task<IActionResult> SearchAlbumRecordings([FromQuery] Guid albumId)
+    {
+        var response = await _metadataService.SearchAlbumRecordingsByIdAsync(albumId);
+        
+        return Ok(response);
+    }
+    
     [HttpPost("save-artist")]
     public async Task<IActionResult> SaveArtist([FromBody] string query)
     {

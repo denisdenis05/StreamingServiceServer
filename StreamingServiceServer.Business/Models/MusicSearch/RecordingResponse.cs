@@ -7,4 +7,5 @@ public class RecordingResponse
     public string? ArtistName { get; set; }
     public string? ReleaseTitle { get; set; }
     public string? Cover {get; set;}
+    public int PositionInAlbum { get; set; }
 }

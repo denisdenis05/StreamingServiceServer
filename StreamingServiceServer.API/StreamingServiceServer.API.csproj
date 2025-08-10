@@ -7,6 +7,7 @@
     </PropertyGroup>
     <ItemGroup>
         <ProjectReference Include="..\StreamingServiceServer.Business\StreamingServiceServer.Business.csproj" />
+        <ProjectReference Include="..\StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj" />
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.7" />
@@ -17,11 +18,6 @@
         </PackageReference>
         <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.13.0" />
         <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
-    </ItemGroup>
-    <ItemGroup>
-      <None Update="temp.txt">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      </None>
     </ItemGroup>
 
 </Project>

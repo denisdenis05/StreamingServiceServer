@@ -2,12 +2,15 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using StreamingServiceDownloader.BackgroundServices;
 using StreamingServiceServer.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddApplicationServices();
+builder.Services.RegisterHelpers();
 builder.Services.AddHostedService<MusicDownloader>();
+builder.Services.AddHostedService<PendingDownloadChecker>();
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();

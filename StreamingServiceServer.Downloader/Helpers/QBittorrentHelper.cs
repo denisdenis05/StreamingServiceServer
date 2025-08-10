@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using StreamingServiceDownloader.Models;
 
 namespace StreamingServiceDownloader.Helpers;
@@ -10,27 +11,24 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-public class QbittorrentClient: ITorrentHelper
+public class QBittorrentHelper: ITorrentHelper
 {
     private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
     private readonly string _baseUrl;
     private readonly string _username;
     private readonly string _password;
     private bool _isLoggedIn;
+    
 
-    public QbittorrentClient(string baseUrl, string username, string password)
+    public QBittorrentHelper(IConfiguration configuration, HttpClient httpClient)
     {
-        _baseUrl = baseUrl.TrimEnd('/');
-        _username = username;
-        _password = password;
-
-        var handler = new HttpClientHandler
-        {
-            CookieContainer = new CookieContainer(),
-            UseCookies = true
-        };
-
-        _httpClient = new HttpClient(handler);
+        _httpClient = httpClient;
+        _configuration = configuration;
+        
+        _baseUrl = _configuration["Music:DownloadSource:Torrent:Url"].TrimEnd('/');
+        _username = _configuration["Music:DownloadSource:Torrent:User"];
+        _password = _configuration["Music:DownloadSource:Torrent:Password"];;
     }
 
     public async Task LoginAsync()
@@ -96,5 +94,26 @@ public class QbittorrentClient: ITorrentHelper
         return torrents.FirstOrDefault(t =>
             t.Hash.Equals(searchTerm, StringComparison.OrdinalIgnoreCase) ||
             t.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    public async Task RemoveTorrentAsync(string torrentName, bool deleteFiles = true)
+    {
+        if (!_isLoggedIn)
+            await LoginAsync();
+
+        var torrent = await GetTorrentInfoAsync(torrentName);
+        if (torrent == null)
+        {
+            return;
+        }
+
+        var content = new FormUrlEncodedContent(new[]
+        {
+            new KeyValuePair<string, string>("hashes", torrent.Hash),
+            new KeyValuePair<string, string>("deleteFiles", deleteFiles ? "true" : "false")
+        });
+
+        var response = await _httpClient.PostAsync($"{_baseUrl}/api/v2/torrents/delete", content);
+        response.EnsureSuccessStatusCode();
     }
 }

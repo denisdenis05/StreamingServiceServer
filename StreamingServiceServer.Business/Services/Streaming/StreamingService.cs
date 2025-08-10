@@ -1,13 +1,7 @@
-using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
-using StreamingServiceServer.Business.Models.MusicSearch;
-using StreamingServiceServer.Data;
-using StreamingServiceServer.Data.Models;
+using StreamingServiceServer.Business.Helpers;
 
 namespace StreamingServiceServer.Business.Services.MusicSearch;
-using Microsoft.EntityFrameworkCore;
-
-
 
 public class StreamingService : IStreamingService
 {
@@ -23,19 +17,30 @@ public class StreamingService : IStreamingService
     public async Task<string> GetStreamingPath(Guid songId)
     {
         var record = await _metadataService.GetRecordingById(songId);
-        
-        if(record == null)
-            throw new Exception("Record not found");
-        
-        return _configuration["Music:Path"] + GetRelativePathForRecording(record);
-    }
 
-    private string GetRelativePathForRecording(RecordingResponse recording)
-    {
-        var artistFolder = recording.ArtistName.Replace(" ", "%").ToUpper();
-        var albumFolder = recording.ReleaseTitle.Replace(" ", "%").ToUpper();
-        var song = recording.Id.ToString() + ".mp3";
-        
-        return $"{artistFolder}/{albumFolder}/{song}";
+        if (record == null)
+            throw new Exception("Record not found");
+
+        var folderPath = Path.Combine(
+            _configuration["Music:Path"],
+            MusicLocationHelper.GetRelativeFolderPathForRecording(record)
+        );
+
+        if (!Directory.Exists(folderPath))
+        {
+            throw new FileNotFoundException($"Folder not found for recording: {folderPath}");
+        }
+
+        var matchingFile = Directory.GetFiles(folderPath, record.Id.ToString() + ".*")
+            .FirstOrDefault();
+
+        if (matchingFile == null)
+        {
+            throw new FileNotFoundException($"No file found for recording ID {record.Id} in {folderPath}");
+        }
+
+        var extension = Path.GetExtension(matchingFile);
+
+        return Path.Combine(folderPath, record.Id + extension);
     }
 }

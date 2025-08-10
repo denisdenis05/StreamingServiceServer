@@ -8,4 +8,5 @@ public interface ITorrentHelper
     Task AddTorrentAsync(string magnetLink);
     Task AddTorrentAsync(TorrentResult torrent);
     Task<TorrentInfo?> GetTorrentInfoAsync(string searchTerm);
+    Task RemoveTorrentAsync(string torrentName, bool deleteFiles = true);
 }

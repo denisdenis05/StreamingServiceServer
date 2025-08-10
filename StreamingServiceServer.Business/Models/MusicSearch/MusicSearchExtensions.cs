@@ -108,7 +108,8 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
-            Cover =  recording.Cover
+            Cover =  recording.Cover,
+            PositionInAlbum = recording.PositionInAlbum,
         };
     
     public static RecordingResponse ToResponse(this RecordingDto recording) =>
@@ -116,9 +117,10 @@ public static class MusicBrainzMapper
         {
             Id = recording.Id,
             Title = recording.Title,
-            ArtistName = recording.Releases.FirstOrDefault()?.Artist.Name,
+            ArtistName = recording.ArtistCredit.FirstOrDefault()?.Artist.Name,
             ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,
             Cover =  recording.Cover,
+            PositionInAlbum = recording.PositionInAlbum,
         };
 
     public static ReleaseResponse ToResponse(this ReleaseDto release) =>

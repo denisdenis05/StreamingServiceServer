@@ -39,10 +39,17 @@ public class MusicBrainzService : IExternalMusicSearchService
         
         return response.Recordings.ToList();
     }
-    
+
+    public async Task<List<ReleaseDto>> SearchAlbumsAsync(string query)
+    {
+        var releases = await SearchForAlbumByQuery(query);
+
+        return releases.ToList();
+    }
+
     public async Task<List<RecordingDto>> SearchAlbumRecordingsAsync(string query)
     {
-        var releases = await GetReleasesFromQuery(query);
+        var releases = await GetReleasesFromAlbumByQuery(query);
         var albumId = releases.First().Id;
         
         var recordings = await GetRecordingsFromAlbum(albumId);
@@ -79,7 +86,7 @@ public class MusicBrainzService : IExternalMusicSearchService
         return new List<ReleaseDto> { release };
     }
     
-    private async Task<ICollection<ReleaseDto>> GetReleasesFromQuery(string query)
+    private async Task<ICollection<ReleaseDto>> GetReleasesFromAlbumByQuery(string query)
     {
         var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(query)}&fmt=json";
         var searchResponse = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(releaseGroupUrl);
@@ -96,6 +103,26 @@ public class MusicBrainzService : IExternalMusicSearchService
             })
         );
 
+        return releases.ToList();
+    }
+    
+    private async Task<ICollection<ReleaseDto>> SearchForAlbumByQuery(string query)
+    {
+        var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(query)}&fmt=json";
+        var searchResponse = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(releaseGroupUrl);
+
+        var releaseGroup = searchResponse.ReleaseGroups.Take(5).ToList();
+        
+        var releases = new List<ReleaseDto>();
+        foreach (var releaseToCheck in releaseGroup)
+        {
+            var releaseToAdd = releaseToCheck.Releases.FirstOrDefault(); 
+            releaseToAdd.Artist = releaseToCheck.ArtistCredits.First().Artist; 
+            releaseToAdd.Cover = await GetAlbumCover(releaseToAdd.Id);
+            
+            releases.AddRange(releaseToAdd);    
+        }
+        
         return releases.ToList();
     }
 
@@ -140,10 +167,17 @@ public class MusicBrainzService : IExternalMusicSearchService
     
     private async Task<string> GetAlbumCover(Guid albumId)
     {
-        var coverUrl = $"{_baseCoverUrl}release/{albumId}";
-        var response = await _httpClient.GetFromJsonAsync<CoverArtResponse>(coverUrl);
+        try
+        {
+            var coverUrl = $"{_baseCoverUrl}release/{albumId}";
+            var response = await _httpClient.GetFromJsonAsync<CoverArtResponse>(coverUrl);
 
- 
-        return response.Images.First().Image;
+
+            return response.Images.First().Image;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 }

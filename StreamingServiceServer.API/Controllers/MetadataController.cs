@@ -39,6 +39,14 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
+    [HttpGet("search-albums")]
+    public async Task<IActionResult> SearchAlbums([FromQuery] string query)
+    {
+        var response = await _metadataService.SearchAlbumsAsync(query);
+        
+        return Ok(response);
+    }
+    
     [HttpGet("search-album-recordings-by-id")]
     public async Task<IActionResult> SearchAlbumRecordings([FromQuery] Guid albumId)
     {
@@ -67,6 +75,14 @@ public class MetadataController : ControllerBase
     public async Task<IActionResult> SaveAlbum([FromBody] string query)
     {
         await _metadataService.SearchAndSaveAlbumRecordingsAsync(query);
+        
+        return Ok();
+    }
+        
+    [HttpPost("save-album-by-id")]
+    public async Task<IActionResult> SaveAlbumById([FromBody] Guid albumId)
+    {
+        await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(albumId);
         
         return Ok();
     }

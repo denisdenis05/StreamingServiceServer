@@ -12,7 +12,7 @@ public class MetadataService : IMetadataService
 {
     private readonly StreamingDbContext _dbContext;
     private readonly IExternalMusicSearchService _externalMusicSearchService;
-    
+
     public MetadataService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService)
     {
         _dbContext = dbContext;
@@ -37,7 +37,7 @@ public class MetadataService : IMetadataService
 
         return recordings;
     }
-    
+
     public async Task<List<ReleaseResponse>> GetAllAlbums()
     {
         var releases = await _dbContext.Releases
@@ -47,7 +47,7 @@ public class MetadataService : IMetadataService
 
         return releases;
     }
-    
+
     public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id)
     {
         var recordings = await _dbContext.Recordings
@@ -57,10 +57,17 @@ public class MetadataService : IMetadataService
             .OrderBy(recording => recording.PositionInAlbum)
             .Select(recording => recording.ToResponse())
             .ToListAsync();
-        
+
+        if (!recordings.Any())
+        {
+            var isQueued = await IsAlreadyQueuedToDownload(id);
+            if (!isQueued)
+                await QueueToDownload(id);
+        }
+
         return recordings;
     }
-    
+
     public async Task<RecordingResponse> GetRecordingById(Guid id)
     {
         var recordings = await _dbContext.Recordings
@@ -72,11 +79,18 @@ public class MetadataService : IMetadataService
 
         return recordings;
     }
-    
+
+    public async Task<bool> IsAlreadyQueuedToDownload(Guid id)
+    {
+        var queuedAlbum = await _dbContext.ReleasesToDownload.Where(release => release.Id == id).ToListAsync();
+
+        return queuedAlbum.Any();
+    }
+
     public async Task QueueToDownload(Guid id)
     {
         var release = await _externalMusicSearchService.GetAlbumDetails(id);
-        
+
         await _dbContext.ReleasesToDownload.AddAsync(
             new ReleaseToDownload
             {
@@ -86,25 +100,33 @@ public class MetadataService : IMetadataService
             });
         await _dbContext.SaveChangesAsync();
     }
-    
+
     public async Task<List<Artist>> SearchArtistsAsync(string query)
     {
         // TODO get artists from local database and also add relevant external artists 
         var artists = await _externalMusicSearchService.SearchArtistsAsync(query);
         // TODO check if artists are not duplicate with the already saved ones
-        
+
         return artists.Select(artist => artist.ToEntity()).ToList();
     }
-    
+
     public async Task<List<RecordingResponse>> SearchRecordingsAsync(string query)
     {
         // TODO get Recordings from local database and also add relevant external Recordings 
         var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
         // TODO check if recordings are not duplicate with the already saved ones
-        
+
         return recordings.Select(recording => recording.ToResponse()).ToList();
     }
-    
+
+    public async Task<List<ReleaseResponse>> SearchAlbumsAsync(string query)
+    {
+        // TODO get Albums from local database and also add relevant external Albums 
+        var releases = await _externalMusicSearchService.SearchAlbumsAsync(query);
+        // TODO check if recordings are not duplicate with the already saved ones
+        return releases.Select(release => release.ToResponse()).ToList();
+    }
+
     public async Task<List<RecordingResponse>> SearchAlbumRecordingsAsync(string query)
     {
         // TODO get Albums from local database and also add relevant external Albums 
@@ -112,7 +134,7 @@ public class MetadataService : IMetadataService
         // TODO check if recordings are not duplicate with the already saved ones
         return recordings.Select(recording => recording.ToResponse()).ToList();
     }
-    
+
     public async Task<List<RecordingResponse>> SearchAlbumRecordingsByIdAsync(Guid albumId)
     {
         // TODO get Albums from local database and also add relevant external Albums 
@@ -120,97 +142,91 @@ public class MetadataService : IMetadataService
         // TODO check if recordings are not duplicate with the already saved ones
         return recordings.Select(recording => recording.ToResponse()).ToList();
     }
-    
+
     public async Task SearchAndSaveRecordingAsync(string query)
     {
-        var recordings =  await _externalMusicSearchService.SearchRecordingsAsync(query);
-        
+        var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
+
         await _dbContext.Recordings.AddAsync(recordings.First().ToEntity());
         await _dbContext.SaveChangesAsync();
     }
-    
+
     public async Task SearchAndSaveArtistAsync(string query)
     {
-        var artists =  await _externalMusicSearchService.SearchArtistsAsync(query);
-        
+        var artists = await _externalMusicSearchService.SearchArtistsAsync(query);
+
         await _dbContext.Artists.AddAsync(artists.First().ToEntity());
         await _dbContext.SaveChangesAsync();
     }
-    
+
     public async Task SearchAndSaveAlbumRecordingsAsync(string query)
     {
-        var recordings =  await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
-        var release = recordings.First().Releases.First().ToEntity();
-        await AddReleaseToDatabase(release);
-        
-        await AddArtistsToDatabaseFromRecordings(recordings);
-        
-        await _dbContext.Recordings.AddRangeAsync(recordings.Select(recording =>
-        {
-            var recordingToAdd = recording.ToEntity();
-            recordingToAdd.Release = release;
-            
-            return recordingToAdd;
-        }).ToList());
-        await _dbContext.SaveChangesAsync();
+        var recordings = await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
+        await SaveAlbumRecordings(recordings);
     }
-    
+
     public async Task SearchAndSaveAlbumRecordingsByIdAsync(Guid albumId)
     {
-        var recordings =  await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
+        var recordings = await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
+        if (recordings == null || !recordings.Any())
+            return;
+
+        await SaveAlbumRecordings(recordings);
+    }
+
+    private async Task SaveAlbumRecordings(ICollection<RecordingDto> recordings)
+    {
         var release = recordings.First().Releases.First().ToEntity();
-        await AddReleaseToDatabase(release);
-        
-        await AddArtistsToDatabaseFromRecordings(recordings);
-        
-        await _dbContext.Recordings.AddRangeAsync(recordings.Select(recording =>
-        {
-            var recordingToAdd = recording.ToEntity();
-            recordingToAdd.Release = release;
-            
-            return recordingToAdd;
-        }).ToList());
-        await _dbContext.SaveChangesAsync();
-    }
 
-    private async Task AddReleaseToDatabase(Release release)
-    {
-        var releaseArtist = release.Artist;
+        var allArtists = new List<Artist>();
 
-        if (releaseArtist != null)
-        {
-            var artistExists = await _dbContext.Artists.AnyAsync(a => a.Id == releaseArtist.Id);
-            if (!artistExists)
-            {
-                await _dbContext.Artists.AddAsync(releaseArtist);
-            }
-        }
-        await _dbContext.Releases.AddAsync(release);
-        await _dbContext.SaveChangesAsync();
-    }
+        if (release.Artist != null)
+            allArtists.Add(release.Artist);
 
-    private async Task AddArtistsToDatabaseFromRecordings(ICollection<RecordingDto> recordings)
-    {
-        var uniqueArtists = recordings
+        var recordingArtists = recordings
             .SelectMany(r => r.ArtistCredit)
             .Where(ac => ac.Artist != null)
-            .Select(ac => ac.Artist!)
+            .Select(ac => ac.Artist!.ToEntity())
+            .ToList();
+
+        allArtists.AddRange(recordingArtists);
+
+        var distinctArtists = allArtists
             .GroupBy(a => a.Id)
             .Select(g => g.First())
             .ToList();
+
         var existingArtistIds = await _dbContext.Artists
-            .Where(a => uniqueArtists.Select(ua => ua.Id).Contains(a.Id))
+            .Where(a => distinctArtists.Select(ua => ua.Id).Contains(a.Id))
             .Select(a => a.Id)
             .ToListAsync();
 
-        foreach (var artistDto in uniqueArtists)
+        foreach (var artist in distinctArtists)
         {
-            if (!existingArtistIds.Contains(artistDto.Id))
+            bool tracked = _dbContext.Artists.Local.Any(a => a.Id == artist.Id);
+            bool exists = existingArtistIds.Contains(artist.Id);
+
+            if (!tracked && !exists)
             {
-                await _dbContext.Artists.AddAsync(artistDto.ToEntity());
+                await _dbContext.Artists.AddAsync(artist);
+            }
+            else if (exists && !tracked)
+            {
+                _dbContext.Artists.Attach(artist);
             }
         }
-        
+
+        await _dbContext.Releases.AddAsync(release);
+
+        var recordingEntities = recordings.Select(recording =>
+        {
+            var recEntity = recording.ToEntity();
+            recEntity.Release = release;
+            return recEntity;
+        }).ToList();
+
+        await _dbContext.Recordings.AddRangeAsync(recordingEntities);
+
         await _dbContext.SaveChangesAsync();
     }
 }

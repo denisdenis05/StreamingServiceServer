@@ -146,6 +146,7 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         foreach (var album in albums)
         {
             await QueueToDownloadByQuery($"{album.Album} {album.Artist}");
+            await Task.Delay(500);
         }
     }
 

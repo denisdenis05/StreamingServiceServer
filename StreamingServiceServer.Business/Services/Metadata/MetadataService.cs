@@ -158,6 +158,12 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         if(releaseToAdd == null)
             Console.WriteLine("COULD NOT FIND RELEASE");
         
+        if (await IsAlreadyDownloaded(releaseToAdd.Id))
+            return;
+
+        if (await IsAlreadyQueuedToDownload(releaseToAdd.Id))
+            return;
+        
         await _dbContext.ReleasesToDownload.AddAsync(
             new ReleaseToDownload
             {
@@ -171,6 +177,9 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
     public async Task QueueToDownloadById(Guid id)
     {
         if (await IsAlreadyDownloaded(id))
+            return;
+
+        if (await IsAlreadyQueuedToDownload(id))
             return;
         
         var release = await _externalMusicSearchService.GetAlbumDetails(id);

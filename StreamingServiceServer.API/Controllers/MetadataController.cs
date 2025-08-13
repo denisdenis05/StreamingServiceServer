@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Business.Services.MusicSearch;
 
 namespace StreamingServiceServer.API.Controllers;
@@ -119,10 +120,26 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
-    [HttpPost("queue-to-download")]
-    public async Task<IActionResult> QueueToDownload([FromBody] Guid albumId)
+    [HttpPost("queue-to-download-by-query")]
+    public async Task<IActionResult> QueueToDownloadByQuery([FromBody] string query)
     {
-        await _metadataService.QueueToDownload(albumId);
+        await _metadataService.QueueToDownloadByQuery(query);
+        
+        return Ok();
+    }
+    
+    [HttpPost("queue-to-download-by-id")]
+    public async Task<IActionResult> QueueToDownloadById([FromBody] Guid albumId)
+    {
+        await _metadataService.QueueToDownloadById(albumId);
+        
+        return Ok();
+    }
+    
+    [HttpPost("bulk-queue-to-download-by-query")]
+    public async Task<IActionResult> BulkQueueToDownloadByQuery([FromBody] IEnumerable<AlbumArtistDto> albums)
+    {
+        await _metadataService.BulkQueueToDownloadByQuery(albums);
         
         return Ok();
     }

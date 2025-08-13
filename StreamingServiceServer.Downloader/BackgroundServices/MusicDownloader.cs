@@ -13,7 +13,7 @@ public class MusicDownloader : BackgroundService
     private readonly StreamingDbContext _dbContext;
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
-    private readonly string _baseUrl, _urlParameters;
+    private readonly string _baseUrl, _urlParameters, _retryUrlParameters;
     private readonly ITorrentHelper _torrentHelper;
     
     public MusicDownloader(StreamingDbContext dbContext ,IHttpClientFactory httpClientFactory, IConfiguration configuration, ITorrentHelper torrentHelper)
@@ -24,6 +24,7 @@ public class MusicDownloader : BackgroundService
         
         _baseUrl = _configuration["Music:DownloadSource:BaseUrl"];
         _urlParameters = _configuration["Music:DownloadSource:Parameters"];
+        _retryUrlParameters = _configuration["Music:DownloadSource:RetryParameters"];
         
         _dbContext = dbContext;
     }
@@ -66,16 +67,31 @@ public class MusicDownloader : BackgroundService
     {
         var queries = new[]
         {
-            $"{releaseToDownload.Artist} {releaseToDownload.Title}", 
-            releaseToDownload.Title,              
-            releaseToDownload.Artist               
+            $"{releaseToDownload.Artist} {releaseToDownload.Title}",
+            releaseToDownload.Title,
+            releaseToDownload.Artist
         };
 
         foreach (var query in queries)
         {
             var sanitizedQuery = SanitizeQuery(query);
 
-            var searchPage = await GetSearchPage(sanitizedQuery);
+            var searchPage = await GetSearchPage(sanitizedQuery, _urlParameters);
+            var torrentList = await GetTorrents(searchPage);
+
+            var matchingTorrent = GetBestTorrent(releaseToDownload, torrentList);
+            if (matchingTorrent != null)
+            {
+                await _torrentHelper.AddTorrentAsync(matchingTorrent.MagnetLink);
+                return matchingTorrent.Title;
+            }
+        }
+
+        foreach (var query in queries)
+        {
+            var sanitizedQuery = SanitizeQuery(query);
+
+            var searchPage = await GetSearchPage(sanitizedQuery, _retryUrlParameters);
             var torrentList = await GetTorrents(searchPage);
 
             var matchingTorrent = GetBestTorrent(releaseToDownload, torrentList);
@@ -97,14 +113,14 @@ public class MusicDownloader : BackgroundService
         return sanitized;
     }
     
-    private async Task<HtmlDocument> GetSearchPage(string query)
+    private async Task<HtmlDocument> GetSearchPage(string query, string urlParameters)
     {
         string encodedQuery = Uri.EscapeDataString(query);
-        string url = $"{_baseUrl}{encodedQuery}{_urlParameters}";
+        string url = $"{_baseUrl}{encodedQuery}{urlParameters}";
 
         using var response = await _httpClient.GetAsync(
             url,
-            HttpCompletionOption.ResponseHeadersRead 
+            HttpCompletionOption.ResponseHeadersRead
         );
 
         response.EnsureSuccessStatusCode();
@@ -116,15 +132,6 @@ public class MusicDownloader : BackgroundService
 
         return searchPage;
     } 
-    /*private async Task<HtmlDocument> GetSearchPage(string query)
-    {
-        using var stream = File.OpenRead("temp.txt");
-        
-        var searchPage = new HtmlDocument();
-        searchPage.Load(stream);
-
-        return searchPage;
-    }*/
 
     private async Task<ICollection<TorrentResult>> GetTorrents(HtmlDocument searchPage)
     {
@@ -180,11 +187,7 @@ public class MusicDownloader : BackgroundService
     private TorrentResult? GetBestTorrent(ReleaseToDownload releaseToDownload, ICollection<TorrentResult> torrentList)
     {
         var matches = GetMatchesSorted(releaseToDownload.Artist, releaseToDownload.Title, torrentList.Select(result => result.Title).ToList());
-        foreach (var idk in matches)
-        {
-            Console.WriteLine($"{idk.candidate}: {idk.score}");
-        }
-
+        
         if(matches.Count == 0)
             return null;
         

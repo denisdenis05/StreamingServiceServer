@@ -82,7 +82,7 @@ public class MusicBrainzService : IExternalMusicSearchService
         if (release == null)
             return Array.Empty<ReleaseDto>();
 
-        release.Cover = await GetAlbumCover(albumId);
+        release.Cover = string.Empty;
         return new List<ReleaseDto> { release };
     }
     
@@ -98,7 +98,7 @@ public class MusicBrainzService : IExternalMusicSearchService
                 .Select(async release =>
             {
                 release.Artist = releaseGroup.ArtistCredits.First().Artist;
-                release.Cover = await GetAlbumCover(release.Id);
+                release.Cover = string.Empty;
                 return release;
             })
         );
@@ -118,7 +118,7 @@ public class MusicBrainzService : IExternalMusicSearchService
         {
             var releaseToAdd = releaseToCheck.Releases.FirstOrDefault(); 
             releaseToAdd.Artist = releaseToCheck.ArtistCredits.First().Artist; 
-            releaseToAdd.Cover = await GetAlbumCover(releaseToAdd.Id);
+            releaseToAdd.Cover = string.Empty;
             
             releases.AddRange(releaseToAdd);    
         }
@@ -130,7 +130,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     {
         var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzLookupResponse>(releaseUrl);
-        var albumCover = await GetAlbumCover(albumId);
+        var albumCover = string.Empty;
 
         var release = new ReleaseResponse
         {
@@ -147,7 +147,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     {
         var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzLookupResponse>(releaseUrl);
-        var albumCover = await GetAlbumCover(albumId);
+        var albumCover = string.Empty;
 
         var positionCounter = 1;
         var recordings = response
@@ -165,7 +165,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     }
     
     
-    private async Task<string> GetAlbumCover(Guid albumId)
+    public async Task<string> GetAlbumCover(Guid albumId)
     {
         try
         {

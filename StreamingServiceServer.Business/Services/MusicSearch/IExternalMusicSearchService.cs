@@ -11,4 +11,5 @@ public interface IExternalMusicSearchService
     Task<List<ReleaseDto>> SearchAlbumsAsync(string query);
     Task<List<RecordingDto>> SearchAlbumRecordingsByIdAsync(Guid albumId);
     Task<ReleaseResponse> GetAlbumDetails(Guid albumId);
+    Task<string> GetAlbumCover(Guid albumId);
 }

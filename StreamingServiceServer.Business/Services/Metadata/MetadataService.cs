@@ -152,26 +152,33 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
 
     public async Task QueueToDownloadByQuery(string query)
     {
-        var release = await _externalMusicSearchService.SearchAlbumsAsync(query);
-        var releaseToAdd = release.First();
-        
-        if(releaseToAdd == null)
-            Console.WriteLine("COULD NOT FIND RELEASE");
-        
-        if (await IsAlreadyDownloaded(releaseToAdd.Id))
-            return;
+        try
+        {
+            var release = await _externalMusicSearchService.SearchAlbumsAsync(query);
+            var releaseToAdd = release.First();
 
-        if (await IsAlreadyQueuedToDownload(releaseToAdd.Id))
-            return;
-        
-        await _dbContext.ReleasesToDownload.AddAsync(
-            new ReleaseToDownload
-            {
-                Id = releaseToAdd.Id,
-                Title = releaseToAdd.Title,
-                Artist = releaseToAdd.Artist.Name
-            });
-        await _dbContext.SaveChangesAsync();
+            if (releaseToAdd == null)
+                Console.WriteLine("COULD NOT FIND RELEASE");
+
+            if (await IsAlreadyDownloaded(releaseToAdd.Id))
+                return;
+
+            if (await IsAlreadyQueuedToDownload(releaseToAdd.Id))
+                return;
+
+            await _dbContext.ReleasesToDownload.AddAsync(
+                new ReleaseToDownload
+                {
+                    Id = releaseToAdd.Id,
+                    Title = releaseToAdd.Title,
+                    Artist = releaseToAdd.Artist.Name
+                });
+            await _dbContext.SaveChangesAsync();
+        }
+        catch
+        {
+            Console.WriteLine("COULD NOT FIND RELEASE");
+        }
     }
 
     public async Task QueueToDownloadById(Guid id)

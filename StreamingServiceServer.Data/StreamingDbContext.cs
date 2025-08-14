@@ -18,6 +18,7 @@ public class StreamingDbContext : DbContext
     public DbSet<Release> Releases { get; set; }
     
     public DbSet<ReleaseToDownload> ReleasesToDownload { get; set; }
+    public DbSet<FailedDownload> FailedDownloads { get; set; }
     public DbSet<PendingDownload> PendingDownloads { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)

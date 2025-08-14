@@ -116,4 +116,31 @@ public class QBittorrentHelper: ITorrentHelper
         var response = await _httpClient.PostAsync($"{_baseUrl}/api/v2/torrents/delete", content);
         response.EnsureSuccessStatusCode();
     }
+    
+    public async Task<int> GetActiveDownloadCountAsync()
+    {
+        if (!_isLoggedIn)
+            await LoginAsync();
+
+        var response = await _httpClient.GetAsync($"{_baseUrl}/api/v2/torrents/info");
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var torrents = JsonSerializer.Deserialize<List<TorrentInfo>>(json);
+
+        if (torrents == null) return 0;
+
+        var downloadingStates = new[]
+        {
+            "downloading",
+            "stalledDL",
+            "queuedDL",
+            "checkingDL",
+            "metaDL"
+        };
+
+        return torrents.Count(t =>
+            t.Progress < 1.0 &&
+            downloadingStates.Contains(t.State, StringComparer.OrdinalIgnoreCase));
+    }
 }

@@ -47,13 +47,24 @@ public class MusicDownloader : BackgroundService
 
     private async Task DownloadTrackAsync()
     {
+        if (await _torrentHelper.GetActiveDownloadCountAsync() > 5)
+            return;
+        
         var albumsToDownload = _dbContext.ReleasesToDownload
             .Where(release => !_dbContext.PendingDownloads
                 .Any(p => p.Id == release.Id))
+            .Where(release => !_dbContext.FailedDownloads
+                .Any(p => p.Id == release.Id))
             .ToList();
 
+        if (!albumsToDownload.Any())
+            return;
+        
         foreach (var album in albumsToDownload)
         {
+            if (await _torrentHelper.GetActiveDownloadCountAsync() > 5)
+                return;
+            
             var downloadTitle = await ScrapeMusicAsync(album);
 
             if (downloadTitle != null)
@@ -101,7 +112,8 @@ public class MusicDownloader : BackgroundService
                 return matchingTorrent.Title;
             }
         }
-
+        
+        await SetFailedDownload(releaseToDownload);
         return null;
     }
     
@@ -166,17 +178,28 @@ public class MusicDownloader : BackgroundService
         return results;
     }
     
-    private List<(string candidate, int score)> GetMatchesSorted(string artist, string album, List<string> candidates)
+    private List<(string candidate, int score, int artistScore, int albumScore)> 
+        GetMatchesSorted(string artist, string album, List<string> candidates)
     {
-        string target = $"{artist} {album}".ToLower();
+        string normalizedArtist = StringSanitizers.SanitizeTitle(artist).ToLower();
+        string normalizedAlbum = StringSanitizers.SanitizeTitle(album).ToLower();
+        string target = $"{normalizedArtist} {normalizedAlbum}";
 
-        var scoredList = new List<(string candidate, int score)>();
+        var scoredList = new List<(string candidate, int score, int artistScore, int albumScore)>();
 
         foreach (var candidate in candidates)
         {
-            string normalized = StringSanitizers.SanitizeTitle(candidate).ToLower();
-            int score = Fuzz.TokenSetRatio(target, normalized);
-            scoredList.Add((candidate, score));
+            string normalizedCandidate = StringSanitizers.SanitizeTitle(candidate).ToLower();
+
+            int artistScore = Fuzz.PartialRatio(normalizedArtist, normalizedCandidate);
+            int albumScore = Fuzz.PartialRatio(normalizedAlbum, normalizedCandidate);
+
+            if (artistScore == 0)
+                continue;
+
+            int combinedScore = (int)(artistScore * 0.6 + albumScore * 0.4);
+
+            scoredList.Add((candidate, combinedScore, artistScore, albumScore));
         }
 
         return scoredList
@@ -191,8 +214,8 @@ public class MusicDownloader : BackgroundService
         if(matches.Count == 0)
             return null;
         
-        var (match, score) = matches.First();
-        if(score > 60)
+        var (match, score, artistScore, albumScore) = matches.First();
+        if(score > 70 && albumScore > 60 && artistScore > 60)
             return torrentList.Where(torrent => torrent.Title == match).FirstOrDefault();
 
         return null;
@@ -204,6 +227,17 @@ public class MusicDownloader : BackgroundService
         {
             Id = albumId,
             SourceName = downloadTitle
+        });
+        await _dbContext.SaveChangesAsync();
+    }
+    
+    private async Task SetFailedDownload(ReleaseToDownload releaseToDownload)
+    {
+        await _dbContext.FailedDownloads.AddAsync(new FailedDownload
+        {
+            Id = releaseToDownload.Id,
+            Title = releaseToDownload.Title,
+            Artist = releaseToDownload.Artist,
         });
         await _dbContext.SaveChangesAsync();
     }

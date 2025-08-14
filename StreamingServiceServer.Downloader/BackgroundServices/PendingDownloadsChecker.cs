@@ -78,37 +78,28 @@ public class PendingDownloadChecker : BackgroundService
             return result;
         }
 
-        string currentPath = savePath;
-
-        while (true)
-        {
-            var entries = Directory.GetFileSystemEntries(currentPath);
-
-            if (entries.Length == 1 && Directory.Exists(entries[0]))
-            {
-                currentPath = entries[0];
-                continue;
-            }
-            break;
-        }
-
         var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma"
         };
 
-        var files = Directory.GetFiles(currentPath);
-        if (files.Length == 0)
+        try
         {
-            return result;
-        }
-
-        foreach (var filePath in files)
-        {
-            if (allowedExtensions.Contains(Path.GetExtension(filePath)))
+            foreach (var filePath in Directory.EnumerateFiles(savePath, "*.*", SearchOption.AllDirectories))
             {
-                result.Add((Path.GetFileName(filePath), filePath));
+                if (allowedExtensions.Contains(Path.GetExtension(filePath)))
+                {
+                    result.Add((Path.GetFileName(filePath), filePath));
+                }
             }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.WriteLine($"Access denied to some folders: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error while searching files: {ex.Message}");
         }
 
         return result;

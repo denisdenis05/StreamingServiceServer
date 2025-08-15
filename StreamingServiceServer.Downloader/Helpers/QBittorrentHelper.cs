@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using StreamingServiceDownloader.Models;
+using StreamingServiceServer.Business.Helpers;
 
 namespace StreamingServiceDownloader.Helpers;
 
@@ -56,7 +57,7 @@ public class QBittorrentHelper: ITorrentHelper
         }
     }
 
-    public async Task AddTorrentAsync(string magnetLink)
+    public async Task AddTorrentAsync(string magnetLink, string? targetFolder = null)
     {
         if (!_isLoggedIn)
             await LoginAsync();
@@ -65,6 +66,12 @@ public class QBittorrentHelper: ITorrentHelper
         {
             { new StringContent(magnetLink), "urls" }
         };
+
+        if (!string.IsNullOrWhiteSpace(targetFolder))
+        {
+            content.Add(new StringContent(targetFolder), "savepath");
+            content.Add(new StringContent("false"), "root_folder");
+        }
 
         var response = await _httpClient.PostAsync($"{_baseUrl}/api/v2/torrents/add", content);
         response.EnsureSuccessStatusCode();

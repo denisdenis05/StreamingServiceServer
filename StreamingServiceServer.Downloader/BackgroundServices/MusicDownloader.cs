@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using StreamingServiceDownloader.Helpers;
 using StreamingServiceDownloader.Models;
+using StreamingServiceServer.Business.Helpers;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
 
@@ -13,7 +14,7 @@ public class MusicDownloader : BackgroundService
     private readonly StreamingDbContext _dbContext;
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
-    private readonly string _baseUrl, _urlParameters, _retryUrlParameters;
+    private readonly string _downloadPath ,_baseUrl, _urlParameters, _retryUrlParameters;
     private readonly ITorrentHelper _torrentHelper;
     
     public MusicDownloader(StreamingDbContext dbContext ,IHttpClientFactory httpClientFactory, IConfiguration configuration, ITorrentHelper torrentHelper)
@@ -21,6 +22,8 @@ public class MusicDownloader : BackgroundService
         _httpClient = httpClientFactory.CreateClient("unsafeHttp");
         _torrentHelper = torrentHelper;
         _configuration = configuration;
+        
+        _downloadPath = _configuration["Music:DownloadPath"];
         
         _baseUrl = _configuration["Music:DownloadSource:BaseUrl"];
         _urlParameters = _configuration["Music:DownloadSource:Parameters"];
@@ -93,7 +96,8 @@ public class MusicDownloader : BackgroundService
             var matchingTorrent = GetBestTorrent(releaseToDownload, torrentList);
             if (matchingTorrent != null)
             {
-                await _torrentHelper.AddTorrentAsync(matchingTorrent.MagnetLink);
+                var fullAlbumPath = Path.Combine(_downloadPath, MusicLocationHelper.SanitizeFolderName(matchingTorrent.Title));
+                await _torrentHelper.AddTorrentAsync(matchingTorrent.MagnetLink, fullAlbumPath);
                 return matchingTorrent.Title;
             }
         }

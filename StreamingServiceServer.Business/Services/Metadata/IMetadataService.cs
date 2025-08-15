@@ -23,6 +23,6 @@ public interface IMetadataService
     Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id);
 
     Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums);
-    Task QueueToDownloadByQuery(string query);
+    Task QueueToDownloadByQuery(string albumQuery, string? artistQuery = null);
     Task QueueToDownloadById(Guid id);
 }

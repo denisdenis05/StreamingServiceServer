@@ -145,16 +145,16 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
     {
         foreach (var album in albums)
         {
-            await QueueToDownloadByQuery($"{album.Album} {album.Artist}");
+            await QueueToDownloadByQuery(album.Album, album.Artist);
             await Task.Delay(500);
         }
     }
 
-    public async Task QueueToDownloadByQuery(string query)
+    public async Task QueueToDownloadByQuery(string albumQuery, string? artistQuery = null)
     {
         try
         {
-            var release = await _externalMusicSearchService.SearchAlbumsAsync(query);
+            var release = await _externalMusicSearchService.SearchAlbumsAsync(albumQuery, artistQuery);
             var releaseToAdd = release.First();
 
             if (releaseToAdd == null)

@@ -40,9 +40,9 @@ public class MusicBrainzService : IExternalMusicSearchService
         return response.Recordings.ToList();
     }
 
-    public async Task<List<ReleaseDto>> SearchAlbumsAsync(string query)
+    public async Task<List<ReleaseDto>> SearchAlbumsAsync(string albumQuery, string? artistQuery = null)
     {
-        var releases = await SearchForAlbumByQuery(query);
+        var releases = await SearchForAlbumByQuery(albumQuery, artistQuery);
 
         return releases.ToList();
     }
@@ -106,9 +106,15 @@ public class MusicBrainzService : IExternalMusicSearchService
         return releases.ToList();
     }
     
-    private async Task<ICollection<ReleaseDto>> SearchForAlbumByQuery(string query)
+    private async Task<ICollection<ReleaseDto>> SearchForAlbumByQuery(string query, string? artistQuery = null)
     {
-        var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(query)}&fmt=json";
+        var searchQuery = string.Empty;
+        if (artistQuery != null)
+            searchQuery = $"release:\"{query}\" AND artist:\"{artistQuery}\"";
+        else
+            searchQuery = query;
+        
+        var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(searchQuery)}&fmt=json";
         var searchResponse = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(releaseGroupUrl);
 
         var releaseGroup = searchResponse.ReleaseGroups.Take(5).ToList();

@@ -121,9 +121,9 @@ public class MetadataController : ControllerBase
     }
     
     [HttpPost("queue-to-download-by-query")]
-    public async Task<IActionResult> QueueToDownloadByQuery([FromBody] string query)
+    public async Task<IActionResult> QueueToDownloadByQuery([FromBody] AlbumArtistDto query)
     {
-        await _metadataService.QueueToDownloadByQuery(query);
+        await _metadataService.QueueToDownloadByQuery(query.Album,  query.Artist);
         
         return Ok();
     }

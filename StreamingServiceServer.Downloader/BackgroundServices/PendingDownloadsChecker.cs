@@ -50,6 +50,8 @@ public class PendingDownloadChecker : BackgroundService
 
     private async Task CheckPendingDownloadsAsync()
     {
+
+        await Task.Delay(3000);
         var pending = _dbContext.PendingDownloads.ToList();
 
         foreach (var item in pending)
@@ -57,14 +59,14 @@ public class PendingDownloadChecker : BackgroundService
             var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
             if (info != null && info.Progress >= 1.0)
             {
-                var files = GetMusicFilesInSavePath(info.SavePath + "/" + info.Name);
+                var files = GetMusicFilesInSavePath(info.SavePath);
                 var matches = await MatchSongsWithMetadataAsync(item.Id, files);
                 
                 MoveMatchedFiles(matches);
-                await CleanUpTorrentAndFilesAsync(item.SourceName);
-                await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                // await CleanUpTorrentAndFilesAsync(item.SourceName);
+                // await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
                 
-                await RemoveAlbumFromDatabaseQueues(item.Id);
+                // await RemoveAlbumFromDatabaseQueues(item.Id);
             }
         }
     }
@@ -191,14 +193,14 @@ public class PendingDownloadChecker : BackgroundService
 
             var destinationPath = Path.Combine(destinationDir, newFileName);
 
-            try
+            /*try
             {
                 File.Move(match.FullPath, destinationPath, overwrite: true);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to move {match.FileName}: {ex.Message}");
-            }
+            }*/
         }
     }
 

@@ -75,7 +75,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     
     private async Task<ICollection<ReleaseDto>> GetReleasesFromId(Guid albumId)
     {
-        var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits&fmt=json";
+        var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits+release-groups&fmt=json";
         var release = await _httpClient.GetFromJsonAsync<ReleaseDto>(releaseUrl);
         release.Artist = release.ArtistCredit.FirstOrDefault().Artist;
         

@@ -63,10 +63,10 @@ public class PendingDownloadChecker : BackgroundService
                 var matches = await MatchSongsWithMetadataAsync(item.Id, files);
                 
                 MoveMatchedFiles(matches);
-                // await CleanUpTorrentAndFilesAsync(item.SourceName);
-                // await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                await CleanUpTorrentAndFilesAsync(item.SourceName);
+                await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
                 
-                // await RemoveAlbumFromDatabaseQueues(item.Id);
+                await RemoveAlbumFromDatabaseQueues(item.Id);
             }
         }
     }
@@ -128,13 +128,19 @@ public class PendingDownloadChecker : BackgroundService
     
             foreach (var (fileName, fullPath) in unmatchedFiles)
             {
-                string sanitizedFileName = SanitizeFileNameTitle(fileName);
-    
-                int score = Fuzz.TokenSetRatio(sanitizedFileName, sanitizedTarget);
-    
-                if (score > bestScore)
+                var (fileTrackNum, fileTitle) = ExtractTrackInfo(fileName);
+
+                bool trackNumMatches = fileTrackNum.HasValue && fileTrackNum == recording.PositionInAlbum;
+
+                int titleScore = Fuzz.TokenSetRatio(fileTitle, sanitizedTarget);
+
+                int combinedScore = titleScore;
+                if (trackNumMatches)
+                    combinedScore += 15; 
+
+                if (combinedScore > bestScore)
                 {
-                    bestScore = score;
+                    bestScore = combinedScore;
                     bestFile = (fileName, fullPath);
                 }
             }
@@ -172,6 +178,31 @@ public class PendingDownloadChecker : BackgroundService
         return title.ToLowerInvariant();
     }
     
+    private static (int? trackNumber, string cleanTitle) ExtractTrackInfo(string fileName)
+    {
+        var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            nameWithoutExt,
+            @"^(?<num>\d{1,2})\s*[-._ ]?\s*(?<title>.*)$"
+        );
+
+        if (match.Success)
+        {
+            int num = int.Parse(match.Groups["num"].Value);
+            string title = match.Groups["title"].Value;
+            title = System.Text.RegularExpressions.Regex.Replace(title, @"[^\w\s]", " ");
+            title = System.Text.RegularExpressions.Regex.Replace(title, @"\s+", " ").Trim();
+            return (num, title.ToLowerInvariant());
+        }
+        else
+        {
+            var clean = System.Text.RegularExpressions.Regex.Replace(nameWithoutExt, @"[^\w\s]", " ");
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
+            return (null, clean.ToLowerInvariant());
+        }
+    }
+    
     private void MoveMatchedFiles(ICollection<MusicFileMatch> matches)
     {
         var baseMusicPath = _musicLocation;
@@ -193,14 +224,14 @@ public class PendingDownloadChecker : BackgroundService
 
             var destinationPath = Path.Combine(destinationDir, newFileName);
 
-            /*try
+            try
             {
                 File.Move(match.FullPath, destinationPath, overwrite: true);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to move {match.FileName}: {ex.Message}");
-            }*/
+            }
         }
     }
 

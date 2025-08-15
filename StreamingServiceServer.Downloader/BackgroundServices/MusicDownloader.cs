@@ -15,6 +15,7 @@ public class MusicDownloader : BackgroundService
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly string _downloadPath ,_baseUrl, _urlParameters, _retryUrlParameters;
+    private readonly int _maxDownloadCount;
     private readonly ITorrentHelper _torrentHelper;
     
     public MusicDownloader(StreamingDbContext dbContext ,IHttpClientFactory httpClientFactory, IConfiguration configuration, ITorrentHelper torrentHelper)
@@ -24,7 +25,7 @@ public class MusicDownloader : BackgroundService
         _configuration = configuration;
         
         _downloadPath = _configuration["Music:DownloadPath"];
-        
+        _maxDownloadCount = Int32.Parse(_configuration["Music:DownloadSource:Torrent:MaxDownloads"]);
         _baseUrl = _configuration["Music:DownloadSource:BaseUrl"];
         _urlParameters = _configuration["Music:DownloadSource:Parameters"];
         _retryUrlParameters = _configuration["Music:DownloadSource:RetryParameters"];
@@ -50,7 +51,7 @@ public class MusicDownloader : BackgroundService
 
     private async Task DownloadTrackAsync()
     {
-        if (await _torrentHelper.GetActiveDownloadCountAsync() > 5)
+        if (await _torrentHelper.GetActiveDownloadCountAsync() > _maxDownloadCount)
             return;
         
         var albumsToDownload = _dbContext.ReleasesToDownload
@@ -65,7 +66,7 @@ public class MusicDownloader : BackgroundService
         
         foreach (var album in albumsToDownload)
         {
-            if (await _torrentHelper.GetActiveDownloadCountAsync() > 5)
+            if (await _torrentHelper.GetActiveDownloadCountAsync() > _maxDownloadCount)
                 return;
             
             var downloadTitle = await ScrapeMusicAsync(album);

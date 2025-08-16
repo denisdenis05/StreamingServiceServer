@@ -51,6 +51,8 @@ public class MusicDownloader : BackgroundService
 
     private async Task DownloadTrackAsync()
     {
+        await Task.Delay(3000);
+        
         if (await _torrentHelper.GetActiveDownloadCountAsync() > _maxDownloadCount)
             return;
         

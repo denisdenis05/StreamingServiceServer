@@ -55,17 +55,24 @@ public class PendingDownloadChecker : BackgroundService
 
         foreach (var item in pending)
         {
-            var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
-            if (info != null && info.Progress >= 1.0)
+            try
             {
-                var files = GetMusicFilesInSavePath(info.SavePath);
-                var matches = await MatchSongsWithMetadataAsync(item.Id, files);
-                
-                MoveMatchedFiles(matches);
-                await CleanUpTorrentAndFilesAsync(item.SourceName);
-                await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-                
-                await RemoveAlbumFromDatabaseQueues(item.Id);
+                var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
+                if (info != null && info.Progress >= 1.0)
+                {
+                    var files = GetMusicFilesInSavePath(info.SavePath);
+                    var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+
+                    MoveMatchedFiles(matches);
+                    await CleanUpTorrentAndFilesAsync(item.SourceName);
+                    await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+
+                    await RemoveAlbumFromDatabaseQueues(item.Id);
+                }
+            }
+            catch
+            {
+                Console.WriteLine($"[PendingDownloadChecker] Error: {item.Id}");
             }
         }
     }

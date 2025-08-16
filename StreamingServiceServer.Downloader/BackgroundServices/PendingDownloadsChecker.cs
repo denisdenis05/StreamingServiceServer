@@ -44,13 +44,12 @@ public class PendingDownloadChecker : BackgroundService
                 Console.WriteLine($"[PendingDownloadChecker] Error: {ex.Message}");
             }
 
-            await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
         }
     }
 
     private async Task CheckPendingDownloadsAsync()
     {
-
         await Task.Delay(3000);
         var pending = _dbContext.PendingDownloads.ToList();
 

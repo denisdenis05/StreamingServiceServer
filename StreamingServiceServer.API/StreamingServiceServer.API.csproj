@@ -10,6 +10,9 @@
         <ProjectReference Include="..\StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj" />
     </ItemGroup>
     <ItemGroup>
+        <PackageReference Include="HotChocolate" Version="16.0.0-p.7.15" />
+        <PackageReference Include="HotChocolate.AspNetCore" Version="16.0.0-p.7.15" />
+        <PackageReference Include="HotChocolate.Data.EntityFramework" Version="16.0.0-p.7.15" />
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.7" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.7">

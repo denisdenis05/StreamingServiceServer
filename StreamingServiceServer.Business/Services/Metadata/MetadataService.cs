@@ -195,7 +195,7 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
             new ReleaseToDownload
             {
                 Id = id,
-                Title = release.Title,
+                Title = release.Title, 
                 Artist = release.ArtistName
             });
         await _dbContext.SaveChangesAsync();

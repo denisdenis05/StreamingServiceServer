@@ -171,15 +171,17 @@ public class MusicBrainzService : IExternalMusicSearchService
     }
     
     
-    public async Task<string> GetAlbumCover(Guid albumId)
+    public async Task<string> GetAlbumCover(Guid releaseId, Guid? releaseGroupId = null)
     {
         try
         {
-            var coverUrl = $"{_baseCoverUrl}release/{albumId}";
-            var response = await _httpClient.GetFromJsonAsync<CoverArtResponse>(coverUrl);
+            var endpoint = releaseGroupId.HasValue
+                ? $"{_baseCoverUrl}release-group/{releaseGroupId.Value}/front"
+                : $"{_baseCoverUrl}release/{releaseId}/front";
 
+            var response = await _httpClient.GetFromJsonAsync<CoverArtResponse>(endpoint);
 
-            return response.Images.First().Image;
+            return response?.Images?.FirstOrDefault()?.Image ?? string.Empty;
         }
         catch
         {

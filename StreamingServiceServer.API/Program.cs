@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using StreamingServiceDownloader.BackgroundServices;
+using StreamingServiceServer.API.GraphQL.Configuration;
+using StreamingServiceServer.API.GraphQL.Schema;
 using StreamingServiceServer.Data;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,6 +29,8 @@ builder.Services.AddHttpClient("unsafeHttp", client =>
                 (message, cert, chain, errors) => true
         };
     });
+
+builder.Services.AddGraphQLConfiguration();
 
 builder.Services.AddEndpointsApiExplorer(); 
 builder.Services.AddDbContext<StreamingDbContext>(options =>
@@ -89,6 +93,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+app.MapGraphQL();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();   

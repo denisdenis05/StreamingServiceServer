@@ -77,6 +77,7 @@ public class PendingDownloadChecker : BackgroundService
         }
     }
     
+    
     private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath)
     {
         var result = new List<(string fileName, string fullPath)>();
@@ -134,15 +135,37 @@ public class PendingDownloadChecker : BackgroundService
     
             foreach (var (fileName, fullPath) in unmatchedFiles)
             {
-                var (fileTrackNum, fileTitle) = ExtractTrackInfo(fileName);
+                var metadata = GetAudioMetadata(fullPath);
 
-                bool trackNumMatches = fileTrackNum.HasValue && fileTrackNum == recording.PositionInAlbum;
+                int combinedScore = 0;
 
-                int titleScore = Fuzz.TokenSetRatio(fileTitle, sanitizedTarget);
+                if (metadata != null && !string.IsNullOrWhiteSpace(metadata.Title))
+                {
+                    int titleScore = Fuzz.TokenSetRatio(
+                        StringSanitizers.SanitizeTitle(metadata.Title).ToLower(),
+                        sanitizedTarget
+                    );
 
-                int combinedScore = titleScore;
-                if (trackNumMatches)
-                    combinedScore += 15; 
+                    bool trackNumMatches = metadata.TrackNumber.HasValue &&
+                                           metadata.TrackNumber.Value == recording.PositionInAlbum;
+
+                    combinedScore = titleScore;
+                    if (trackNumMatches)
+                        combinedScore += 20; 
+                }
+                else
+                {
+                    var (fileTrackNum, fileTitle) = ExtractTrackInfo(fileName);
+
+                    bool trackNumMatches = fileTrackNum.HasValue &&
+                                           fileTrackNum == recording.PositionInAlbum;
+
+                    int titleScore = Fuzz.TokenSetRatio(fileTitle, sanitizedTarget);
+
+                    combinedScore = titleScore;
+                    if (trackNumMatches)
+                        combinedScore += 15; 
+                }
 
                 if (combinedScore > bestScore)
                 {
@@ -265,5 +288,26 @@ public class PendingDownloadChecker : BackgroundService
         }
 
         await _dbContext.SaveChangesAsync();
+    }
+    
+    private AudioMetadata GetAudioMetadata(string filePath)
+    {
+        try
+        {
+            var file = TagLib.File.Create(filePath);
+            return new AudioMetadata
+            {
+                Title = file.Tag.Title,
+                Artist = file.Tag.FirstPerformer,
+                Album = file.Tag.Album,
+                TrackNumber = file.Tag.Track,
+                Year = file.Tag.Year
+            };
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to read metadata: {ex.Message}");
+            return null;
+        }
     }
 }

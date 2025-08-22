@@ -146,12 +146,7 @@ public class PendingDownloadChecker : BackgroundService
                         sanitizedTarget
                     );
 
-                    bool trackNumMatches = metadata.TrackNumber.HasValue &&
-                                           metadata.TrackNumber.Value == recording.PositionInAlbum;
-
                     combinedScore = titleScore;
-                    if (trackNumMatches)
-                        combinedScore += 20; 
                 }
                 else
                 {

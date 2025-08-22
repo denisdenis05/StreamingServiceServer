@@ -16,7 +16,7 @@ public class ReleaseDto
     [JsonPropertyName("release-group")]
     public ReleaseGroup? ReleaseGroup { get; set; } 
     
-    public string Cover { get; set; }
+    public AlbumCoversDto Cover { get; set; }
     
     public ArtistDto? Artist { get; set; }
     

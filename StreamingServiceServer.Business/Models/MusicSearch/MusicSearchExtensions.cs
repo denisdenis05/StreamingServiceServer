@@ -58,7 +58,9 @@ public static class MusicBrainzMapper
             Id = dto.Id,
             Title = dto.Title,
             Length = dto.Length,
-            Cover =  dto.Cover,
+            Cover =  dto.Cover.Cover,
+            SmallCover = dto.Cover.SmallCover,
+            VerySmallCover = dto.Cover.VerySmallCover,
             PositionInAlbum = dto.PositionInAlbum,
         };
 
@@ -86,7 +88,9 @@ public static class MusicBrainzMapper
             Id = dto.Id,
             Title = dto.Title,
             Artist = dto.Artist.ToEntity(),
-            Cover =  dto.Cover
+            Cover =  dto.Cover.Cover,
+            SmallCover = dto.Cover.SmallCover,
+            VerySmallCover = dto.Cover.VerySmallCover,
         };
 
     public static Release ToEntity(this ReleaseDto dto, ICollection<TrackDto> tracks)
@@ -97,7 +101,9 @@ public static class MusicBrainzMapper
             Title = dto.Title,
             Recordings = tracks.Select(track=>track.Recording.ToEntity()).ToList(),
             Artist = dto.Artist.ToEntity(),
-            Cover =  dto.Cover
+            Cover =  dto.Cover.Cover,
+            SmallCover = dto.Cover.SmallCover,
+            VerySmallCover = dto.Cover.VerySmallCover,
         };
     }
 
@@ -108,7 +114,7 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
-            Cover =  recording.Cover,
+            Cover =  recording.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
         };
     
@@ -119,7 +125,7 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.ArtistCredit.FirstOrDefault()?.Artist.Name,
             ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,
-            Cover =  recording.Cover,
+            Cover =  recording.Cover.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
         };
 
@@ -129,7 +135,7 @@ public static class MusicBrainzMapper
             Id = release.Id,
             Title = release.Title,
             ArtistName = release.Artist?.Name ?? string.Empty,
-            Cover = release.Cover
+            Cover = release.Cover.VerySmallCover
         };
 
     public static ReleaseResponse ToResponse(this Release release) =>

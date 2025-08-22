@@ -143,4 +143,11 @@ public class MetadataController : ControllerBase
         
         return Ok();
     }
+
+    [HttpPost("refresh-all-album-covers")] public async Task<IActionResult> RefreshAllAlbumCovers()
+    {
+        await _metadataService.RefreshAllAlbumCovers();
+        
+        return Ok();
+    }
 }

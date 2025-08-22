@@ -49,7 +49,11 @@ public class MetadataService : IMetadataService
     {
         if (string.IsNullOrEmpty(recording.Release.Cover))
         {
-            recording.Release.Cover = coverTasks[recording.Release.Id].Result;
+            var albumCovers = coverTasks[recording.Release.Id].Result;
+
+            recording.Release.Cover = albumCovers.Cover;
+            recording.Release.SmallCover = albumCovers.SmallCover;
+            recording.Release.VerySmallCover = albumCovers.VerySmallCover;
         }
     }
 
@@ -81,7 +85,10 @@ public async Task<List<ReleaseResponse>> GetAllAlbums()
     {
         if (string.IsNullOrEmpty(release.Cover))
         {
-            release.Cover = coverTasks[release.Id].Result;
+            var albumCovers = coverTasks[release.Id].Result;
+            release.Cover = albumCovers.Cover;
+            release.SmallCover = albumCovers.SmallCover;
+            release.VerySmallCover = albumCovers.VerySmallCover;
         }
     }
 
@@ -110,10 +117,12 @@ public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id
 
     if (string.IsNullOrEmpty(recordings.First().Release.Cover))
     {
-        var cover = await _externalMusicSearchService.GetAlbumCover(id);
+        var albumCovers = await _externalMusicSearchService.GetAlbumCover(id);
         foreach (var recording in recordings)
         {
-            recording.Release.Cover = cover;
+            recording.Release.Cover = albumCovers.Cover;
+            recording.Release.SmallCover = albumCovers.SmallCover;
+            recording.Release.VerySmallCover = albumCovers.VerySmallCover;
         }
     }
 
@@ -135,7 +144,11 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
 
     if (string.IsNullOrEmpty(recording.Release.Cover))
     {
-        recording.Release.Cover = await _externalMusicSearchService.GetAlbumCover(recording.Release.Id);
+        var albumCovers = await _externalMusicSearchService.GetAlbumCover(recording.Release.Id);
+        
+        recording.Release.Cover = albumCovers.Cover;
+        recording.Release.SmallCover = albumCovers.SmallCover;
+        recording.Release.VerySmallCover = albumCovers.VerySmallCover;
     }
 
     return recording.ToResponse();
@@ -323,10 +336,10 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         if (recordings == null || !recordings.Any())
             return;
         var release = recordings.First().Releases.First();
-        var cover = string.Empty;
+        var cover = new AlbumCoversDto();
         
         if (release.ReleaseGroup != null)
-            cover = await _externalMusicSearchService.GetAlbumCover(release.ReleaseGroup.Id);
+            cover = await _externalMusicSearchService.GetAlbumCover(Guid.Empty, release.ReleaseGroup.Id);
         else
             cover = await _externalMusicSearchService.GetAlbumCover(release.Id);
         foreach (var recording in recordings)
@@ -404,5 +417,52 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         var queuedAlbum = await _dbContext.ReleasesToDownload.Where(release => release.Id == id).ToListAsync();
 
         return queuedAlbum.Any();
+    }
+    
+    public async Task RefreshAllAlbumCovers()
+    {
+        var allReleases = await _dbContext.Releases
+            .Include(r => r.Recordings)
+            .ToListAsync();
+
+        foreach (var release in allReleases)
+        {
+            AlbumCoversDto? albumCovers = null;
+
+            var externalReleaseDtos = await _externalMusicSearchService.GetReleasesFromId(release.Id);
+            var externalReleaseDto = externalReleaseDtos.FirstOrDefault();
+
+            if (externalReleaseDto?.ReleaseGroup?.Id != null && externalReleaseDto.ReleaseGroup.Id != Guid.Empty)
+            {
+                var releaseGroupId = externalReleaseDto.ReleaseGroup.Id;
+                albumCovers = await _externalMusicSearchService.GetAllAlbumCovers(releaseGroupId);
+            }
+            else
+            {
+                var singleCoverUrl = await _externalMusicSearchService.GetAlbumCover(release.Id);
+                albumCovers = new AlbumCoversDto
+                {
+                    Cover = singleCoverUrl.Cover,
+                    SmallCover = singleCoverUrl.SmallCover,
+                    VerySmallCover = singleCoverUrl.VerySmallCover
+                };
+            }
+
+            if (albumCovers != null)
+            {
+                release.Cover = albumCovers.Cover;
+                release.SmallCover = albumCovers.SmallCover;
+                release.VerySmallCover = albumCovers.VerySmallCover;
+
+                // Apply covers to each Recording within this Release
+                foreach (var recording in release.Recordings)
+                {
+                    recording.Cover = albumCovers.Cover;
+                    recording.SmallCover = albumCovers.SmallCover;
+                    recording.VerySmallCover = albumCovers.VerySmallCover;
+                }
+            }
+        }
+        await _dbContext.SaveChangesAsync();
     }
 }

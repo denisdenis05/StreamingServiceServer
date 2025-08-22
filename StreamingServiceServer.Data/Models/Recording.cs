@@ -6,6 +6,8 @@ public class Recording
     public string Title { get; set; } = string.Empty;
     public int? Length { get; set; }
     public string Cover { get; set; }
+    public string? SmallCover { get; set; }
+    public string? VerySmallCover { get; set; }
     public int PositionInAlbum { get; set; } = 0;
     public Release Release { get; set; }
 

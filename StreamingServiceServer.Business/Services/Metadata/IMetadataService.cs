@@ -25,4 +25,6 @@ public interface IMetadataService
     Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums);
     Task QueueToDownloadByQuery(string albumQuery, string? artistQuery = null);
     Task QueueToDownloadById(Guid id);
+    
+    Task RefreshAllAlbumCovers();
 }

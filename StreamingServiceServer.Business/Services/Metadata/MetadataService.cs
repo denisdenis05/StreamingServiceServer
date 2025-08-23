@@ -115,10 +115,21 @@ public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id
         return Array.Empty<RecordingResponse>();
     }
 
+    var albumCovers = new AlbumCoversDto
+    {
+        Cover = recordings.First().Release.Cover,
+        SmallCover = recordings.First().Release.SmallCover,
+        VerySmallCover = recordings.First().Release.VerySmallCover
+    };
+
     if (string.IsNullOrEmpty(recordings.First().Release.Cover))
     {
-        var albumCovers = await _externalMusicSearchService.GetAlbumCover(id);
-        foreach (var recording in recordings)
+        albumCovers = await _externalMusicSearchService.GetAlbumCover(id);
+    }
+    
+    foreach (var recording in recordings)
+    {
+        if (string.IsNullOrEmpty(recording.Release.Cover))
         {
             recording.Release.Cover = albumCovers.Cover;
             recording.Release.SmallCover = albumCovers.SmallCover;

@@ -58,8 +58,7 @@ public class PendingDownloadChecker : BackgroundService
         {
             try
             {
-                var decodedTorrentName = WebUtility.HtmlEncode(item.SourceName);
-                var info = await _torrentHelper.GetTorrentInfoAsync(decodedTorrentName);
+                var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
                 if (info != null && info.Progress >= 1.0)
                 {
                     var files = GetMusicFilesInSavePath(info.SavePath);

@@ -339,7 +339,7 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         var cover = new AlbumCoversDto();
         
         if (release.ReleaseGroup != null)
-            cover = await _externalMusicSearchService.GetAlbumCover(Guid.Empty, release.ReleaseGroup.Id);
+            cover = await _externalMusicSearchService.GetAllAlbumCovers(release.ReleaseGroup.Id);
         else
             cover = await _externalMusicSearchService.GetAlbumCover(release.Id);
         foreach (var recording in recordings)

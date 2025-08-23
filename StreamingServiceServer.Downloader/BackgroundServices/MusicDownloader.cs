@@ -115,7 +115,8 @@ public class MusicDownloader : BackgroundService
             var matchingTorrent = GetBestTorrent(releaseToDownload, torrentList);
             if (matchingTorrent != null)
             {
-                await _torrentHelper.AddTorrentAsync(matchingTorrent.MagnetLink);
+                var fullAlbumPath = Path.Combine(_downloadPath, MusicLocationHelper.SanitizeFolderName(matchingTorrent.Title));
+                await _torrentHelper.AddTorrentAsync(matchingTorrent.MagnetLink, fullAlbumPath);
                 return matchingTorrent.Title;
             }
         }

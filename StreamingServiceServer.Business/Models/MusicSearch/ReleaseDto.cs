@@ -16,7 +16,9 @@ public class ReleaseDto
     [JsonPropertyName("release-group")]
     public ReleaseGroup? ReleaseGroup { get; set; } 
     
-    public AlbumCoversDto Cover { get; set; }
+    [JsonPropertyName("media")]
+    public ICollection<MediaDto>? Media { get; set; } = new List<MediaDto>();
+    public AlbumCoversDto Cover { get; set; } =  new AlbumCoversDto();
     
     public ArtistDto? Artist { get; set; }
     

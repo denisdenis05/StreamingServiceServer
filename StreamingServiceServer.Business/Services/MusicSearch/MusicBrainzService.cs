@@ -64,7 +64,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     public async Task<List<RecordingDto>> SearchAlbumRecordingsByIdAsync(Guid albumId)
     {
         var releases = await GetReleasesFromId(albumId);
-        var recordings = await GetRecordingsFromAlbum(albumId);
+        var recordings = await GetRecordingsFromAlbum(releases.First());
         return recordings.Select(recording =>
             {
                 recording.Releases = releases;
@@ -75,7 +75,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     
     public async Task<ICollection<ReleaseDto>> GetReleasesFromId(Guid albumId)
     {
-        var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits+release-groups&fmt=json";
+        var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits+release-groups+media&fmt=json";
         var release = await _httpClient.GetFromJsonAsync<ReleaseDto>(releaseUrl);
         release.Artist = release.ArtistCredit.FirstOrDefault().Artist;
         
@@ -153,6 +153,22 @@ public class MusicBrainzService : IExternalMusicSearchService
 
         var positionCounter = 1;
         var recordings = response
+            .Media
+            .SelectMany(media => media.Tracks)
+            .Select(track =>
+            {
+                track.Recording.PositionInAlbum = positionCounter++;
+                return track.Recording;
+            })
+            .ToList();
+        
+        return recordings;
+    }
+    
+    private async Task<ICollection<RecordingDto>> GetRecordingsFromAlbum(ReleaseDto release)
+    {
+        var positionCounter = 1;
+        var recordings = release
             .Media
             .SelectMany(media => media.Tracks)
             .Select(track =>

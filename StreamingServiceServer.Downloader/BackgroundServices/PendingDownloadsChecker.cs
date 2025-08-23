@@ -285,7 +285,7 @@ public class PendingDownloadChecker : BackgroundService
         await _dbContext.SaveChangesAsync();
     }
     
-    private AudioMetadata GetAudioMetadata(string filePath)
+    private AudioMetadata? GetAudioMetadata(string filePath)
     {
         try
         {

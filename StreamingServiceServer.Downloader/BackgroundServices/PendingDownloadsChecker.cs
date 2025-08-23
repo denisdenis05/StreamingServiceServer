@@ -1,3 +1,4 @@
+using System.Net;
 using FuzzySharp;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -57,7 +58,8 @@ public class PendingDownloadChecker : BackgroundService
         {
             try
             {
-                var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
+                var decodedTorrentName = WebUtility.HtmlDecode(item.SourceName);
+                var info = await _torrentHelper.GetTorrentInfoAsync(decodedTorrentName);
                 if (info != null && info.Progress >= 1.0)
                 {
                     var files = GetMusicFilesInSavePath(info.SavePath);
@@ -76,7 +78,6 @@ public class PendingDownloadChecker : BackgroundService
             }
         }
     }
-    
     
     private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath)
     {

@@ -392,20 +392,53 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
             }
         }
 
-        await _dbContext.Releases.AddAsync(release);
-
-        var recordingEntities = recordings.Select(recording =>
+        // Apply the same logic to Release
+        var trackedRelease = _dbContext.Releases.Local.FirstOrDefault(r => r.Id == release.Id);
+        if (trackedRelease == null)
         {
-            var recEntity = recording.ToEntity();
-            recEntity.Release = release;
-            return recEntity;
-        }).ToList();
+            var exists = await _dbContext.Releases.AnyAsync(r => r.Id == release.Id);
+            if (!exists)
+            {
+                await _dbContext.Releases.AddAsync(release);
+            }
+            else
+            {
+                _dbContext.Releases.Update(release);
+            }
+        }
+        else
+        {
+            release = trackedRelease;
+        }
 
-        await _dbContext.Recordings.AddRangeAsync(recordingEntities);
+        var recordingEntities = recordings
+            .Select(r => r.ToEntity())
+            .GroupBy(r => r.Id)
+            .Select(g => g.First())
+            .ToList();
+
+        foreach (var recEntity in recordingEntities)
+        {
+            recEntity.Release = release; // Use the tracked release instance
+
+            var tracked = _dbContext.Recordings.Local.FirstOrDefault(r => r.Id == recEntity.Id);
+            if (tracked == null)
+            {
+                var exists = await _dbContext.Recordings.AnyAsync(r => r.Id == recEntity.Id);
+                if (!exists)
+                {
+                    await _dbContext.Recordings.AddAsync(recEntity);
+                }
+                else
+                {
+                    _dbContext.Recordings.Update(recEntity);
+                }
+            }
+        }
 
         await _dbContext.SaveChangesAsync();
     }
-    
+
     public async Task<bool> IsAlreadyDownloaded(Guid id)
     {
         return await _dbContext.Releases.AnyAsync(r => r.Id == id);

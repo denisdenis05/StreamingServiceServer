@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StreamingServiceServer.Business.Services.MusicSearch;
 
 namespace StreamingServiceServer.API.Controllers;
 
 [ApiController]
+[Authorize(AuthenticationSchemes = "Bearer", Roles = "User")]
 [Route("[controller]")]
 public class StreamController : ControllerBase
 {

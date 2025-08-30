@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Business.Services.MusicSearch;
@@ -5,6 +6,7 @@ using StreamingServiceServer.Business.Services.MusicSearch;
 namespace StreamingServiceServer.API.Controllers;
 
 [ApiController]
+[Authorize(AuthenticationSchemes = "Bearer", Roles = "User")]
 [Route("[controller]")]
 public class MetadataController : ControllerBase
 {
@@ -56,6 +58,7 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("save-artist")]
     public async Task<IActionResult> SaveArtist([FromBody] string query)
     {
@@ -64,6 +67,7 @@ public class MetadataController : ControllerBase
         return Ok();
     }
     
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("save-recording")]
     public async Task<IActionResult> SaveRecording([FromBody] string query)
     {
@@ -72,6 +76,7 @@ public class MetadataController : ControllerBase
         return Ok();
     }
     
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("save-album")]
     public async Task<IActionResult> SaveAlbum([FromBody] string query)
     {
@@ -80,6 +85,7 @@ public class MetadataController : ControllerBase
         return Ok();
     }
         
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("save-album-by-id")]
     public async Task<IActionResult> SaveAlbumById([FromBody] Guid albumId)
     {
@@ -120,6 +126,7 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("queue-to-download-by-query")]
     public async Task<IActionResult> QueueToDownloadByQuery([FromBody] AlbumArtistDto query)
     {
@@ -128,6 +135,7 @@ public class MetadataController : ControllerBase
         return Ok();
     }
     
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("queue-to-download-by-id")]
     public async Task<IActionResult> QueueToDownloadById([FromBody] Guid albumId)
     {
@@ -136,6 +144,7 @@ public class MetadataController : ControllerBase
         return Ok();
     }
     
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("bulk-queue-to-download-by-query")]
     public async Task<IActionResult> BulkQueueToDownloadByQuery([FromBody] IEnumerable<AlbumArtistDto> albums)
     {
@@ -144,6 +153,7 @@ public class MetadataController : ControllerBase
         return Ok();
     }
 
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
     [HttpPost("refresh-all-album-covers")] public async Task<IActionResult> RefreshAllAlbumCovers()
     {
         await _metadataService.RefreshAllAlbumCovers();

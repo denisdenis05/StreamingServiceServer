@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using SocialMedia.Data.Models;
 using StreamingServiceServer.Data.Models;
 
 namespace StreamingServiceServer.Data;
@@ -20,6 +21,9 @@ public class StreamingDbContext : DbContext
     public DbSet<ReleaseToDownload> ReleasesToDownload { get; set; }
     public DbSet<FailedDownload> FailedDownloads { get; set; }
     public DbSet<PendingDownload> PendingDownloads { get; set; }
+    
+    public virtual DbSet<User> Users { get; set; }
+    public virtual DbSet<RefreshToken> RefreshTokens { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

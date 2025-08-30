@@ -10,16 +10,13 @@
         <ProjectReference Include="..\StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj" />
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="HotChocolate" Version="16.0.0-p.7.15" />
-        <PackageReference Include="HotChocolate.AspNetCore" Version="16.0.0-p.7.15" />
-        <PackageReference Include="HotChocolate.Data.EntityFramework" Version="16.0.0-p.7.15" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.7" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.7">
-          <PrivateAssets>all</PrivateAssets>
-          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.13.0" />
+        <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.7.1" />
         <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
     </ItemGroup>
 

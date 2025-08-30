@@ -90,60 +90,12 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = builder.Configuration["Jwt:Issuer"], // Should be "streamingservice"
-        ValidAudience = builder.Configuration["Jwt:Audience"], // Should be "streamingservice-users"
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = builder.Configuration["Jwt:Audience"], 
         IssuerSigningKey = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(builder.Configuration["Jwt:SecretKey"])),
         RoleClaimType = ClaimTypes.Role,
         NameClaimType = "name",
-        ClockSkew = TimeSpan.Zero // Remove default 5 minute clock skew
-    };
-    
-    options.Events = new JwtBearerEvents
-    {
-        OnMessageReceived = context =>
-        {
-            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-            Console.WriteLine($"Full Authorization header: {authHeader}");
-            
-            var token = authHeader?.Split(" ", StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
-            if (!string.IsNullOrEmpty(token))
-            {
-                Console.WriteLine($"Extracted token length: {token.Length}");
-                Console.WriteLine($"Token parts count: {token.Split('.').Length}");
-                
-                // Validate basic JWT structure
-                var parts = token.Split('.');
-                if (parts.Length == 3)
-                {
-                    Console.WriteLine($"Header length: {parts[0].Length}");
-                    Console.WriteLine($"Payload length: {parts[1].Length}");
-                    Console.WriteLine($"Signature length: {parts[2].Length}");
-                }
-                else
-                {
-                    Console.WriteLine("Invalid JWT structure - not 3 parts!");
-                }
-            }
-            return Task.CompletedTask;
-        },
-        
-        OnAuthenticationFailed = ctx =>
-        {
-            Console.WriteLine($"Auth failed: {ctx.Exception.Message}");
-            Console.WriteLine($"Exception type: {ctx.Exception.GetType().Name}");
-            if (ctx.Exception.InnerException != null)
-            {
-                Console.WriteLine($"Inner exception: {ctx.Exception.InnerException.Message}");
-            }
-            return Task.CompletedTask;
-        },
-
-        OnTokenValidated = ctx =>
-        {
-            var claims = ctx.Principal?.Claims.Select(c => new { c.Type, c.Value });
-            Console.WriteLine($"Token validated: {System.Text.Json.JsonSerializer.Serialize(claims)}");
-            return Task.CompletedTask;
-        }
+        ClockSkew = TimeSpan.Zero 
     };
 });
 

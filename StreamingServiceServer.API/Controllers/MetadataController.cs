@@ -6,7 +6,7 @@ using StreamingServiceServer.Business.Services.MusicSearch;
 namespace StreamingServiceServer.API.Controllers;
 
 [ApiController]
-[Authorize(AuthenticationSchemes = "Bearer", Roles = "User")]
+[Authorize(AuthenticationSchemes = "Bearer", Roles = "User,Admin")]
 [Route("[controller]")]
 public class MetadataController : ControllerBase
 {

@@ -302,13 +302,17 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
         if (recordings == null || !recordings.Any())
             return;
-        var release = recordings.First().Releases.First();
+        
+        var releases = recordings.First().Releases;
+        var release = releases.First();
         var cover = new AlbumCoversDto();
         
         if (release.ReleaseGroup != null)
             cover = await _externalMusicSearchService.GetAllAlbumCovers(release.ReleaseGroup.Id);
         else
             cover = await _externalMusicSearchService.GetAlbumCover(release.Id);
+        
+        release.Cover = cover;
         foreach (var recording in recordings)
         {
             recording.Cover = cover;

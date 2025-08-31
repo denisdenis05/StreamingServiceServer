@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Npgsql;
 using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
@@ -322,94 +323,270 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
     }
 
     private async Task SaveAlbumRecordings(ICollection<RecordingDto> recordings)
+{
+    const int maxRetries = 3;
+    int retryCount = 0;
+
+    while (retryCount < maxRetries)
     {
-        var release = recordings.First().Releases.First().ToEntity();
-
-        var allArtists = new List<Artist>();
-
-        if (release.Artist != null)
-            allArtists.Add(release.Artist);
-
-        var recordingArtists = recordings
-            .SelectMany(r => r.ArtistCredit)
-            .Where(ac => ac.Artist != null)
-            .Select(ac => ac.Artist!.ToEntity())
-            .ToList();
-
-        allArtists.AddRange(recordingArtists);
-
-        var distinctArtists = allArtists
-            .GroupBy(a => a.Id)
-            .Select(g => g.First())
-            .ToList();
-
-        var existingArtistIds = await _dbContext.Artists
-            .Where(a => distinctArtists.Select(ua => ua.Id).Contains(a.Id))
-            .Select(a => a.Id)
-            .ToListAsync();
-
-        foreach (var artist in distinctArtists)
+        try
         {
-            bool tracked = _dbContext.Artists.Local.Any(a => a.Id == artist.Id);
-            bool exists = existingArtistIds.Contains(artist.Id);
-
-            if (!tracked && !exists)
-            {
-                await _dbContext.Artists.AddAsync(artist);
-            }
-            else if (exists && !tracked)
-            {
-                _dbContext.Artists.Attach(artist);
-            }
+            await SaveAlbumRecordingsInternal(recordings);
+            return; 
         }
-
-        // Apply the same logic to Release
-        var trackedRelease = _dbContext.Releases.Local.FirstOrDefault(r => r.Id == release.Id);
-        if (trackedRelease == null)
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
-            var exists = await _dbContext.Releases.AnyAsync(r => r.Id == release.Id);
-            if (!exists)
+            retryCount++;
+            
+            _dbContext.ChangeTracker.Clear();
+            
+            if (retryCount >= maxRetries)
             {
-                await _dbContext.Releases.AddAsync(release);
+                throw new InvalidOperationException($"Failed to save album recordings after {maxRetries} attempts due to concurrent modifications.", ex);
             }
-            else
-            {
-                _dbContext.Releases.Update(release);
-            }
+            
+            await Task.Delay(100 * retryCount);
+        }
+    }
+}
+
+private async Task SaveAlbumRecordingsInternal(ICollection<RecordingDto> recordings)
+{
+    using var transaction = await _dbContext.Database.BeginTransactionAsync();
+    
+    try
+    {
+        await UpsertArtists(recordings);
+        
+        var release = await UpsertRelease(recordings);
+        
+        await UpsertRecordings(recordings, release);
+        
+        RemoveDuplicatesFromChangeTracker();
+        
+        await _dbContext.SaveChangesAsync();
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        throw;
+    }
+}
+
+private async Task UpsertArtists(ICollection<RecordingDto> recordings)
+{
+    var allArtists = new List<Artist>();
+
+    var releaseArtist = recordings.First().Releases.First().Artist?.ToEntity();
+    if (releaseArtist != null)
+        allArtists.Add(releaseArtist);
+
+    var recordingArtists = recordings
+        .SelectMany(r => r.ArtistCredit)
+        .Where(ac => ac.Artist != null)
+        .Select(ac => ac.Artist!.ToEntity())
+        .ToList();
+
+    allArtists.AddRange(recordingArtists);
+
+    var distinctArtists = allArtists
+        .GroupBy(a => a.Id)
+        .Select(g => g.First())
+        .ToList();
+
+    if (!distinctArtists.Any())
+        return;
+
+    var artistIds = distinctArtists.Select(a => a.Id).ToList();
+    
+    var existingArtists = await _dbContext.Artists
+        .Where(a => artistIds.Contains(a.Id))
+        .ToDictionaryAsync(a => a.Id, a => a);
+
+    foreach (var artist in distinctArtists)
+    {
+        var trackedArtist = _dbContext.Artists.Local.FirstOrDefault(a => a.Id == artist.Id);
+        
+        if (trackedArtist != null)
+        {
+            continue;
+        }
+        
+        if (existingArtists.TryGetValue(artist.Id, out var existingArtist))
+        {
+            _dbContext.Artists.Attach(existingArtist);
         }
         else
         {
-            release = trackedRelease;
+            _dbContext.Artists.Add(artist);
         }
+    }
+}
 
-        var recordingEntities = recordings
-            .Select(r => r.ToEntity())
-            .GroupBy(r => r.Id)
-            .Select(g => g.First())
-            .ToList();
+private async Task<Release> UpsertRelease(ICollection<RecordingDto> recordings)
+{
+    var releaseDto = recordings.First().Releases.First();
+    var release = releaseDto.ToEntity();
 
-        foreach (var recEntity in recordingEntities)
-        {
-            recEntity.Release = release; // Use the tracked release instance
-
-            var tracked = _dbContext.Recordings.Local.FirstOrDefault(r => r.Id == recEntity.Id);
-            if (tracked == null)
-            {
-                var exists = await _dbContext.Recordings.AnyAsync(r => r.Id == recEntity.Id);
-                if (!exists)
-                {
-                    await _dbContext.Recordings.AddAsync(recEntity);
-                }
-                else
-                {
-                    _dbContext.Recordings.Update(recEntity);
-                }
-            }
-        }
-
-        await _dbContext.SaveChangesAsync();
+    var trackedRelease = _dbContext.Releases.Local.FirstOrDefault(r => r.Id == release.Id);
+    if (trackedRelease != null)
+    {
+        return trackedRelease;
     }
 
+    var existingRelease = await _dbContext.Releases.FirstOrDefaultAsync(r => r.Id == release.Id);
+    
+    if (existingRelease != null)
+    {
+        _dbContext.Entry(existingRelease).CurrentValues.SetValues(release);
+        
+        if (release.Artist != null)
+        {
+            var artistInContext = _dbContext.Artists.Local.FirstOrDefault(a => a.Id == release.Artist.Id) 
+                                ?? await _dbContext.Artists.FirstOrDefaultAsync(a => a.Id == release.Artist.Id);
+            
+            if (artistInContext != null)
+            {
+                existingRelease.Artist = artistInContext;
+            }
+        }
+        
+        return existingRelease;
+    }
+    else
+    {
+        if (release.Artist != null)
+        {
+            var artistInContext = _dbContext.Artists.Local.FirstOrDefault(a => a.Id == release.Artist.Id);
+            if (artistInContext != null)
+            {
+                release.Artist = artistInContext;
+            }
+        }
+        
+        _dbContext.Releases.Add(release);
+        return release;
+    }
+}
+
+private async Task UpsertRecordings(ICollection<RecordingDto> recordings, Release release)
+{
+    var recordingEntities = recordings
+        .Select(r => r.ToEntity())
+        .GroupBy(r => r.Id)
+        .Select(g => g.First())
+        .ToList();
+
+    foreach (var recording in recordingEntities)
+    {
+        recording.Release = release;
+
+        var trackedRecording = _dbContext.Recordings.Local.FirstOrDefault(r => r.Id == recording.Id);
+        if (trackedRecording != null)
+        {
+            continue;
+        }
+
+        var existingRecording = await _dbContext.Recordings.FirstOrDefaultAsync(r => r.Id == recording.Id);
+        
+        if (existingRecording != null)
+        {
+            _dbContext.Entry(existingRecording).CurrentValues.SetValues(recording);
+            existingRecording.Release = release;
+        }
+        else
+        {
+            _dbContext.Recordings.Add(recording);
+        }
+    }
+
+    await UpsertRecordingArtistCredits(recordings);
+}
+
+private async Task UpsertRecordingArtistCredits(ICollection<RecordingDto> recordings)
+{
+    var allCredits = recordings
+        .SelectMany(r => r.ArtistCredit.Select(ac => new
+        {
+            RecordingId = r.Id,
+            Credit = ac
+        }))
+        .ToList();
+
+    foreach (var creditInfo in allCredits)
+    {
+        if (creditInfo.Credit.Artist == null) continue;
+
+        var credit = new RecordingArtistCredit
+        {
+            Id = Guid.NewGuid(), 
+            RecordingId = creditInfo.RecordingId,
+            ArtistId = creditInfo.Credit.Artist.Id,
+            Name = creditInfo.Credit.Name
+        };
+
+        var existingCredit = await _dbContext.Set<RecordingArtistCredit>()
+            .FirstOrDefaultAsync(rac => rac.RecordingId == credit.RecordingId && 
+                                       rac.ArtistId == credit.ArtistId);
+
+        if (existingCredit == null)
+        {
+            var artistInContext = _dbContext.Artists.Local.FirstOrDefault(a => a.Id == credit.ArtistId);
+            if (artistInContext != null)
+            {
+                credit.Artist = artistInContext;
+            }
+
+            _dbContext.Set<RecordingArtistCredit>().Add(credit);
+        }
+    }
+}
+
+private void RemoveDuplicatesFromChangeTracker()
+{
+    var duplicateArtists = _dbContext.ChangeTracker.Entries<Artist>()
+        .Where(e => e.State == EntityState.Added)
+        .GroupBy(e => e.Entity.Id)
+        .Where(g => g.Count() > 1);
+
+    foreach (var duplicateGroup in duplicateArtists)
+    {
+        var duplicates = duplicateGroup.Skip(1);
+        foreach (var duplicate in duplicates)
+        {
+            duplicate.State = EntityState.Detached;
+        }
+    }
+
+    var duplicateReleases = _dbContext.ChangeTracker.Entries<Release>()
+        .Where(e => e.State == EntityState.Added)
+        .GroupBy(e => e.Entity.Id)
+        .Where(g => g.Count() > 1);
+
+    foreach (var duplicateGroup in duplicateReleases)
+    {
+        var duplicates = duplicateGroup.Skip(1);
+        foreach (var duplicate in duplicates)
+        {
+            duplicate.State = EntityState.Detached;
+        }
+    }
+
+    var duplicateRecordings = _dbContext.ChangeTracker.Entries<Recording>()
+        .Where(e => e.State == EntityState.Added)
+        .GroupBy(e => e.Entity.Id)
+        .Where(g => g.Count() > 1);
+
+    foreach (var duplicateGroup in duplicateRecordings)
+    {
+        var duplicates = duplicateGroup.Skip(1);
+        foreach (var duplicate in duplicates)
+        {
+            duplicate.State = EntityState.Detached;
+        }
+    }
+}
     public async Task<bool> IsAlreadyDownloaded(Guid id)
     {
         return await _dbContext.Releases.AnyAsync(r => r.Id == id);

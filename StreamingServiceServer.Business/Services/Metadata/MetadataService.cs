@@ -45,18 +45,6 @@ public class MetadataService : IMetadataService
 
     await Task.WhenAll(coverTasks.Values);
 
-    foreach (var recording in recordings)
-    {
-        if (string.IsNullOrEmpty(recording.Release.Cover))
-        {
-            var albumCovers = coverTasks[recording.Release.Id].Result;
-
-            recording.Release.Cover = albumCovers.Cover;
-            recording.Release.SmallCover = albumCovers.SmallCover;
-            recording.Release.VerySmallCover = albumCovers.VerySmallCover;
-        }
-    }
-
     return recordings
         .Select(recording => recording.ToResponse())
         .ToList();
@@ -73,24 +61,6 @@ public async Task<List<ReleaseResponse>> GetAllAlbums()
         .Select(r => r.Id)
         .Distinct()
         .ToList();
-
-    var coverTasks = releaseIdsToFetch.ToDictionary(
-        id => id,
-        id => _externalMusicSearchService.GetAlbumCover(id)
-    );
-
-    await Task.WhenAll(coverTasks.Values);
-
-    foreach (var release in releases)
-    {
-        if (string.IsNullOrEmpty(release.Cover))
-        {
-            var albumCovers = coverTasks[release.Id].Result;
-            release.Cover = albumCovers.Cover;
-            release.SmallCover = albumCovers.SmallCover;
-            release.VerySmallCover = albumCovers.VerySmallCover;
-        }
-    }
 
     return releases
         .Select(release => release.ToResponse())
@@ -121,11 +91,6 @@ public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id
         SmallCover = recordings.First().Release.SmallCover,
         VerySmallCover = recordings.First().Release.VerySmallCover
     };
-
-    if (string.IsNullOrEmpty(recordings.First().Release.Cover))
-    {
-        albumCovers = await _externalMusicSearchService.GetAlbumCover(id);
-    }
     
     foreach (var recording in recordings)
     {
@@ -152,15 +117,6 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
 
     if (recording == null)
         return null;
-
-    if (string.IsNullOrEmpty(recording.Release.Cover))
-    {
-        var albumCovers = await _externalMusicSearchService.GetAlbumCover(recording.Release.Id);
-        
-        recording.Release.Cover = albumCovers.Cover;
-        recording.Release.SmallCover = albumCovers.SmallCover;
-        recording.Release.VerySmallCover = albumCovers.VerySmallCover;
-    }
 
     return recording.ToResponse();
 }

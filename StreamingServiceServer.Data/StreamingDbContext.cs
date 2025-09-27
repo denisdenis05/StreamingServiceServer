@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 using SocialMedia.Data.Models;
 using StreamingServiceServer.Data.Models;
+using StreamingServiceServer.Data.Models.Library;
 
 namespace StreamingServiceServer.Data;
 
@@ -24,6 +25,10 @@ public class StreamingDbContext : DbContext
     
     public virtual DbSet<User> Users { get; set; }
     public virtual DbSet<RefreshToken> RefreshTokens { get; set; }
+    public virtual DbSet<Playlist> Playlists { get; set; }
+    public virtual DbSet<PlaylistRecording> PlaylistRecordings { get; set; }
+    
+    public virtual DbSet<Listen> Listens { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

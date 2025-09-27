@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StreamingServiceServer.Data;
@@ -11,9 +12,11 @@ using StreamingServiceServer.Data;
 namespace StreamingServiceServer.Data.Migrations
 {
     [DbContext(typeof(StreamingDbContext))]
-    partial class StreamingDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250901121320_Playlists")]
+    partial class Playlists
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -69,15 +72,6 @@ namespace StreamingServiceServer.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
-
-                    b.Property<DateTime?>("LastFmConnectedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("LastFmSessionKey")
-                        .HasColumnType("text");
-
-                    b.Property<string>("LastFmUsername")
-                        .HasColumnType("text");
 
                     b.Property<DateTime?>("LastLoginAt")
                         .HasColumnType("timestamp with time zone");
@@ -296,72 +290,6 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("PlaylistRecordings");
                 });
 
-            modelBuilder.Entity("StreamingServiceServer.Data.Models.Listen", b =>
-                {
-                    b.Property<Guid>("ListenId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AnomalyNotes")
-                        .HasColumnType("text");
-
-                    b.Property<int>("ClientReportedSeconds")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("EndTime")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("HasAnomalies")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime>("LastProgressUpdate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("NowPlayingReported")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("PauseSeekEvents")
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("RecordingId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("Scrobbled")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("ScrobbledAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("ServerCalculatedSeconds")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("SessionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("StartTime")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("TrackDurationSeconds")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int>("ValidatedPlayedSeconds")
-                        .HasColumnType("integer");
-
-                    b.HasKey("ListenId");
-
-                    b.HasIndex("RecordingId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("Listens");
-                });
-
             modelBuilder.Entity("StreamingServiceServer.Data.Models.PendingDownload", b =>
                 {
                     b.Property<Guid>("Id")
@@ -548,25 +476,6 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Navigation("Playlist");
 
                     b.Navigation("Recording");
-                });
-
-            modelBuilder.Entity("StreamingServiceServer.Data.Models.Listen", b =>
-                {
-                    b.HasOne("StreamingServiceServer.Data.Models.Recording", "Recording")
-                        .WithMany()
-                        .HasForeignKey("RecordingId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SocialMedia.Data.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Recording");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>

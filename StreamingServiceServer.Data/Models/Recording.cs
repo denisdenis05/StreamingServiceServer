@@ -1,3 +1,5 @@
+using StreamingServiceServer.Data.Models.Library;
+
 namespace StreamingServiceServer.Data.Models;
 
 public class Recording
@@ -12,4 +14,5 @@ public class Recording
     public Release Release { get; set; }
 
     public virtual ICollection<RecordingArtistCredit> ArtistCredit { get; set; } = new List<RecordingArtistCredit>();
+    public virtual ICollection<PlaylistRecording>  PlaylistRecordings { get; set; } = new List<PlaylistRecording>();
 }

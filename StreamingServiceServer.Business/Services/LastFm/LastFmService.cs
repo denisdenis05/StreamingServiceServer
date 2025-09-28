@@ -129,99 +129,12 @@ public class LastFmService : ILastFmService
         throw new Exception("Failed to get session key and username from Last.fm response");
     }
 
-    public async Task<bool> ScrobbleTrack(string sessionKey, string artist, string track, string album, long timestamp)
-    {
-        var parameters = new Dictionary<string, string>
-        {
-            ["method"] = "track.scrobble",
-            ["api_key"] = _apiKey,
-            ["sk"] = sessionKey,
-            ["artist"] = artist,
-            ["track"] = track,
-            ["timestamp"] = timestamp.ToString()
-        };
-
-        if (!string.IsNullOrEmpty(album))
-        {
-            parameters["album"] = album;
-        }
-
-        var signature = GenerateSignature(parameters);
-        parameters["api_sig"] = signature;
-        parameters["format"] = "json";
-
-        var content = new FormUrlEncodedContent(parameters);
-        var response = await _httpClient.PostAsync(_baseUrl, content);
-
-        return response.IsSuccessStatusCode;
-    }
-
-    public async Task<bool> UpdateNowPlaying(string sessionKey, string artist, string track, string album, int duration)
-    {
-        var parameters = new Dictionary<string, string>
-        {
-            ["method"] = "track.updateNowPlaying",
-            ["api_key"] = _apiKey,
-            ["sk"] = sessionKey,
-            ["artist"] = artist,
-            ["track"] = track
-        };
-
-        if (!string.IsNullOrEmpty(album))
-        {
-            parameters["album"] = album;
-        }
-
-        if (duration > 0)
-        {
-            parameters["duration"] = duration.ToString();
-        }
-
-        var signature = GenerateSignature(parameters);
-        parameters["api_sig"] = signature;
-        parameters["format"] = "json";
-
-        try
-        {
-            var content = new FormUrlEncodedContent(parameters);
-            var response = await _httpClient.PostAsync(_baseUrl, content);
-
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            return false;
-        }
-    }
-
     public async Task<Guid> StartPlaybackSession(Guid userId, StartPlaybackRequest request)
     {
         try
         {
             var sessionId = Guid.NewGuid();
             var startTime = DateTime.UtcNow;
-
-            var recentListen = await _dbContext.Listens
-                .Where(l => l.UserId == userId &&
-                            l.RecordingId == request.TrackId &&
-                            l.IsActive &&
-                            l.StartTime > DateTime.UtcNow.AddMinutes(-5))
-                .OrderByDescending(l => l.StartTime)
-                .FirstOrDefaultAsync();
-
-            if (recentListen != null)
-            {
-                recentListen.SessionId = sessionId;
-                recentListen.IsActive = true;
-                await _dbContext.SaveChangesAsync();
-
-                if (!recentListen.NowPlayingReported)
-                {
-                    _ = Task.Run(() => ReportNowPlaying(recentListen.ListenId));
-                }
-
-                return sessionId;
-            }
 
             var listen = new Listen
             {
@@ -245,7 +158,7 @@ public class LastFmService : ILastFmService
             _dbContext.Listens.Add(listen);
             await _dbContext.SaveChangesAsync();
 
-            _ = Task.Run(() => ReportNowPlaying(listen.ListenId));
+            await ReportNowPlaying(listen.ListenId);
 
             return sessionId;
         }
@@ -273,6 +186,19 @@ public class LastFmService : ILastFmService
                 listen.PauseSeekEvents = JsonSerializer.Serialize(events);
 
                 await _dbContext.SaveChangesAsync();
+            
+                switch (playbackEvent.EventType.ToLower())
+                {
+                    case "pause":
+                        await ClearNowPlayingForListen(listen.ListenId);
+                        break;
+                    case "resume":
+                        await ReportNowPlaying(listen.ListenId);
+                        break;
+                    case "seek":
+                        await ReportNowPlaying(listen.ListenId);
+                        break;
+                }
             }
         }
         catch (Exception ex)
@@ -291,24 +217,25 @@ public class LastFmService : ILastFmService
             var listen = await db.Listens
                 .Include(l => l.Recording)
                 .FirstOrDefaultAsync(l => l.ListenId == listenId);
-
-            if (listen.NowPlayingReported) return;
-
+            
             var sessionInfo = await GetValidatedSession(listen.UserId);
 
             if (sessionInfo?.IsValid == true)
             {
                 var recording = await db.Recordings
+                    .Include(rec => rec.Release)
+                    .Include(rec => rec.Release.Artist)
                     .FirstOrDefaultAsync(r => r.Id == listen.RecordingId);
 
                 if (recording != null)
                 {
                     var success = await UpdateNowPlaying(
                         sessionInfo.SessionKey,
-                        recording.ArtistCredit.First().Name,
+                        recording.Id,
+                        recording.Release.Artist.Name,
                         recording.Title,
                         recording.Release.Title,
-                        listen.TrackDurationSeconds
+                        listen.TrackDurationSeconds 
                     );
 
                     if (success)
@@ -324,7 +251,35 @@ public class LastFmService : ILastFmService
             Console.WriteLine($"Error reporting now playing for listen {listenId}: {ex.Message}");
         }
     }
+    
+    public async Task<bool> ClearNowPlaying(string sessionKey)
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["method"] = "track.updateNowPlaying",
+            ["api_key"] = _apiKey,
+            ["sk"] = sessionKey,
+            ["artist"] = "",
+            ["track"] = "" 
+        };
 
+        var signature = GenerateSignature(parameters);
+        parameters["api_sig"] = signature;
+        parameters["format"] = "json";
+
+        try
+        {
+            var content = new FormUrlEncodedContent(parameters);
+            var response = await _httpClient.PostAsync(_baseUrl, content);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error clearing now playing: {ex.Message}");
+            return false;
+        }
+    }
+    
     private async Task ScrobbleListen(Guid listenId)
     {
         try
@@ -343,6 +298,8 @@ public class LastFmService : ILastFmService
             if (sessionInfo?.IsValid == true)
             {
                 var recording = await db.Recordings
+                    .Include(r=> r.Release)
+                    .Include(r=> r.Release.Artist)
                     .FirstOrDefaultAsync(r => r.Id == listen.RecordingId);
 
                 if (recording != null)
@@ -351,7 +308,7 @@ public class LastFmService : ILastFmService
 
                     var success = await ScrobbleTrack(
                         sessionInfo.SessionKey,
-                        recording.ArtistCredit.First().Name,
+                        recording.Release.Artist.Name,
                         recording.Title,
                         recording.Release.Title,
                         timestamp
@@ -454,7 +411,8 @@ public class LastFmService : ILastFmService
         }
     }
 
-    public async Task UpdatePlaybackProgress(Guid sessionId, int clientReportedSeconds)
+    
+    public async Task UpdatePlaybackProgressDelta(Guid sessionId, int deltaListenedSeconds, int totalListenedSeconds)
     {
         try
         {
@@ -465,20 +423,31 @@ public class LastFmService : ILastFmService
             if (listen == null) return;
 
             var now = DateTime.UtcNow;
-            var serverCalculatedSeconds = (int)(now - listen.StartTime).TotalSeconds;
 
-            var validatedSeconds = ValidateProgress(listen, clientReportedSeconds, serverCalculatedSeconds, now);
+            var validatedTotalSeconds = ValidateProgressDelta(listen, totalListenedSeconds, now);
+        
+            if (deltaListenedSeconds < 0)
+            {
+                listen.HasAnomalies = true;
+                listen.AnomalyNotes += $"Negative delta {deltaListenedSeconds}s; ";
+                deltaListenedSeconds = 0;
+            }
 
-            listen.ClientReportedSeconds = clientReportedSeconds;
-            listen.ServerCalculatedSeconds = serverCalculatedSeconds;
-            listen.ValidatedPlayedSeconds = validatedSeconds;
+            var timeSinceLastUpdate = (now - listen.LastProgressUpdate).TotalSeconds;
+            if (deltaListenedSeconds > timeSinceLastUpdate + 30) 
+            {
+                listen.HasAnomalies = true;
+                listen.AnomalyNotes += $"Delta {deltaListenedSeconds}s > elapsed time {timeSinceLastUpdate}s; ";
+            }
+
+            listen.ValidatedPlayedSeconds = validatedTotalSeconds;
             listen.LastProgressUpdate = now;
 
             await _dbContext.SaveChangesAsync();
 
-            if (listen.ShouldScrobble && !listen.Scrobbled)
+            if (ShouldScrobble(validatedTotalSeconds, listen.TrackDurationSeconds) && !listen.Scrobbled)
             {
-                _ = Task.Run(() => ScrobbleListen(listen.ListenId));
+                await ScrobbleListen(listen.ListenId);
             }
         }
         catch (Exception ex)
@@ -487,87 +456,8 @@ public class LastFmService : ILastFmService
         }
     }
 
-    private int ValidateProgress(Listen listen, int clientReported, int serverCalculated, DateTime now)
-    {
-        // Use TrackDurationSeconds instead of Recording.Length for consistency
-        var trackDuration = listen.TrackDurationSeconds > 0
-            ? listen.TrackDurationSeconds
-            : (listen.Recording?.Length ?? 0);
 
-        if (clientReported > trackDuration)
-        {
-            listen.HasAnomalies = true;
-            listen.AnomalyNotes += $"Reported {clientReported}s > duration {trackDuration}s; ";
-            return Math.Min(clientReported, trackDuration);
-        }
-
-        var previousValidated = listen.ValidatedPlayedSeconds;
-        if (clientReported < previousValidated - 10) 
-        {
-            var recentSeek = HasRecentSeekEvent(listen, now);
-
-            if (!recentSeek)
-            {
-                listen.HasAnomalies = true;
-                listen.AnomalyNotes += $"Backwards progress {previousValidated}s -> {clientReported}s; ";
-            }
-        }
-
-        var timeSinceStart = (now - listen.StartTime).TotalSeconds;
-        var maxPossibleProgress = timeSinceStart + 30; 
-
-        if (clientReported > maxPossibleProgress)
-        {
-            listen.HasAnomalies = true;
-            listen.AnomalyNotes += $"Too rapid progress {clientReported}s > {maxPossibleProgress}s; ";
-            return (int)Math.Min(clientReported, maxPossibleProgress);
-        }
-
-        var timeSinceLastUpdate = (now - listen.LastProgressUpdate).TotalSeconds;
-        if (timeSinceLastUpdate > 120)
-        {
-            var expectedProgress = previousValidated + timeSinceLastUpdate;
-            var actualProgress = clientReported;
-
-            if (Math.Abs(actualProgress - expectedProgress) > 60)
-            {
-                listen.HasAnomalies = true;
-                listen.AnomalyNotes += $"Large reporting gap {timeSinceLastUpdate}s; ";
-            }
-        }
-
-        var variance = Math.Abs(clientReported - serverCalculated);
-
-        if (variance <= 30)
-        {
-            return clientReported;
-        }
-        else if (variance <= 60)
-        {
-            return (int)((clientReported + serverCalculated) / 2.0);
-        }
-
-        return serverCalculated;
-    }
-
-    private bool HasRecentSeekEvent(Listen listen, DateTime now)
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(listen.PauseSeekEvents))
-                return false;
-
-            var events = JsonSerializer.Deserialize<List<PlaybackEvent>>(listen.PauseSeekEvents);
-            return events?.Any(e => e.EventType == "seek" &&
-                                    (now - e.Timestamp).TotalSeconds < 10) == true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public async Task StopPlaybackSession(Guid sessionId, int clientReportedSeconds)
+    public async Task StopPlaybackSessionDelta(Guid sessionId, int totalListenedSeconds)
     {
         try
         {
@@ -579,29 +469,111 @@ public class LastFmService : ILastFmService
             if (listen == null) return;
 
             var now = DateTime.UtcNow;
-            var totalServerTime = (int)(now - listen.StartTime).TotalSeconds;
 
-            var finalValidatedSeconds = ValidateProgress(listen, clientReportedSeconds, totalServerTime, now);
+            var validatedTotalSeconds = ValidateProgressDelta(listen, totalListenedSeconds, now);
 
             listen.EndTime = now;
-            listen.ClientReportedSeconds = clientReportedSeconds;
-            listen.ServerCalculatedSeconds = totalServerTime;
-            listen.ValidatedPlayedSeconds = finalValidatedSeconds;
+            listen.ValidatedPlayedSeconds = validatedTotalSeconds;
             listen.IsActive = false;
 
             await _dbContext.SaveChangesAsync();
 
-            if (ShouldScrobble(finalValidatedSeconds, listen.TrackDurationSeconds) && !listen.Scrobbled)
+            await ClearNowPlayingForListen(listen.ListenId);
+
+            if (ShouldScrobble(validatedTotalSeconds, listen.TrackDurationSeconds) && !listen.Scrobbled)
             {
-                _ = Task.Run(() => ScrobbleListen(listen.ListenId));
+                await ScrobbleListen(listen.ListenId);
             }
         }
         catch (Exception ex)
         {
-            throw;
+            throw new Exception($"Error stopping playback session {sessionId}: {ex.Message}", ex);
         }
     }
 
+    private bool ValidateListenTime(int totalListenedSeconds, int trackDurationSeconds, TimeSpan sessionDuration)
+    {
+        if (totalListenedSeconds < 0) return false;
+        if (totalListenedSeconds > trackDurationSeconds + 30) return false; 
+        if (totalListenedSeconds > sessionDuration.TotalSeconds + 60) return false; 
+    
+        return true;
+    }
+
+    private int ValidateProgressDelta(Listen listen, int totalListenedSeconds, DateTime now)
+    {
+        var trackDuration = listen.TrackDurationSeconds > 0
+            ? listen.TrackDurationSeconds
+            : (listen.Recording?.Length ?? 0);
+
+        var sessionDuration = now - listen.StartTime;
+
+        if (!ValidateListenTime(totalListenedSeconds, trackDuration, sessionDuration))
+        {
+            listen.HasAnomalies = true;
+            listen.AnomalyNotes += $"Invalid total listen time {totalListenedSeconds}s for track {trackDuration}s, session {(int)sessionDuration.TotalSeconds}s; ";
+        
+            var maxPossibleListenTime = Math.Min(trackDuration, (int)sessionDuration.TotalSeconds);
+            return Math.Min(totalListenedSeconds, maxPossibleListenTime);
+        }
+
+        var previousTotal = listen.ValidatedPlayedSeconds;
+        if (totalListenedSeconds < previousTotal - 5) 
+        {
+            var hasRecentSeek = HasRecentSeekEvent(listen, now);
+            if (!hasRecentSeek)
+            {
+                listen.HasAnomalies = true;
+                listen.AnomalyNotes += $"Total listen time decreased from {previousTotal}s to {totalListenedSeconds}s without seek; ";
+            }
+        }
+
+        return totalListenedSeconds;
+    }
+    
+    private bool HasRecentSeekEvent(Listen listen, DateTime now)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(listen.PauseSeekEvents))
+                return false;
+
+            var events = JsonSerializer.Deserialize<List<PlaybackEvent>>(listen.PauseSeekEvents);
+        
+            return events?.Any(e => e.EventType.ToLower() == "seek" &&
+                                    (now - e.Timestamp).TotalSeconds < 15) == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+    
+    private async Task ClearNowPlayingForListen(Guid listenId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+
+            var listen = await db.Listens
+                .FirstOrDefaultAsync(l => l.ListenId == listenId);
+
+            if (listen == null) return;
+
+            var sessionInfo = await GetValidatedSession(listen.UserId);
+
+            if (sessionInfo?.IsValid == true)
+            {
+                await ClearNowPlaying(sessionInfo.SessionKey);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error clearing now playing for listen {listenId}: {ex.Message}");
+        }
+    }
+    
     private static bool ShouldScrobble(int validatedSeconds, int trackDuration)
     {
         const int fourMinutes = 240;
@@ -666,6 +638,72 @@ public class LastFmService : ILastFmService
             }
 
             return false;
+        }
+        catch (Exception ex)
+        {
+            return false;
+        }
+    }
+    
+    private async Task<bool> ScrobbleTrack(string sessionKey, string artist, string track, string album, long timestamp)
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["method"] = "track.scrobble",
+            ["api_key"] = _apiKey,
+            ["sk"] = sessionKey,
+            ["artist"] = artist,
+            ["track"] = track,
+            ["timestamp"] = timestamp.ToString()
+        };
+
+        if (!string.IsNullOrEmpty(album))
+        {
+            parameters["album"] = album;
+        }
+
+        var signature = GenerateSignature(parameters);
+        parameters["api_sig"] = signature;
+        parameters["format"] = "json";
+
+        var content = new FormUrlEncodedContent(parameters);
+        var response = await _httpClient.PostAsync(_baseUrl, content);
+
+        return response.IsSuccessStatusCode;
+    }
+
+    private async Task<bool> UpdateNowPlaying(string sessionKey, Guid recordingId, string artist, string track, string album, int duration)
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["method"] = "track.updateNowPlaying",
+            ["api_key"] = _apiKey,
+            ["sk"] = sessionKey,
+            ["artist"] = artist,
+            ["track"] = track,
+            ["mbid"] = recordingId.ToString(),
+        };
+
+        if (!string.IsNullOrEmpty(album))
+        {
+            parameters["album"] = album;
+        }
+
+        if (duration > 0)
+        {
+            parameters["duration"] = duration.ToString();
+        }
+
+        var signature = GenerateSignature(parameters);
+        parameters["api_sig"] = signature;
+        parameters["format"] = "json";
+
+        try
+        {
+            var content = new FormUrlEncodedContent(parameters);
+            var response = await _httpClient.PostAsync(_baseUrl, content);
+
+            return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
         {

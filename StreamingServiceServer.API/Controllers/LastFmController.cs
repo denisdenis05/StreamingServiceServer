@@ -10,16 +10,13 @@ using StreamingServiceServer.Data;
 public class LastFmController : ControllerBase
 {
     private readonly ILastFmService _lastFmService;
-    private readonly ILogger<LastFmController> _logger;
     private readonly StreamingDbContext _dbContext; 
 
     public LastFmController(
         ILastFmService lastFmService,
-        ILogger<LastFmController> logger,
         StreamingDbContext dbContext)
     {
         _lastFmService = lastFmService;
-        _logger = logger;
         _dbContext = dbContext;
     }
 
@@ -40,7 +37,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating Last.fm auth URL");
             return StatusCode(500, "Failed to generate auth URL");
         }
     }
@@ -60,8 +56,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling Last.fm callback");
-            
             return Redirect($"streamingservice://lastfm/callback?error=server_error");
         }
     }
@@ -95,7 +89,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error connecting Last.fm account");
             return StatusCode(500, "Failed to connect Last.fm account");
         }
     }
@@ -128,7 +121,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting Last.fm connection status");
             return StatusCode(500, "Failed to get connection status");
         }
     }
@@ -162,7 +154,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error disconnecting Last.fm account");
             return StatusCode(500, "Failed to disconnect Last.fm account");
         }
     }
@@ -179,9 +170,8 @@ public class LastFmController : ControllerBase
         try
         {
             var sessionId = await _lastFmService.StartPlaybackSession(userId, request);
-            
-            _logger.LogInformation("Started playback session {SessionId} for user {UserId}, track {TrackId}", 
-                sessionId, userId, request.TrackId);
+
+            await _lastFmService.StartPlaybackSession(userId, request);
             
             return Ok(new { 
                 success = true, 
@@ -191,7 +181,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting playback session for user {UserId}", userId);
             return StatusCode(500, "Failed to start playback session");
         }
     }
@@ -201,10 +190,8 @@ public class LastFmController : ControllerBase
     {
         try
         {
-            await _lastFmService.StopPlaybackSession(request.SessionId, request.PlayedSeconds);
-            
-            _logger.LogInformation("Stopped playback session {SessionId}", request.SessionId);
-            
+            await _lastFmService.StopPlaybackSessionDelta(request.SessionId, request.TotalListenedSeconds);
+        
             return Ok(new { 
                 success = true, 
                 message = "Playback session stopped" 
@@ -212,7 +199,6 @@ public class LastFmController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error stopping playback session {SessionId}", request.SessionId);
             return StatusCode(500, "Failed to stop playback session");
         }
     }
@@ -222,8 +208,12 @@ public class LastFmController : ControllerBase
     {
         try
         {
-            await _lastFmService.UpdatePlaybackProgress(request.SessionId, request.PlayedSeconds);
-            
+            await _lastFmService.UpdatePlaybackProgressDelta(
+                request.SessionId, 
+                request.DeltaListenedSeconds, 
+                request.TotalListenedSeconds
+            );
+        
             if (request.Events?.Any() == true)
             {
                 foreach (var playbackEvent in request.Events)
@@ -231,12 +221,11 @@ public class LastFmController : ControllerBase
                     await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
                 }
             }
-            
+        
             return Ok(new { success = true });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating playback progress for session {SessionId}", request.SessionId);
             return StatusCode(500, "Failed to update playback progress");
         }
     }
@@ -253,13 +242,20 @@ public class LastFmController : ControllerBase
             };
 
             await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
-            await _lastFmService.UpdatePlaybackProgress(request.SessionId, request.PlayedSeconds);
-            
+        
+            if (request.DeltaListenedSeconds > 0)
+            {
+                await _lastFmService.UpdatePlaybackProgressDelta(
+                    request.SessionId, 
+                    request.DeltaListenedSeconds, 
+                    request.TotalListenedSeconds
+                );
+            }
+        
             return Ok(new { success = true, message = "Playback paused" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error pausing playback for session {SessionId}", request.SessionId);
             return StatusCode(500, "Failed to pause playback");
         }
     }
@@ -276,12 +272,11 @@ public class LastFmController : ControllerBase
             };
 
             await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
-            
+        
             return Ok(new { success = true, message = "Playback resumed" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error resuming playback for session {SessionId}", request.SessionId);
             return StatusCode(500, "Failed to resume playback");
         }
     }
@@ -300,13 +295,11 @@ public class LastFmController : ControllerBase
             };
 
             await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
-            await _lastFmService.UpdatePlaybackProgress(request.SessionId, request.ToSeconds);
-            
+        
             return Ok(new { success = true, message = "Seek recorded" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error recording seek for session {SessionId}", request.SessionId);
             return StatusCode(500, "Failed to record seek");
         }
     }

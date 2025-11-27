@@ -57,7 +57,12 @@ public class MusicBrainzService : IExternalMusicSearchService
     public async Task<List<RecordingDto>> SearchAlbumRecordingsAsync(string query)
     {
         var releases = await GetReleasesFromAlbumByQuery(query);
-        var albumId = releases.First().Id;
+        var firstRelease = releases.FirstOrDefault();
+        
+        if (firstRelease == null)
+            return new List<RecordingDto>();
+
+        var albumId = firstRelease.Id;
         
         var recordings = await GetRecordingsFromAlbum(albumId);
         return recordings.Select(recording =>
@@ -84,7 +89,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     {
         var releaseUrl = $"{_baseUrl}release/{albumId}?inc=recordings+artist-credits+release-groups+media&fmt=json";
         var release = await _httpClient.GetFromJsonAsync<ReleaseDto>(releaseUrl);
-        release.Artist = release.ArtistCredit.FirstOrDefault().Artist;
+        release.Artist = release.ArtistCredit?.FirstOrDefault()?.Artist;
         
         if (release == null)
             return Array.Empty<ReleaseDto>();
@@ -97,18 +102,20 @@ public class MusicBrainzService : IExternalMusicSearchService
         var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(query)}&fmt=json";
         var searchResponse = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(releaseGroupUrl);
 
-        var releaseGroup = searchResponse.ReleaseGroups.First();
-        var releases = await Task.WhenAll(
-            releaseGroup.Releases
-                .Take(5)
-                .Select(async release =>
-            {
-                release.Artist = releaseGroup.ArtistCredits.First().Artist;
-                return release;
-            })
-        );
+        var releaseGroup = searchResponse.ReleaseGroups.FirstOrDefault();
+        if (releaseGroup == null)
+            return new List<ReleaseDto>();
 
-        return releases.ToList();
+        var releases = releaseGroup.Releases?.Take(5).ToList() ?? new List<ReleaseDto>();
+        var artist = releaseGroup.ArtistCredits?.FirstOrDefault()?.Artist;
+
+        foreach (var release in releases)
+        {
+            if (artist != null)
+                release.Artist = artist;
+        }
+
+        return releases;
     }
     
     private async Task<ICollection<ReleaseDto>> SearchForAlbumByQuery(string query, string? artistQuery = null)
@@ -127,10 +134,13 @@ public class MusicBrainzService : IExternalMusicSearchService
         var releases = new List<ReleaseDto>();
         foreach (var releaseToCheck in releaseGroup)
         {
-            var releaseToAdd = releaseToCheck.Releases.FirstOrDefault(); 
-            releaseToAdd.Artist = releaseToCheck.ArtistCredits.First().Artist; 
+            var releaseToAdd = releaseToCheck.Releases?.FirstOrDefault();
+
+            var artist = releaseToCheck.ArtistCredits?.FirstOrDefault()?.Artist;
+            if (artist != null)
+                releaseToAdd.Artist = artist;
             
-            releases.AddRange(releaseToAdd);    
+            releases.Add(releaseToAdd);    
         }
         
         return releases.ToList();
@@ -196,36 +206,9 @@ public class MusicBrainzService : IExternalMusicSearchService
             ? $"{_baseCoverUrl}release-group/{releaseGroupId.Value}"
             : $"{_baseCoverUrl}release/{releaseId}";
 
-        try
-        {
-            var frontResponse = await _httpClient.GetAsync($"{targetUrlPrefix}/front");
-            if (frontResponse.IsSuccessStatusCode)
-            {
-                albumCovers.Cover = frontResponse.RequestMessage.RequestUri?.AbsoluteUri;
-            }
-
-            var front500Response = await _httpClient.GetAsync($"{targetUrlPrefix}/front-500");
-            if (front500Response.IsSuccessStatusCode)
-            {
-                albumCovers.SmallCover = front500Response.RequestMessage.RequestUri?.AbsoluteUri;
-            }
-            
-            var front250Response = await _httpClient.GetAsync($"{targetUrlPrefix}/front-250");
-            if (front250Response.IsSuccessStatusCode)
-            {
-                albumCovers.VerySmallCover = front250Response.RequestMessage.RequestUri?.AbsoluteUri;
-            }
-        }
-        catch (HttpRequestException ex)
-        {
-            Console.WriteLine($"Error fetching album covers for release/release group {releaseId}: {ex.Message}");
-            return new AlbumCoversDto();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"An unexpected error occurred while fetching album covers for {releaseId}: {ex.Message}");
-            return new AlbumCoversDto();
-        }
+        albumCovers.Cover = $"{targetUrlPrefix}/front";
+        albumCovers.SmallCover = $"{targetUrlPrefix}/front-500";
+        albumCovers.VerySmallCover = $"{targetUrlPrefix}/front-250";
 
         return albumCovers;
     }
@@ -233,34 +216,16 @@ public class MusicBrainzService : IExternalMusicSearchService
     public async Task<AlbumCoversDto> GetAllAlbumCovers(Guid releaseGroupId)
     {
         var albumCovers = new AlbumCoversDto();
-        try
-        {
-            var frontCoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front";
-            var frontCoverResponse = await _httpClient.GetAsync(frontCoverUrl);
-            if (frontCoverResponse.IsSuccessStatusCode)
-            {
-                albumCovers.Cover = frontCoverResponse.RequestMessage.RequestUri?.AbsoluteUri;
-            }
+        
+        var frontCoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front";
+        albumCovers.Cover = frontCoverUrl;
 
-            var front500CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-500";
-            var front500CoverResponse = await _httpClient.GetAsync(front500CoverUrl);
-            if (front500CoverResponse.IsSuccessStatusCode)
-            {
-                albumCovers.SmallCover = front500CoverResponse.RequestMessage.RequestUri?.AbsoluteUri;
-            }
+        var front500CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-500";
+        albumCovers.SmallCover = front500CoverUrl;
 
-            var front250CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-250";
-            var front250CoverResponse = await _httpClient.GetAsync(front250CoverUrl);
-            if (front250CoverResponse.IsSuccessStatusCode)
-            {
-                albumCovers.VerySmallCover = front250CoverResponse.RequestMessage.RequestUri?.AbsoluteUri;
-            }
-        }
-        catch (HttpRequestException ex)
-        {
-            Console.WriteLine($"Error fetching album covers for release group {releaseGroupId}: {ex.Message}");
-            return new AlbumCoversDto();
-        }
+        var front250CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-250";
+        albumCovers.VerySmallCover = front250CoverUrl;
+        
         return albumCovers;
     }
 }

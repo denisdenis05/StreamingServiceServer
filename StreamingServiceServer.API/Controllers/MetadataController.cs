@@ -26,7 +26,7 @@ public class MetadataController : ControllerBase
     }
     
     
-    [HttpGet("search-recording")]
+    [HttpGet("search-recording")] 
     public async Task<IActionResult> SearchRecording([FromQuery] string query)
     {
         var response = await _metadataService.SearchRecordingsAsync(query);

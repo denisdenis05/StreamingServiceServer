@@ -83,7 +83,7 @@ public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id
         if (!isQueued)
             await QueueToDownloadById(id);
 
-        return Array.Empty<RecordingResponse>();
+        return await SearchAlbumRecordingsByIdAsync(id);
     }
 
     var albumCovers = new AlbumCoversDto
@@ -189,6 +189,13 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         // TODO check if artists are not duplicate with the already saved ones
 
         return artists.Select(artist => artist.ToEntity()).ToList();
+    }
+
+    public async Task<RecordingResponse> SearchRecordingByIdAsync(Guid id)
+    {
+        var recording = await _externalMusicSearchService.SearchRecordingByIdAsync(id);
+        
+        return recording.ToResponse();
     }
 
     public async Task<List<RecordingResponse>> SearchRecordingsAsync(string query)

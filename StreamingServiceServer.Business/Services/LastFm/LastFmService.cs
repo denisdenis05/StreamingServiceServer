@@ -215,7 +215,6 @@ public class LastFmService : ILastFmService
             var db = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
 
             var listen = await db.Listens
-                .Include(l => l.Recording)
                 .FirstOrDefaultAsync(l => l.ListenId == listenId);
             
             var sessionInfo = await GetValidatedSession(listen.UserId);
@@ -224,7 +223,7 @@ public class LastFmService : ILastFmService
             {
                 var recording = await db.Recordings
                     .Include(rec => rec.Release)
-                    .Include(rec => rec.Release.Artist)
+                    .ThenInclude(re => re.Artist)
                     .FirstOrDefaultAsync(r => r.Id == listen.RecordingId);
 
                 if (recording != null)
@@ -238,6 +237,23 @@ public class LastFmService : ILastFmService
                         listen.TrackDurationSeconds 
                     );
 
+                    if (success)
+                    {
+                        listen.NowPlayingReported = true;
+                        await db.SaveChangesAsync();
+                    }
+                }
+                else
+                {
+                    // Fallback: mbid-only now playing (no artist/title)
+                    var success = await UpdateNowPlaying(
+                        sessionInfo.SessionKey,
+                        listen.RecordingId,
+                        null,
+                        null,
+                        null,
+                        listen.TrackDurationSeconds
+                    );
                     if (success)
                     {
                         listen.NowPlayingReported = true;
@@ -288,7 +304,6 @@ public class LastFmService : ILastFmService
             var db = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
 
             var listen = await db.Listens
-                .Include(l => l.Recording)
                 .FirstOrDefaultAsync(l => l.ListenId == listenId);
 
             if (listen.Scrobbled) return;
@@ -302,7 +317,7 @@ public class LastFmService : ILastFmService
                     .Include(r=> r.Release.Artist)
                     .FirstOrDefaultAsync(r => r.Id == listen.RecordingId);
 
-                if (recording != null)
+            if (recording != null)
                 {
                     var timestamp = ((DateTimeOffset)listen.StartTime).ToUnixTimeSeconds();
 
@@ -320,6 +335,25 @@ public class LastFmService : ILastFmService
                         listen.ScrobbledAt = DateTime.UtcNow;
                         await db.SaveChangesAsync();
                     }
+                }
+            }
+            else
+            {
+                // mbid-only scrobble fallback
+                var timestamp = ((DateTimeOffset)listen.StartTime).ToUnixTimeSeconds();
+                var success = await ScrobbleTrack(
+                    sessionInfo.SessionKey,
+                    null,
+                    null,
+                    null,
+                    timestamp,
+                    listen.RecordingId
+                );
+                if (success)
+                {
+                    listen.Scrobbled = true;
+                    listen.ScrobbledAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync();
                 }
             }
         }
@@ -391,7 +425,6 @@ public class LastFmService : ILastFmService
         try
         {
             var pendingScrobbles = await _dbContext.Listens
-                .Include(l => l.Recording)
                 .Where(l => !l.Scrobbled &&
                             l.ShouldScrobble &&
                             (!l.IsActive || l.EndTime.HasValue))
@@ -417,7 +450,6 @@ public class LastFmService : ILastFmService
         try
         {
             var listen = await _dbContext.Listens
-                .Include(l => l.Recording)
                 .FirstOrDefaultAsync(l => l.SessionId == sessionId && l.IsActive);
 
             if (listen == null) return;
@@ -463,7 +495,6 @@ public class LastFmService : ILastFmService
         {
             var listen = await _dbContext.Listens
                 .Include(l => l.User)
-                .Include(l => l.Recording)
                 .FirstOrDefaultAsync(l => l.SessionId == sessionId && l.IsActive);
 
             if (listen == null) return;
@@ -502,9 +533,13 @@ public class LastFmService : ILastFmService
 
     private int ValidateProgressDelta(Listen listen, int totalListenedSeconds, DateTime now)
     {
+       var recordingLength = _dbContext.Recordings
+                .FirstOrDefault(r => r.Id == listen.RecordingId)
+                ?.Length ?? 0;
+
         var trackDuration = listen.TrackDurationSeconds > 0
             ? listen.TrackDurationSeconds
-            : (listen.Recording?.Length ?? 0);
+            : recordingLength;
 
         var sessionDuration = now - listen.StartTime;
 
@@ -645,17 +680,19 @@ public class LastFmService : ILastFmService
         }
     }
     
-    private async Task<bool> ScrobbleTrack(string sessionKey, string artist, string track, string album, long timestamp)
+    private async Task<bool> ScrobbleTrack(string sessionKey, string? artist, string? track, string? album, long timestamp, Guid? recordingId = null)
     {
         var parameters = new Dictionary<string, string>
         {
             ["method"] = "track.scrobble",
             ["api_key"] = _apiKey,
             ["sk"] = sessionKey,
-            ["artist"] = artist,
-            ["track"] = track,
             ["timestamp"] = timestamp.ToString()
         };
+
+        if (!string.IsNullOrEmpty(artist)) parameters["artist"] = artist;
+        if (!string.IsNullOrEmpty(track)) parameters["track"] = track;
+        if (recordingId.HasValue) parameters["mbid"] = recordingId.Value.ToString();
 
         if (!string.IsNullOrEmpty(album))
         {
@@ -672,17 +709,18 @@ public class LastFmService : ILastFmService
         return response.IsSuccessStatusCode;
     }
 
-    private async Task<bool> UpdateNowPlaying(string sessionKey, Guid recordingId, string artist, string track, string album, int duration)
+    private async Task<bool> UpdateNowPlaying(string sessionKey, Guid recordingId, string? artist, string? track, string? album, int duration)
     {
         var parameters = new Dictionary<string, string>
         {
             ["method"] = "track.updateNowPlaying",
             ["api_key"] = _apiKey,
             ["sk"] = sessionKey,
-            ["artist"] = artist,
-            ["track"] = track,
             ["mbid"] = recordingId.ToString(),
         };
+
+        if (!string.IsNullOrEmpty(artist)) parameters["artist"] = artist;
+        if (!string.IsNullOrEmpty(track)) parameters["track"] = track;
 
         if (!string.IsNullOrEmpty(album))
         {

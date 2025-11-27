@@ -15,17 +15,35 @@ public class StreamController : ControllerBase
 {
     private readonly IStreamingService _streamingService;
     private readonly ILastFmService _lastFmService;
+    private readonly StreamingServiceServer.PreviewDownloader.IPreviewDownloaderService _previewDownloaderService;
+    private readonly IMetadataService _metadataService;
     
-    public StreamController(IStreamingService streamingService, ILastFmService lastFmService)
+    public StreamController(IStreamingService streamingService, ILastFmService lastFmService, StreamingServiceServer.PreviewDownloader.IPreviewDownloaderService previewDownloaderService, IMetadataService metadataService)
     {
         _streamingService = streamingService;
         _lastFmService = lastFmService;
+        _previewDownloaderService = previewDownloaderService;
+        _metadataService = metadataService;
     }
     
     [HttpGet]
     public async Task<IActionResult> StreamAudio([FromQuery] Guid id)
     {
-        var trackPath = await _streamingService.GetStreamingPath(id);
+        string trackPath;
+        try 
+        {
+            trackPath = await _streamingService.GetStreamingPath(id);
+        }
+        catch (Exception)
+        {
+            var recording = await _metadataService.SearchRecordingByIdAsync(id);
+            if (recording == null)
+            {
+                return NotFound("Recording not found");
+            }
+
+            trackPath = await _previewDownloaderService.DownloadPreview(recording);
+        } 
         
         var encodedSegments = trackPath
             .Split('/')

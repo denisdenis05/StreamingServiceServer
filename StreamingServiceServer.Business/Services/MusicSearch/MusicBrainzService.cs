@@ -39,6 +39,13 @@ public class MusicBrainzService : IExternalMusicSearchService
         
         return response.Recordings.ToList();
     }
+    public async Task<RecordingDto> SearchRecordingByIdAsync(Guid id)
+    {
+        var url = $"{_baseUrl}recording/{id}?inc=artist-credits&fmt=json";
+        var response = await _httpClient.GetFromJsonAsync<RecordingDto>(url);
+        
+        return response;
+    }
 
     public async Task<List<ReleaseDto>> SearchAlbumsAsync(string albumQuery, string? artistQuery = null)
     {

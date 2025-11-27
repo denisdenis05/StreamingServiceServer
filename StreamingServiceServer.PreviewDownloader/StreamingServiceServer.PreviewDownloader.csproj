@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\StreamingServiceServer.Data\StreamingServiceServer.Data.csproj" />
+    <ProjectReference Include="..\StreamingServiceServer.Business\StreamingServiceServer.Business.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Tools\preview-downloader">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

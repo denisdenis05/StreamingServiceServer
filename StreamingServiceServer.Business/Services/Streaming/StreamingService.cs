@@ -49,7 +49,11 @@ public class StreamingService : IStreamingService
         var record = await _metadataService.GetRecordingById(songId);
 
         if (record == null)
+        {
+            var tempPath = CheckTempFolder(songId);
+            if (tempPath != null) return tempPath;
             throw new Exception("Record not found");
+        }
 
         var relativeFolderPath = MusicLocationHelper.GetRelativeFolderPathForRecording(record);
         
@@ -74,5 +78,19 @@ public class StreamingService : IStreamingService
         var extension = Path.GetExtension(matchingFile);
 
         return Path.Combine(relativeFolderPath, record.Id + extension);
+    }
+
+    private string? CheckTempFolder(Guid songId)
+    {
+        var tempPath = Path.Combine(_configuration["Music:Path"], "TEMP");
+        var matchingFile = Directory.GetFiles(tempPath, songId.ToString() + ".*")
+            .FirstOrDefault();    
+        
+        if (matchingFile != null)
+        {
+            return Path.Combine($"TEMP/{songId}.mp3");
+        }
+
+        return null;
     }
 }

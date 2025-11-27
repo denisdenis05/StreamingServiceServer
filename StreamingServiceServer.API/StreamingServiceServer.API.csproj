@@ -8,10 +8,11 @@
     <ItemGroup>
         <ProjectReference Include="..\StreamingServiceServer.Business\StreamingServiceServer.Business.csproj" />
         <ProjectReference Include="..\StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj" />
+        <ProjectReference Include="..\StreamingServiceServer.PreviewDownloader\StreamingServiceServer.PreviewDownloader.csproj" />
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7"/>
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.7">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

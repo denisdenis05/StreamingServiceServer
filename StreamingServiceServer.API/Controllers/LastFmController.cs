@@ -170,8 +170,6 @@ public class LastFmController : ControllerBase
         try
         {
             var sessionId = await _lastFmService.StartPlaybackSession(userId, request);
-
-            await _lastFmService.StartPlaybackSession(userId, request);
             
             return Ok(new { 
                 success = true, 

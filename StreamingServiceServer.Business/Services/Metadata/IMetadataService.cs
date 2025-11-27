@@ -7,6 +7,7 @@ public interface IMetadataService
 {
     Task<List<Artist>> SearchArtistsAsync(string query);
     Task<List<RecordingResponse>> SearchRecordingsAsync(string query);
+    Task<RecordingResponse> SearchRecordingByIdAsync(Guid id);
     Task<List<ReleaseResponse>> SearchAlbumsAsync(string query);
     Task<List<RecordingResponse>> SearchAlbumRecordingsAsync(string query);
     Task<List<RecordingResponse>> SearchAlbumRecordingsByIdAsync(Guid albumId);

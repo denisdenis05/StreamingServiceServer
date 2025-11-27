@@ -7,6 +7,7 @@ public interface IExternalMusicSearchService
 {
     Task<List<ArtistDto>> SearchArtistsAsync(string query);
     Task<List<RecordingDto>> SearchRecordingsAsync(string query);
+    Task<RecordingDto> SearchRecordingByIdAsync(Guid id);
     Task<List<RecordingDto>> SearchAlbumRecordingsAsync(string query);
     Task<List<ReleaseDto>> SearchAlbumsAsync(string albumQuery, string? artistQuery = null);
     Task<List<RecordingDto>> SearchAlbumRecordingsByIdAsync(Guid albumId);

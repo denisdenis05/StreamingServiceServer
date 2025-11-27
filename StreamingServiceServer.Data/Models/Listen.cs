@@ -8,6 +8,9 @@ public class Listen
     public Guid ListenId { get; set; }
     
     public Guid UserId { get; set; }
+    public string Artist { get; set; }
+    public string TrackName { get; set; }
+    public string Album { get; set; }
     public User User { get; set; }
     
     public Guid RecordingId { get; set; }

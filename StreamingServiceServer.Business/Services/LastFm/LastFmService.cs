@@ -140,6 +140,9 @@ public class LastFmService : ILastFmService
             {
                 ListenId = Guid.NewGuid(),
                 UserId = userId,
+                Artist = request.Artist,
+                TrackName = request.Track,
+                Album = request.Album,
                 RecordingId = request.TrackId,
                 SessionId = sessionId,
                 StartTime = startTime,
@@ -221,45 +224,20 @@ public class LastFmService : ILastFmService
 
             if (sessionInfo?.IsValid == true)
             {
-                var recording = await db.Recordings
-                    .Include(rec => rec.Release)
-                    .ThenInclude(re => re.Artist)
-                    .FirstOrDefaultAsync(r => r.Id == listen.RecordingId);
-
-                if (recording != null)
+                var success = await UpdateNowPlaying(
+                    sessionInfo.SessionKey,
+                    listen.RecordingId,
+                    listen.Artist,
+                    listen.TrackName,
+                    listen.Album,
+                    listen.TrackDurationSeconds
+                );
+                if (success)
                 {
-                    var success = await UpdateNowPlaying(
-                        sessionInfo.SessionKey,
-                        recording.Id,
-                        recording.Release.Artist.Name,
-                        recording.Title,
-                        recording.Release.Title,
-                        listen.TrackDurationSeconds 
-                    );
+                    listen.NowPlayingReported = true;
+                    await db.SaveChangesAsync();
+                }
 
-                    if (success)
-                    {
-                        listen.NowPlayingReported = true;
-                        await db.SaveChangesAsync();
-                    }
-                }
-                else
-                {
-                    // Fallback: mbid-only now playing (no artist/title)
-                    var success = await UpdateNowPlaying(
-                        sessionInfo.SessionKey,
-                        listen.RecordingId,
-                        null,
-                        null,
-                        null,
-                        listen.TrackDurationSeconds
-                    );
-                    if (success)
-                    {
-                        listen.NowPlayingReported = true;
-                        await db.SaveChangesAsync();
-                    }
-                }
             }
         }
         catch (Exception ex)
@@ -312,40 +290,13 @@ public class LastFmService : ILastFmService
 
             if (sessionInfo?.IsValid == true)
             {
-                var recording = await db.Recordings
-                    .Include(r=> r.Release)
-                    .Include(r=> r.Release.Artist)
-                    .FirstOrDefaultAsync(r => r.Id == listen.RecordingId);
-
-            if (recording != null)
-                {
-                    var timestamp = ((DateTimeOffset)listen.StartTime).ToUnixTimeSeconds();
-
-                    var success = await ScrobbleTrack(
-                        sessionInfo.SessionKey,
-                        recording.Release.Artist.Name,
-                        recording.Title,
-                        recording.Release.Title,
-                        timestamp
-                    );
-
-                    if (success)
-                    {
-                        listen.Scrobbled = true;
-                        listen.ScrobbledAt = DateTime.UtcNow;
-                        await db.SaveChangesAsync();
-                    }
-                }
-            }
-            else
-            {
-                // mbid-only scrobble fallback
+                
                 var timestamp = ((DateTimeOffset)listen.StartTime).ToUnixTimeSeconds();
                 var success = await ScrobbleTrack(
                     sessionInfo.SessionKey,
-                    null,
-                    null,
-                    null,
+                    listen.Artist,
+                    listen.TrackName,
+                    listen.Album,
                     timestamp,
                     listen.RecordingId
                 );

@@ -28,7 +28,7 @@ public class AuthenticationController : ControllerBase
             var cookieOptions = new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                Secure = Request.IsHttps,
                 SameSite = SameSiteMode.Lax,
             };
             if (request.KeepMeLoggedIn)
@@ -72,7 +72,7 @@ public class AuthenticationController : ControllerBase
         var cookieOptions = new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,
+            Secure = Request.IsHttps,
             SameSite = SameSiteMode.Lax,
             Expires = DateTime.UtcNow.AddDays(30)
         };

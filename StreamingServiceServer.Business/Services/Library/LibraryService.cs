@@ -19,7 +19,7 @@ public class LibraryService : ILibraryService
         _dbContext = dbContext;
     }
 
-    public async Task<Playlist> CreatePlaylistAsync(Guid ownerId, RecordingIdList request, CancellationToken cancellationToken)
+    public async Task<Playlist> CreatePlaylistAsync(Guid ownerId, CreatePlaylistRequest request, CancellationToken cancellationToken)
     {
         var ownerExists = await _dbContext.Users
             .AnyAsync(u => u.Id == ownerId, cancellationToken);
@@ -34,33 +34,45 @@ public class LibraryService : ILibraryService
             playlistId = Guid.NewGuid();
         }
 
+        var recordings = await _dbContext.Recordings
+            .Where(r => request.RecordingIds.Contains(r.Id))
+            .Select(r => new { r.Id, r.Title })
+            .ToListAsync(cancellationToken);
+
+        string playlistName;
+        if (!string.IsNullOrWhiteSpace(request.Name))
+        {
+            playlistName = request.Name;
+        }
+        else if (recordings.Any())
+        {
+            playlistName = recordings.First().Title ?? DefaultPlaylistName;
+        }
+        else
+        {
+            playlistName = DefaultPlaylistName;
+        }
+
         var playlist = new Playlist
         {
             Id = playlistId,
-            Name = DefaultPlaylistName,
+            Name = playlistName,
             OwnerId = ownerId,
+            Cover = string.Empty
         };
 
-        if (request.RecordingIds.Any())
+        int order = 0;
+        foreach (var recording in recordings)
         {
-            var recordings = await _dbContext.Recordings
-                .Where(r => request.RecordingIds.Contains(r.Id))
-                .Select(r => r.Id)
-                .ToListAsync(cancellationToken);
-
-            int order = 0;
-            foreach (var recordingId in recordings)
+            playlist.PlaylistRecordings.Add(new PlaylistRecording
             {
-                playlist.PlaylistRecordings.Add(new PlaylistRecording
-                {
-                    PlaylistId = playlist.Id,
-                    RecordingId = recordingId,
-                    Order = order++,
-                    AddedById = ownerId
-                });
-            }
+                PlaylistId = playlist.Id,
+                RecordingId = recording.Id,
+                Order = order++,
+                AddedById = ownerId
+            });
         }
-
+        
         _dbContext.Playlists.Add(playlist);
         await _dbContext.SaveChangesAsync(cancellationToken);
 

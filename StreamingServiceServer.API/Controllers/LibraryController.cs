@@ -19,7 +19,7 @@ public class LibraryController : ControllerBase
     }
 
     [HttpPost("playlists")]
-    public async Task<IActionResult> CreatePlaylist([FromBody] RecordingIdList request, CancellationToken cancellationToken)
+    public async Task<IActionResult> CreatePlaylist([FromBody] CreatePlaylistRequest request, CancellationToken cancellationToken)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
  

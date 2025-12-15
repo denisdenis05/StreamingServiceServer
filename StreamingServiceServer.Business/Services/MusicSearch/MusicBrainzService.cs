@@ -34,10 +34,44 @@ public class MusicBrainzService : IExternalMusicSearchService
     
     public async Task<List<RecordingDto>> SearchRecordingsAsync(string query)
     {
-        var url = $"{_baseUrl}recording?query={Uri.EscapeDataString(query)}&fmt=json";
+        var luceneQuery = $"\"{query}\" OR (recording:\"{query}\"^1.5 AND artist:\"{query}\")";
+        var url = $"{_baseUrl}recording?query={Uri.EscapeDataString(luceneQuery)}&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(url);
         
         return response.Recordings.ToList();
+    }
+
+    public async Task<List<ReleaseDto>> SearchReleaseGroupsAsync(string query)
+    {
+        var luceneQuery = $"\"{query}\" OR (release:\"{query}\"^1.5 AND artist:\"{query}\")";
+        var url = $"{_baseUrl}release-group?query={Uri.EscapeDataString(luceneQuery)}&fmt=json";
+        var searchResponse = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(url);
+
+        var releaseGroups = searchResponse.ReleaseGroups.Take(5).ToList();
+        
+        var releases = new List<ReleaseDto>();
+        foreach (var group in releaseGroups)
+        {
+            // Map ReleaseGroup to ReleaseDto (Album)
+            // We need to pick a representative release from the group, or just use the group info
+            // The existing SearchForAlbumByQuery logic fetches releases from the group.
+            // Let's reuse that logic or similar.
+            
+            var releaseToAdd = group.Releases?.FirstOrDefault();
+            if (releaseToAdd == null) continue;
+
+            var artist = group.ArtistCredits?.FirstOrDefault()?.Artist;
+            if (artist != null)
+                releaseToAdd.Artist = artist;
+            
+            // Ensure ID matches the group if we want to track it by group, but DTO might expect Release ID.
+            // The user said "Map them to the Albums DTO".
+            // Let's keep the Release ID but maybe ensure we have cover art logic later.
+            
+            releases.Add(releaseToAdd);
+        }
+        
+        return releases;
     }
     public async Task<RecordingDto> SearchRecordingByIdAsync(Guid id)
     {

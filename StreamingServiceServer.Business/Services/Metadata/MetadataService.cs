@@ -3,6 +3,7 @@ using Npgsql;
 using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
+using StreamingServiceServer.Data.Models.Library;
 
 namespace StreamingServiceServer.Business.Services.MusicSearch;
 using Microsoft.EntityFrameworkCore;
@@ -642,7 +643,6 @@ private void RemoveDuplicatesFromChangeTracker()
                 release.SmallCover = albumCovers.SmallCover;
                 release.VerySmallCover = albumCovers.VerySmallCover;
 
-                // Apply covers to each Recording within this Release
                 foreach (var recording in release.Recordings)
                 {
                     recording.Cover = albumCovers.Cover;
@@ -652,5 +652,60 @@ private void RemoveDuplicatesFromChangeTracker()
             }
         }
         await _dbContext.SaveChangesAsync();
+    }
+    
+    public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit)
+    {
+        var response = new UniversalSearchResponse();
+
+        var playlistsTask = _dbContext.Playlists
+            .Where(p => p.Name.ToLower().Contains(query.ToLower()))
+            .Take(limit)
+            .ToListAsync();
+
+        var artistsTask = _externalMusicSearchService.SearchArtistsAsync(query);
+        var recordingsTask = _externalMusicSearchService.SearchRecordingsAsync(query);
+
+        await Task.WhenAll(playlistsTask, artistsTask, recordingsTask);
+
+        var playlists = playlistsTask.Result;
+        var artists = artistsTask.Result ?? new List<ArtistDto>();
+        var recordings = recordingsTask.Result ?? new List<RecordingDto>();
+
+        response.Playlists = playlists;
+        response.Artists = artists.Take(limit).ToList();
+        response.Tracks = recordings.Take(limit).ToList();
+
+        response.Albums = recordings
+            .SelectMany(r => r.Releases)
+            .GroupBy(r => r.Id)
+            .Select(g => g.First())
+            .Take(limit)
+            .ToList();
+
+        ArtistDto? bestArtist = artists.FirstOrDefault();
+        RecordingDto? bestRecording = recordings.FirstOrDefault();
+        Playlist? bestPlaylist = playlists.FirstOrDefault(p => p.Name.Equals(query, StringComparison.OrdinalIgnoreCase));
+
+        if (bestPlaylist != null)
+        {
+            response.BestMatch = new BestMatch { Type = "playlist", Data = bestPlaylist };
+        }
+        else
+        {
+            int artistScore = bestArtist?.Score ?? 0;
+            int recordingScore = bestRecording?.Score ?? 0;
+
+            if (artistScore >= recordingScore && bestArtist != null)
+            {
+                response.BestMatch = new BestMatch { Type = "artist", Data = bestArtist };
+            }
+            else if (bestRecording != null)
+            {
+                response.BestMatch = new BestMatch { Type = "track", Data = bestRecording };
+            }
+        }
+
+        return response;
     }
 }

@@ -25,6 +25,14 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
     
+    [HttpGet("search")]
+    public async Task<IActionResult> GeneralSearch([FromQuery] string query, [FromQuery] int limit = 10)
+    {
+        var response = await _metadataService.GeneralSearch(query, limit);
+        
+        return Ok(response);
+    }
+    
     
     [HttpGet("search-recording")] 
     public async Task<IActionResult> SearchRecording([FromQuery] string query)

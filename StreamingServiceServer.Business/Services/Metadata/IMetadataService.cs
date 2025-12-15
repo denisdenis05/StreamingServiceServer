@@ -12,6 +12,8 @@ public interface IMetadataService
     Task<List<RecordingResponse>> SearchAlbumRecordingsAsync(string query);
     Task<List<RecordingResponse>> SearchAlbumRecordingsByIdAsync(Guid albumId);
     
+    Task<UniversalSearchResponse> GeneralSearch(string query, int limit);
+    
     Task SearchAndSaveRecordingAsync(string query);
     Task SearchAndSaveArtistAsync(string query);
     Task SearchAndSaveAlbumRecordingsAsync(string query);

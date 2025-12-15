@@ -182,81 +182,14 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
             });
         await _dbContext.SaveChangesAsync();
     }
-
-    public async Task<List<Artist>> SearchArtistsAsync(string query)
-    {
-        // TODO get artists from local database and also add relevant external artists 
-        var artists = await _externalMusicSearchService.SearchArtistsAsync(query);
-        // TODO check if artists are not duplicate with the already saved ones
-
-        return artists.Select(artist => artist.ToEntity()).ToList();
-    }
-
+    
     public async Task<RecordingResponse> SearchRecordingByIdAsync(Guid id)
     {
         var recording = await _externalMusicSearchService.SearchRecordingByIdAsync(id);
         
         return recording.ToResponse();
     }
-
-    public async Task<List<RecordingResponse>> SearchRecordingsAsync(string query)
-    {
-        // TODO get Recordings from local database and also add relevant external Recordings 
-        var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
-        // TODO check if recordings are not duplicate with the already saved ones
-
-        var releaseIds = recordings
-            .Select(r => r.Releases.First().Id)
-            .Distinct()
-            .ToList();
-
-        var coverTasks = releaseIds.ToDictionary(
-            id => id,
-            id => _externalMusicSearchService.GetAlbumCover(id)
-        );
-
-        await Task.WhenAll(coverTasks.Values);
-
-        foreach (var recording in recordings)
-        {
-            recording.Cover = coverTasks[recording.Releases.First().Id].Result;
-        }
-        
-        return recordings.Select(recording => recording.ToResponse()).ToList();
-    }
-
-    public async Task<List<ReleaseResponse>> SearchAlbumsAsync(string query)
-    {
-        // TODO get Albums from local database and also add relevant external Albums 
-        var releases = await _externalMusicSearchService.SearchAlbumsAsync(query);
-        // TODO check if recordings are not duplicate with the already saved ones
-
-        foreach (var release in releases)
-        {
-            release.Cover = await _externalMusicSearchService.GetAlbumCover(release.Id);
-        }
-        
-        return releases.Select(release => release.ToResponse()).ToList();
-    }
-
-    public async Task<List<RecordingResponse>> SearchAlbumRecordingsAsync(string query)
-    {
-        // TODO get Albums from local database and also add relevant external Albums 
-        var recordings = await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
-        // TODO check if recordings are not duplicate with the already saved ones
-
-        if (!recordings.Any())
-            return new List<RecordingResponse>();
-
-        var cover = await _externalMusicSearchService.GetAlbumCover(recordings.First().Releases.First().Id);
-        foreach (var recording in recordings)
-        {
-            recording.Cover = cover;
-        }
-        
-        return recordings.Select(recording => recording.ToResponse()).ToList();
-    }
-
+    
     public async Task<List<RecordingResponse>> SearchAlbumRecordingsByIdAsync(Guid albumId)
     {
         // TODO get Albums from local database and also add relevant external Albums 
@@ -274,7 +207,7 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         
         return recordings.Select(recording => recording.ToResponse()).ToList();
     }
-
+    
     public async Task SearchAndSaveRecordingAsync(string query)
     {
         var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);

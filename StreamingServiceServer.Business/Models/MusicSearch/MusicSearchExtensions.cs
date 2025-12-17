@@ -1,6 +1,4 @@
-using System.Reflection.Emit;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Data.Models;
 
 namespace StreamingServiceServer.Business.Models.MusicSearch;
@@ -51,7 +49,7 @@ public static class MusicBrainzMapper
         return artist;
     }
 
-    public static Recording ToEntity(this RecordingDto dto)
+    public static Recording ToEntity(this RecordingDto dto, IImageService imageService)
     {
         var recording = new Recording
         {
@@ -76,14 +74,27 @@ public static class MusicBrainzMapper
 
         if (dto.Releases != null && dto.Releases.Any())
         {
-            recording.Release = dto.Releases.First().ToEntity();
+            recording.Release = dto.Releases.First().ToEntity(imageService);
+        }
+
+        if (string.IsNullOrEmpty(recording.Cover))
+        {
+            var releaseId = dto.Releases.FirstOrDefault()?.Id;
+            if (releaseId != null)
+            {
+                var covers = imageService.GetAlbumCover(releaseId.Value);
+                recording.Cover = covers.Cover;
+                recording.SmallCover = covers.SmallCover;
+                recording.VerySmallCover = covers.VerySmallCover;
+            }
         }
 
         return recording;
     }
 
-    public static Release ToEntity(this ReleaseDto dto) =>
-        new Release
+    public static Release ToEntity(this ReleaseDto dto, IImageService imageService)
+    {
+        var release = new Release
         {
             Id = dto.Id,
             Title = dto.Title,
@@ -93,13 +104,24 @@ public static class MusicBrainzMapper
             VerySmallCover = dto.Cover.VerySmallCover,
         };
 
-    public static Release ToEntity(this ReleaseDto dto, ICollection<TrackDto> tracks)
+        if (string.IsNullOrEmpty(release.Cover))
+        {
+            var covers = imageService.GetAlbumCover(dto.Id);
+            release.Cover = covers.Cover;
+            release.SmallCover = covers.SmallCover;
+            release.VerySmallCover = covers.VerySmallCover;
+        }
+
+        return release;
+    }
+
+    public static Release ToEntity(this ReleaseDto dto, ICollection<TrackDto> tracks, IImageService imageService)
     {
         return new Release
         {
             Id = dto.Id,
             Title = dto.Title,
-            Recordings = tracks.Select(track=>track.Recording.ToEntity()).ToList(),
+            Recordings = tracks.Select(track=>track.Recording.ToEntity(imageService)).ToList(),
             Artist = dto.Artist.ToEntity(),
             Cover =  dto.Cover.Cover,
             SmallCover = dto.Cover.SmallCover,
@@ -107,8 +129,9 @@ public static class MusicBrainzMapper
         };
     }
 
-    public static RecordingResponse ToResponse(this Recording recording) =>
-        new RecordingResponse
+    public static RecordingResponse ToResponse(this Recording recording, IImageService imageService)
+    {
+        var response = new RecordingResponse
         {
             Id = recording.Id,
             Title = recording.Title,
@@ -117,9 +140,19 @@ public static class MusicBrainzMapper
             Cover =  recording.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
         };
+
+        if (string.IsNullOrEmpty(response.Cover))
+        {
+            var covers = imageService.GetAlbumCover(recording.Release.Id);
+            response.Cover = covers.VerySmallCover;
+        }
+
+        return response;
+    }
     
-    public static RecordingResponse ToResponse(this RecordingDto recording) =>
-        new RecordingResponse
+    public static RecordingResponse ToResponse(this RecordingDto recording, IImageService imageService)
+    {
+        var response = new RecordingResponse
         {
             Id = recording.Id,
             Title = recording.Title,
@@ -129,21 +162,70 @@ public static class MusicBrainzMapper
             PositionInAlbum = recording.PositionInAlbum,
         };
 
-    public static ReleaseResponse ToResponse(this ReleaseDto release) =>
-        new ReleaseResponse
+        if (string.IsNullOrEmpty(response.Cover))
+        {
+            var releaseId = recording.Releases?.FirstOrDefault()?.Id;
+            if (releaseId != null)
+            {
+                var covers = imageService.GetAlbumCover(releaseId.Value);
+                response.Cover = covers.VerySmallCover;
+            }
+        }
+
+        return response;
+    }
+
+    public static ReleaseResponse ToResponse(this ReleaseDto release, IImageService imageService)
+    {
+        var response = new ReleaseResponse
         {
             Id = release.Id,
             Title = release.Title,
-            ArtistName = release.Artist?.Name ?? string.Empty,
+            ArtistName = release.Artist?.Name
+                         ?? release.ArtistCredit?.FirstOrDefault()?.Artist?.Name
+                         ?? string.Empty,
             Cover = release.Cover.VerySmallCover
         };
 
-    public static ReleaseResponse ToResponse(this Release release) =>
-        new ReleaseResponse
+        if (string.IsNullOrEmpty(response.Cover))
+        {
+            var covers = imageService.GetAlbumCover(release.Id);
+            response.Cover = covers.VerySmallCover;
+        }
+
+        return response;
+    }
+
+    public static ReleaseResponse ToResponse(this Release release, IImageService imageService)
+    {
+        var response = new ReleaseResponse
         {
             Id = release.Id,
             Title = release.Title,
             ArtistName = release.Artist?.Name ?? string.Empty,
             Cover = release.Cover
+        };
+
+        if (string.IsNullOrEmpty(response.Cover))
+        {
+            var covers = imageService.GetAlbumCover(release.Id);
+            response.Cover = covers.VerySmallCover;
+        }
+
+        return response;
+    }
+
+    public static ArtistResponse ToResponse(this ArtistDto artist) =>
+        new ArtistResponse
+        {
+            Id = artist.Id,
+            Name = artist.Name,
+        };
+
+    public static ArtistResponse ToResponse(this Artist artist) =>
+        new ArtistResponse
+        {
+            Id = artist.Id,
+            Name = artist.Name,
         };
 }

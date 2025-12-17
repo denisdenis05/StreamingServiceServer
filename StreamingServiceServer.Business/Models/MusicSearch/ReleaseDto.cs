@@ -22,4 +22,6 @@ public class ReleaseDto
     
     public ArtistDto? Artist { get; set; }
     
+    [JsonPropertyName("score")]
+    public int Score { get; set; }
 }

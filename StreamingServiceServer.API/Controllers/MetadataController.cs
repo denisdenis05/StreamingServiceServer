@@ -17,43 +17,10 @@ public class MetadataController : ControllerBase
         _metadataService = metadataService;
     }
     
-    [HttpGet("search-artist")]
-    public async Task<IActionResult> SearchArtist([FromQuery] string query)
+    [HttpGet("search")]
+    public async Task<IActionResult> GeneralSearch([FromQuery] string query, [FromQuery] int limit = 10)
     {
-        var response = await _metadataService.SearchArtistsAsync(query);
-        
-        return Ok(response);
-    }
-    
-    
-    [HttpGet("search-recording")] 
-    public async Task<IActionResult> SearchRecording([FromQuery] string query)
-    {
-        var response = await _metadataService.SearchRecordingsAsync(query);
-        
-        return Ok(response);
-    }
-    
-    [HttpGet("search-album-recordings")]
-    public async Task<IActionResult> SearchAlbumRecordings([FromQuery] string query)
-    {
-        var response = await _metadataService.SearchAlbumRecordingsAsync(query);
-        
-        return Ok(response);
-    }
-    
-    [HttpGet("search-albums")]
-    public async Task<IActionResult> SearchAlbums([FromQuery] string query)
-    {
-        var response = await _metadataService.SearchAlbumsAsync(query);
-        
-        return Ok(response);
-    }
-    
-    [HttpGet("search-album-recordings-by-id")]
-    public async Task<IActionResult> SearchAlbumRecordings([FromQuery] Guid albumId)
-    {
-        var response = await _metadataService.SearchAlbumRecordingsByIdAsync(albumId);
+        var response = await _metadataService.GeneralSearch(query, limit);
         
         return Ok(response);
     }

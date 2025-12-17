@@ -35,7 +35,7 @@ public class MusicBrainzService : IExternalMusicSearchService
     public async Task<List<RecordingDto>> SearchRecordingsAsync(string query)
     {
         var luceneQuery = $"\"{query}\" OR (recording:\"{query}\"^1.5 AND artist:\"{query}\")";
-        var url = $"{_baseUrl}recording?query={Uri.EscapeDataString(luceneQuery)}&fmt=json";
+        var url = $"{_baseUrl}recording?query={Uri.EscapeDataString(luceneQuery)}&inc=releases+artist-credits&fmt=json";
         var response = await _httpClient.GetFromJsonAsync<MusicBrainzSearchResponse>(url);
         
         return response.Recordings.ToList();
@@ -52,21 +52,12 @@ public class MusicBrainzService : IExternalMusicSearchService
         var releases = new List<ReleaseDto>();
         foreach (var group in releaseGroups)
         {
-            // Map ReleaseGroup to ReleaseDto (Album)
-            // We need to pick a representative release from the group, or just use the group info
-            // The existing SearchForAlbumByQuery logic fetches releases from the group.
-            // Let's reuse that logic or similar.
-            
             var releaseToAdd = group.Releases?.FirstOrDefault();
             if (releaseToAdd == null) continue;
 
             var artist = group.ArtistCredits?.FirstOrDefault()?.Artist;
             if (artist != null)
                 releaseToAdd.Artist = artist;
-            
-            // Ensure ID matches the group if we want to track it by group, but DTO might expect Release ID.
-            // The user said "Map them to the Albums DTO".
-            // Let's keep the Release ID but maybe ensure we have cover art logic later.
             
             releases.Add(releaseToAdd);
         }
@@ -233,33 +224,4 @@ public class MusicBrainzService : IExternalMusicSearchService
     }
     
     
-    public async Task<AlbumCoversDto> GetAlbumCover(Guid releaseId, Guid? releaseGroupId = null)
-    {
-        var albumCovers = new AlbumCoversDto();
-        var targetUrlPrefix = releaseGroupId.HasValue
-            ? $"{_baseCoverUrl}release-group/{releaseGroupId.Value}"
-            : $"{_baseCoverUrl}release/{releaseId}";
-
-        albumCovers.Cover = $"{targetUrlPrefix}/front";
-        albumCovers.SmallCover = $"{targetUrlPrefix}/front-500";
-        albumCovers.VerySmallCover = $"{targetUrlPrefix}/front-250";
-
-        return albumCovers;
-    }
-    
-    public async Task<AlbumCoversDto> GetAllAlbumCovers(Guid releaseGroupId)
-    {
-        var albumCovers = new AlbumCoversDto();
-        
-        var frontCoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front";
-        albumCovers.Cover = frontCoverUrl;
-
-        var front500CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-500";
-        albumCovers.SmallCover = front500CoverUrl;
-
-        var front250CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-250";
-        albumCovers.VerySmallCover = front250CoverUrl;
-        
-        return albumCovers;
-    }
 }

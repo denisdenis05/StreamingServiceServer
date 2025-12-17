@@ -6,8 +6,8 @@ namespace StreamingServiceServer.Business.Models.MusicSearch;
 public class UniversalSearchResponse
 {
     public BestMatch? BestMatch { get; set; }
-    public List<ArtistDto> Artists { get; set; } = new();
-    public List<RecordingDto> Tracks { get; set; } = new();
-    public List<ReleaseDto> Albums { get; set; } = new();
+    public List<ArtistResponse> Artists { get; set; } = new();
+    public List<RecordingResponse> Tracks { get; set; } = new();
+    public List<ReleaseResponse> Albums { get; set; } = new();
     public List<Playlist> Playlists { get; set; } = new();
 }

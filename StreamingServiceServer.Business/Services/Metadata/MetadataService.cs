@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using Npgsql;
 using StreamingServiceServer.Business.Models.MusicSearch;
+using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
 using StreamingServiceServer.Data.Models.Library;
@@ -12,11 +13,13 @@ public class MetadataService : IMetadataService
 {
     private readonly StreamingDbContext _dbContext;
     private readonly IExternalMusicSearchService _externalMusicSearchService;
+    private readonly IImageService _imageService;
 
-    public MetadataService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService)
+    public MetadataService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService imageService)
     {
         _dbContext = dbContext;
         _externalMusicSearchService = externalMusicSearchService;
+        _imageService = imageService;
     }
 
 
@@ -28,46 +31,26 @@ public class MetadataService : IMetadataService
     }
 
     public async Task<List<RecordingResponse>> GetAllRecordings()
-{
-    var recordings = await _dbContext.Recordings
-        .Include(recording => recording.ArtistCredit)
-        .Include(recording => recording.Release)
-        .ToListAsync();
+    {
+        var recordings = await _dbContext.Recordings
+            .Include(recording => recording.ArtistCredit)
+            .Include(recording => recording.Release)
+            .ToListAsync();
 
-    var releaseIdsToFetch = recordings
-        .Where(r => string.IsNullOrEmpty(r.Release.Cover))
-        .Select(r => r.Release.Id)
-        .Distinct()
-        .ToList();
+        return recordings
+            .Select(recording => recording.ToResponse(_imageService))
+            .ToList();
+    }
+    public async Task<List<ReleaseResponse>> GetAllAlbums()
+    {
+        var releases = await _dbContext.Releases
+            .Include(release => release.Artist)
+            .ToListAsync();
 
-    var coverTasks = releaseIdsToFetch.ToDictionary(
-        id => id,
-        id => _externalMusicSearchService.GetAlbumCover(id)
-    );
-
-    await Task.WhenAll(coverTasks.Values);
-
-    return recordings
-        .Select(recording => recording.ToResponse())
-        .ToList();
-}
-
-public async Task<List<ReleaseResponse>> GetAllAlbums()
-{
-    var releases = await _dbContext.Releases
-        .Include(release => release.Artist)
-        .ToListAsync();
-
-    var releaseIdsToFetch = releases
-        .Where(r => string.IsNullOrEmpty(r.Cover))
-        .Select(r => r.Id)
-        .Distinct()
-        .ToList();
-
-    return releases
-        .Select(release => release.ToResponse())
-        .ToList();
-}
+        return releases
+            .Select(release => release.ToResponse(_imageService))
+            .ToList();
+    }
 
 public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id)
 {
@@ -87,27 +70,10 @@ public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id
         return await SearchAlbumRecordingsByIdAsync(id);
     }
 
-    var albumCovers = new AlbumCoversDto
-    {
-        Cover = recordings.First().Release.Cover,
-        SmallCover = recordings.First().Release.SmallCover,
-        VerySmallCover = recordings.First().Release.VerySmallCover
-    };
-    
-    foreach (var recording in recordings)
-    {
-        if (string.IsNullOrEmpty(recording.Release.Cover))
-        {
-            recording.Release.Cover = albumCovers.Cover;
-            recording.Release.SmallCover = albumCovers.SmallCover;
-            recording.Release.VerySmallCover = albumCovers.VerySmallCover;
-        }
+        return recordings
+            .Select(recording => recording.ToResponse(_imageService))
+            .ToList();
     }
-
-    return recordings
-        .Select(recording => recording.ToResponse())
-        .ToList();
-}
 
 public async Task<RecordingResponse> GetRecordingById(Guid id)
 {
@@ -120,7 +86,7 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
     if (recording == null)
         return null;
 
-    return recording.ToResponse();
+    return recording.ToResponse(_imageService);
 }
     
     public async Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums)
@@ -187,7 +153,7 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
     {
         var recording = await _externalMusicSearchService.SearchRecordingByIdAsync(id);
         
-        return recording.ToResponse();
+        return recording.ToResponse(_imageService);
     }
     
     public async Task<List<RecordingResponse>> SearchAlbumRecordingsByIdAsync(Guid albumId)
@@ -199,22 +165,15 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         if (!recordings.Any())
             return new List<RecordingResponse>();
 
-        var cover = await _externalMusicSearchService.GetAlbumCover(recordings.First().Releases.First().Id);
-        foreach (var recording in recordings)
-        {
-            recording.Cover = cover;
-        }
-        
-        return recordings.Select(recording => recording.ToResponse()).ToList();
+        return recordings.Select(recording => recording.ToResponse(_imageService)).ToList();
     }
     
     public async Task SearchAndSaveRecordingAsync(string query)
     {
         var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
         var recordingToSave = recordings.First();
-        recordingToSave.Cover = await _externalMusicSearchService.GetAlbumCover(recordingToSave.Releases.First().Id);
         
-        await _dbContext.Recordings.AddAsync(recordingToSave.ToEntity());
+        await _dbContext.Recordings.AddAsync(recordingToSave.ToEntity(_imageService));
         await _dbContext.SaveChangesAsync();
     }
 
@@ -230,12 +189,6 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
     {
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
         
-        var cover = await _externalMusicSearchService.GetAlbumCover(recordings.First().Releases.First().Id);
-        foreach (var recording in recordings)
-        {
-            recording.Cover = cover;
-        }
-        
         await SaveAlbumRecordings(recordings);
     }
 
@@ -245,21 +198,6 @@ public async Task<RecordingResponse> GetRecordingById(Guid id)
         if (recordings == null || !recordings.Any())
             return;
         
-        var releases = recordings.First().Releases;
-        var release = releases.First();
-        var cover = new AlbumCoversDto();
-        
-        if (release.ReleaseGroup != null)
-            cover = await _externalMusicSearchService.GetAllAlbumCovers(release.ReleaseGroup.Id);
-        else
-            cover = await _externalMusicSearchService.GetAlbumCover(release.Id);
-        
-        release.Cover = cover;
-        foreach (var recording in recordings)
-        {
-            recording.Cover = cover;
-        }
-
         await SaveAlbumRecordings(recordings);
     }
 
@@ -368,7 +306,7 @@ private async Task UpsertArtists(ICollection<RecordingDto> recordings)
 private async Task<Release> UpsertRelease(ICollection<RecordingDto> recordings)
 {
     var releaseDto = recordings.First().Releases.First();
-    var release = releaseDto.ToEntity();
+    var release = releaseDto.ToEntity(_imageService);
 
     var trackedRelease = _dbContext.Releases.Local.FirstOrDefault(r => r.Id == release.Id);
     if (trackedRelease != null)
@@ -414,7 +352,7 @@ private async Task<Release> UpsertRelease(ICollection<RecordingDto> recordings)
 private async Task UpsertRecordings(ICollection<RecordingDto> recordings, Release release)
 {
     var recordingEntities = recordings
-        .Select(r => r.ToEntity())
+        .Select(r => r.ToEntity(_imageService))
         .GroupBy(r => r.Id)
         .Select(g => g.First())
         .ToList();
@@ -557,11 +495,11 @@ private void RemoveDuplicatesFromChangeTracker()
             if (externalReleaseDto?.ReleaseGroup?.Id != null && externalReleaseDto.ReleaseGroup.Id != Guid.Empty)
             {
                 var releaseGroupId = externalReleaseDto.ReleaseGroup.Id;
-                albumCovers = await _externalMusicSearchService.GetAllAlbumCovers(releaseGroupId);
+                albumCovers = _imageService.GetAllAlbumCovers(releaseGroupId);
             }
             else
             {
-                var singleCoverUrl = await _externalMusicSearchService.GetAlbumCover(release.Id);
+                var singleCoverUrl = _imageService.GetAlbumCover(release.Id);
                 albumCovers = new AlbumCoversDto
                 {
                     Cover = singleCoverUrl.Cover,
@@ -606,14 +544,16 @@ private void RemoveDuplicatesFromChangeTracker()
         var recordings = recordingsTask.Result ?? new List<RecordingDto>();
 
         response.Playlists = playlists;
-        response.Artists = artists.Take(limit).ToList();
-        response.Tracks = recordings.Take(limit).ToList();
+        response.Playlists = playlists;
+        response.Artists = artists.Take(limit).Select(a => a.ToResponse()).ToList();
+        response.Tracks = recordings.Take(limit).Select(r => r.ToResponse(_imageService)).ToList();
 
         response.Albums = recordings
             .SelectMany(r => r.Releases)
             .GroupBy(r => r.Id)
             .Select(g => g.First())
             .Take(limit)
+            .Select(r => r.ToResponse(_imageService))
             .ToList();
 
         ArtistDto? bestArtist = artists.FirstOrDefault();
@@ -631,11 +571,11 @@ private void RemoveDuplicatesFromChangeTracker()
 
             if (artistScore >= recordingScore && bestArtist != null)
             {
-                response.BestMatch = new BestMatch { Type = "artist", Data = bestArtist };
+                response.BestMatch = new BestMatch { Type = "artist", Data = bestArtist.ToResponse() };
             }
             else if (bestRecording != null)
             {
-                response.BestMatch = new BestMatch { Type = "track", Data = bestRecording };
+                response.BestMatch = new BestMatch { Type = "track", Data = bestRecording.ToResponse(_imageService) };
             }
         }
 

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using SocialMedia.Data.Models;
 using StreamingServiceServer.Business.Services.Authentication;
+using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.LastFm;
 using StreamingServiceServer.Business.Services.MusicSearch;
 using StreamingServiceServer.PreviewDownloader;
@@ -17,6 +18,6 @@ public static class ServiceExtensions
         services.AddScoped<ILastFmService, LastFmService>();
         services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddScoped<IPreviewDownloaderService, PreviewDownloaderService>();
-
+        services.AddScoped<IImageService, ImageService>();
     }
 }

@@ -7,6 +7,7 @@ using StreamingServiceDownloader.Helpers;
 using StreamingServiceDownloader.Models;
 using StreamingServiceServer.Business.Helpers;
 using StreamingServiceServer.Business.Models.MusicSearch;
+using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.MusicSearch;
 using StreamingServiceServer.Data;
 
@@ -19,15 +20,17 @@ public class PendingDownloadChecker : BackgroundService
     private readonly IExternalMusicSearchService _externalMusicSearchService;
     private readonly IMetadataService _metadataService;
     private readonly IConfiguration _configuration;
+    private readonly IImageService _imageService;
     private string _musicLocation;
 
-    public PendingDownloadChecker(StreamingDbContext dbContext, ITorrentHelper torrentHelper, IExternalMusicSearchService externalMusicSearchService, IMetadataService metadataService, IConfiguration configuration)
+    public PendingDownloadChecker(StreamingDbContext dbContext, ITorrentHelper torrentHelper, IExternalMusicSearchService externalMusicSearchService, IMetadataService metadataService, IConfiguration configuration, IImageService imageService)
     {
         _dbContext = dbContext;
         _torrentHelper = torrentHelper;
         _externalMusicSearchService = externalMusicSearchService;
         _metadataService = metadataService;
         _configuration = configuration;
+        _imageService = imageService;
         
         _musicLocation = _configuration["Music:Path"];
     }
@@ -119,7 +122,7 @@ public class PendingDownloadChecker : BackgroundService
         List<(string fileName, string fullPath)> files)
     {
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
-        var simpleRecordings = recordings.Select(recording => recording.ToResponse()).ToList();
+        var simpleRecordings = recordings.Select(recording => recording.ToResponse(_imageService)).ToList();
     
         var matches = new List<MusicFileMatch>();
     

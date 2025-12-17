@@ -536,28 +536,27 @@ private void RemoveDuplicatesFromChangeTracker()
 
         var artistsTask = _externalMusicSearchService.SearchArtistsAsync(query);
         var recordingsTask = _externalMusicSearchService.SearchRecordingsAsync(query);
+        var albumsTask = _externalMusicSearchService.SearchAlbumsAsync(query);
 
-        await Task.WhenAll(playlistsTask, artistsTask, recordingsTask);
+        await Task.WhenAll(playlistsTask, artistsTask, recordingsTask, albumsTask);
 
         var playlists = playlistsTask.Result;
         var artists = artistsTask.Result ?? new List<ArtistDto>();
         var recordings = recordingsTask.Result ?? new List<RecordingDto>();
+        var albums = albumsTask.Result ?? new List<ReleaseDto>();
 
-        response.Playlists = playlists;
         response.Playlists = playlists;
         response.Artists = artists.Take(limit).Select(a => a.ToResponse()).ToList();
         response.Tracks = recordings.Take(limit).Select(r => r.ToResponse(_imageService)).ToList();
 
-        response.Albums = recordings
-            .SelectMany(r => r.Releases)
-            .GroupBy(r => r.Id)
-            .Select(g => g.First())
+        response.Albums = albums
             .Take(limit)
             .Select(r => r.ToResponse(_imageService))
             .ToList();
 
         ArtistDto? bestArtist = artists.FirstOrDefault();
         RecordingDto? bestRecording = recordings.FirstOrDefault();
+        ReleaseDto? bestAlbum = albums.FirstOrDefault();
         Playlist? bestPlaylist = playlists.FirstOrDefault(p => p.Name.Equals(query, StringComparison.OrdinalIgnoreCase));
 
         if (bestPlaylist != null)
@@ -568,14 +567,19 @@ private void RemoveDuplicatesFromChangeTracker()
         {
             int artistScore = bestArtist?.Score ?? 0;
             int recordingScore = bestRecording?.Score ?? 0;
+            int albumScore = bestAlbum?.Score ?? 0;
 
-            if (artistScore >= recordingScore && bestArtist != null)
+            if (artistScore >= recordingScore && artistScore >= albumScore && bestArtist != null)
             {
                 response.BestMatch = new BestMatch { Type = "artist", Data = bestArtist.ToResponse() };
             }
-            else if (bestRecording != null)
+            else if (recordingScore >= albumScore && bestRecording != null)
             {
                 response.BestMatch = new BestMatch { Type = "track", Data = bestRecording.ToResponse(_imageService) };
+            }
+            else if (bestAlbum != null)
+            {
+                response.BestMatch = new BestMatch { Type = "album", Data = bestAlbum.ToResponse(_imageService) };
             }
         }
 

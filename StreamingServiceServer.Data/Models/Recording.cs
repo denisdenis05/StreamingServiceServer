@@ -11,6 +11,7 @@ public class Recording
     public string? SmallCover { get; set; }
     public string? VerySmallCover { get; set; }
     public int PositionInAlbum { get; set; } = 0;
+    public DateTime DateAdded { get; set; } = DateTime.UtcNow;
     public Release Release { get; set; }
 
     public virtual ICollection<RecordingArtistCredit> ArtistCredit { get; set; } = new List<RecordingArtistCredit>();

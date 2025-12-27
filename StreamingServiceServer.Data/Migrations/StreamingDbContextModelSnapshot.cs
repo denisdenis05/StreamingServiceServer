@@ -397,6 +397,9 @@ namespace StreamingServiceServer.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime>("DateAdded")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int?>("Length")
                         .HasColumnType("integer");
 
@@ -461,6 +464,9 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<string>("Cover")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<DateTime>("DateAdded")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SmallCover")
                         .HasColumnType("text");

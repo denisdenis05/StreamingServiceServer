@@ -4,6 +4,7 @@ using StreamingServiceServer.Business.Services.Authentication;
 using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.LastFm;
 using StreamingServiceServer.Business.Services.MusicSearch;
+using StreamingServiceServer.Business.Services.Recommendation;
 using StreamingServiceServer.PreviewDownloader;
 
 public static class ServiceExtensions
@@ -19,5 +20,6 @@ public static class ServiceExtensions
         services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddScoped<IPreviewDownloaderService, PreviewDownloaderService>();
         services.AddScoped<IImageService, ImageService>();
+        services.AddScoped<IRecommendationService, RecommendationService>();
     }
 }

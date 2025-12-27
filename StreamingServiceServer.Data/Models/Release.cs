@@ -8,5 +8,6 @@ public class Release
     public string? SmallCover { get; set; }
     public string? VerySmallCover { get; set; }
     public Artist Artist { get; set; }
+    public DateTime DateAdded { get; set; } = DateTime.UtcNow;
     public ICollection<Recording> Recordings { get; set; } = new List<Recording>();
 }

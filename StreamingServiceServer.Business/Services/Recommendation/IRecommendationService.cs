@@ -5,8 +5,8 @@ namespace StreamingServiceServer.Business.Services.Recommendation;
 
 public interface IRecommendationService
 {
-    Task<List<RecommendationSection>> GetSections();
-    Task<List<ReleaseResponse>> GetSection(string sectionId);
+    Task<List<RecommendationSection>> GetSections(Guid userId);
+    Task<List<ReleaseResponse>> GetSection(string sectionId, Guid userId);
 }
 
 public class RecommendationSection

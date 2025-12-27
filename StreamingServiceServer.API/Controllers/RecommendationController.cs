@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StreamingServiceServer.Business.Services.Recommendation;
@@ -19,14 +20,28 @@ public class RecommendationController : ControllerBase
     [HttpGet("sections")]
     public async Task<IActionResult> GetSections()
     {
-        var sections = await _recommendationService.GetSections();
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var sections = await _recommendationService.GetSections(userId);
         return Ok(sections);
     }
 
     [HttpGet("section/{id}")]
     public async Task<IActionResult> GetSection(string id)
     {
-        var section = await _recommendationService.GetSection(id);
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var section = await _recommendationService.GetSection(id, userId);
         return Ok(section);
     }
 }

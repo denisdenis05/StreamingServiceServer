@@ -20,18 +20,31 @@ public class RecommendationService : IRecommendationService
     }
 
 
-    public async Task<List<RecommendationSection>> GetSections()
+    public async Task<List<RecommendationSection>> GetSections(Guid userId)
     {
-        return new List<RecommendationSection>
+        var sections = new List<RecommendationSection>
         {
             new RecommendationSection { Id = RecommendationConstants.Today, Title = "Recommended for today" },
-            new RecommendationSection { Id = RecommendationConstants.Latest, Title = "Latest added releases" },
-            new RecommendationSection { Id = RecommendationConstants.Picks, Title = "Best picks for you" },
-            new RecommendationSection { Id = RecommendationConstants.Friends, Title = "Friends also listen to" }
+            new RecommendationSection { Id = RecommendationConstants.Latest, Title = "Latest added releases" }
         };
+
+        var hasRecentListens = await _dbContext.Listens
+            .Where(l => l.UserId == userId)
+            .Join(_dbContext.Recordings, l => l.RecordingId, r => r.Id, (l, r) => l)
+            .AnyAsync();
+
+        if (hasRecentListens)
+        {
+            sections.Add(new RecommendationSection { Id = RecommendationConstants.Recent, Title = "Recent Listens" });
+        }
+
+        sections.Add(new RecommendationSection { Id = RecommendationConstants.Picks, Title = "Best picks for you" });
+        sections.Add(new RecommendationSection { Id = RecommendationConstants.Friends, Title = "Friends also listen to" });
+
+        return sections;
     }
 
-    public async Task<List<ReleaseResponse>> GetSection(string sectionId)
+    public async Task<List<ReleaseResponse>> GetSection(string sectionId, Guid userId)
     {
         switch (sectionId)
         {
@@ -39,6 +52,8 @@ public class RecommendationService : IRecommendationService
                 return await GetRecommendedForToday();
             case RecommendationConstants.Latest:
                 return await GetLatestAddedReleases();
+            case RecommendationConstants.Recent:
+                return await GetRecentListens(userId);
             case RecommendationConstants.Picks:
                 return await GetBestPicksForYou();
             case RecommendationConstants.Friends:
@@ -80,6 +95,28 @@ public class RecommendationService : IRecommendationService
             .Include(r => r.Artist)
             .OrderBy(r => Guid.NewGuid())
             .Take(count)
+            .ToListAsync();
+
+        return releases.Select(r => r.ToResponse(_imageService)).ToList();
+    }
+
+    private async Task<List<ReleaseResponse>> GetRecentListens(Guid userId)
+    {
+        var recentListens = await _dbContext.Listens
+            .Where(l => l.UserId == userId)
+            .OrderByDescending(l => l.StartTime)
+            .Select(l => l.RecordingId)
+            .Distinct()
+            .Take(20)
+            .ToListAsync();
+
+        var releases = await _dbContext.Recordings
+            .Where(r => recentListens.Contains(r.Id))
+            .Include(r => r.Release)
+            .ThenInclude(rel => rel.Artist)
+            .Select(r => r.Release)
+            .Distinct()
+            .Take(10)
             .ToListAsync();
 
         return releases.Select(r => r.ToResponse(_imageService)).ToList();

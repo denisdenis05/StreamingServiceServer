@@ -6,7 +6,10 @@ public class PlaylistRecording
     public Playlist Playlist { get; set; } = null!;
 
     public Guid RecordingId { get; set; }
-    public Recording Recording { get; set; } = null!;
+    public string Title { get; set; } = string.Empty;
+    public string Artist { get; set; } = string.Empty;
+    public string Album { get; set; } = string.Empty;
+    public string Cover { get; set; } = string.Empty;
 
     public int Order { get; set; } 
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;

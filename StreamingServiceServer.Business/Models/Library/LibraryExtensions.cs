@@ -17,16 +17,15 @@ public static class LibraryExtensions
             CreatedAt = playlist.CreatedAt 
         };
 
-    public static RecordingResponse ToResponse(this PlaylistRecording playlistRecording) => 
+    public static RecordingResponse ToResponse(this PlaylistRecording playlistRecording, bool isLiked = false) => 
         new RecordingResponse
         {
-            Id = playlistRecording.Recording.Id,
-            Title = playlistRecording.Recording.Title,
-            ArtistName = playlistRecording.Recording.ArtistCredit
-                .Select(ac => ac.Artist.Name)
-                .FirstOrDefault(),
-            ReleaseTitle = playlistRecording.Recording.Release.Title,
-            Cover = playlistRecording.Recording.Cover,
-            PositionInAlbum = playlistRecording.Order
+            Id = playlistRecording.RecordingId,
+            Title = playlistRecording.Title,
+            ArtistName = playlistRecording.Artist,
+            ReleaseTitle = playlistRecording.Album,
+            Cover = playlistRecording.Cover,
+            PositionInAlbum = playlistRecording.Order,
+            IsLiked = isLiked
         };
 }

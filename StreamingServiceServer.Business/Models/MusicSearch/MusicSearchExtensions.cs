@@ -129,7 +129,7 @@ public static class MusicBrainzMapper
         };
     }
 
-    public static RecordingResponse ToResponse(this Recording recording, IImageService imageService)
+    public static RecordingResponse ToResponse(this Recording recording, IImageService imageService, bool isLiked = false)
     {
         var response = new RecordingResponse
         {
@@ -141,6 +141,7 @@ public static class MusicBrainzMapper
             SmallCover =  !string.IsNullOrEmpty(recording.OptimizedSmallCover) ? recording.OptimizedSmallCover : recording.SmallCover,
             VerySmallCover =  !string.IsNullOrEmpty(recording.OptimizedVerySmallCover) ? recording.OptimizedVerySmallCover : recording.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
+            IsLiked = isLiked
         };
 
         if (string.IsNullOrEmpty(response.Cover))
@@ -154,7 +155,7 @@ public static class MusicBrainzMapper
         return response;
     }
     
-    public static RecordingResponse ToResponse(this RecordingDto recording, IImageService imageService)
+    public static RecordingResponse ToResponse(this RecordingDto recording, IImageService imageService, bool isLiked = false)
     {
         var response = new RecordingResponse
         {
@@ -166,6 +167,7 @@ public static class MusicBrainzMapper
             SmallCover =  recording.Cover.SmallCover,
             VerySmallCover =  recording.Cover.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
+            IsLiked = isLiked
         };
 
         if (string.IsNullOrEmpty(response.Cover))

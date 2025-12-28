@@ -7,7 +7,7 @@ public interface IMetadataService
 {
     Task<RecordingResponse> SearchRecordingByIdAsync(Guid id);
     
-    Task<UniversalSearchResponse> GeneralSearch(string query, int limit);
+    Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId);
     
     Task SearchAndSaveRecordingAsync(string query);
     Task SearchAndSaveArtistAsync(string query);
@@ -17,8 +17,8 @@ public interface IMetadataService
     Task<List<string>> GetAllArtistNames();
     Task<List<RecordingResponse>> GetAllRecordings();
     Task<List<ReleaseResponse>> GetAllAlbums();
-    Task<RecordingResponse> GetRecordingById(Guid id);
-    Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id);
+    Task<RecordingResponse> GetRecordingById(Guid id, Guid userId);
+    Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id, Guid userId);
 
     Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums);
     Task QueueToDownloadByQuery(string albumQuery, string? artistQuery = null);

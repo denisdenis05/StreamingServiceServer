@@ -8,4 +8,5 @@ public class ReleaseResponse
     public string? Cover {get; set;}
     public string? SmallCover {get; set;}
     public string? VerySmallCover {get; set;}
+    public string Type { get; set; } = "Album";
 }

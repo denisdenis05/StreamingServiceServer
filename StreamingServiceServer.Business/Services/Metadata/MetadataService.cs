@@ -14,12 +14,14 @@ public class MetadataService : IMetadataService
     private readonly StreamingDbContext _dbContext;
     private readonly IExternalMusicSearchService _externalMusicSearchService;
     private readonly IImageService _imageService;
+    private readonly ILibraryService _libraryService;
 
-    public MetadataService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService imageService)
+    public MetadataService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService imageService, ILibraryService libraryService)
     {
         _dbContext = dbContext;
         _externalMusicSearchService = externalMusicSearchService;
         _imageService = imageService;
+        _libraryService = libraryService;
     }
 
 
@@ -52,42 +54,46 @@ public class MetadataService : IMetadataService
             .ToList();
     }
 
-public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id)
-{
-    var recordings = await _dbContext.Recordings
-        .Where(recording => recording.Release.Id == id)
-        .Include(recording => recording.Release)
-        .Include(recording => recording.Release.Artist)
-        .OrderBy(recording => recording.PositionInAlbum)
-        .ToListAsync();
-
-    if (!recordings.Any())
+    public async Task<ICollection<RecordingResponse>> GetRecordingsByAlbumId(Guid id, Guid userId)
     {
-        var isQueued = await IsAlreadyQueuedToDownload(id);
-        if (!isQueued)
-            await QueueToDownloadById(id);
+        var recordings = await _dbContext.Recordings
+            .Where(recording => recording.Release.Id == id)
+            .Include(recording => recording.Release)
+            .Include(recording => recording.Release.Artist)
+            .OrderBy(recording => recording.PositionInAlbum)
+            .ToListAsync();
 
-        return await SearchAlbumRecordingsByIdAsync(id);
-    }
+        if (!recordings.Any())
+        {
+            var isQueued = await IsAlreadyQueuedToDownload(id);
+            if (!isQueued)
+                await QueueToDownloadById(id);
+
+            return await SearchAlbumRecordingsByIdAsync(id);
+        }
+
+        var likedRecordingIds = await _libraryService.GetLikedRecordingIdsAsync(userId, CancellationToken.None);
 
         return recordings
-            .Select(recording => recording.ToResponse(_imageService))
+            .Select(recording => recording.ToResponse(_imageService, likedRecordingIds.Contains(recording.Id)))
             .ToList();
     }
 
-public async Task<RecordingResponse> GetRecordingById(Guid id)
-{
-    var recording = await _dbContext.Recordings
-        .Where(r => r.Id == id)
-        .Include(r => r.Release)
-        .Include(r => r.Release.Artist)
-        .FirstOrDefaultAsync();
+    public async Task<RecordingResponse> GetRecordingById(Guid id, Guid userId)
+    {
+        var recording = await _dbContext.Recordings
+            .Where(r => r.Id == id)
+            .Include(r => r.Release)
+            .Include(r => r.Release.Artist)
+            .FirstOrDefaultAsync();
 
-    if (recording == null)
-        return null;
+        if (recording == null)
+            return null;
 
-    return recording.ToResponse(_imageService);
-}
+        var likedRecordingIds = await _libraryService.GetLikedRecordingIdsAsync(userId, CancellationToken.None);
+
+        return recording.ToResponse(_imageService, likedRecordingIds.Contains(recording.Id));
+    }
     
     public async Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums)
     {
@@ -525,7 +531,7 @@ private void RemoveDuplicatesFromChangeTracker()
         await _dbContext.SaveChangesAsync();
     }
     
-    public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit)
+    public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId)
     {
         var response = new UniversalSearchResponse();
 
@@ -537,17 +543,19 @@ private void RemoveDuplicatesFromChangeTracker()
         var artistsTask = _externalMusicSearchService.SearchArtistsAsync(query);
         var recordingsTask = _externalMusicSearchService.SearchRecordingsAsync(query);
         var albumsTask = _externalMusicSearchService.SearchAlbumsAsync(query);
+        var likedRecordingIdsTask = _libraryService.GetLikedRecordingIdsAsync(userId, CancellationToken.None);
 
-        await Task.WhenAll(playlistsTask, artistsTask, recordingsTask, albumsTask);
+        await Task.WhenAll(playlistsTask, artistsTask, recordingsTask, albumsTask, likedRecordingIdsTask);
 
         var playlists = playlistsTask.Result;
         var artists = artistsTask.Result ?? new List<ArtistDto>();
         var recordings = recordingsTask.Result ?? new List<RecordingDto>();
         var albums = albumsTask.Result ?? new List<ReleaseDto>();
+        var likedRecordingIds = likedRecordingIdsTask.Result;
 
         response.Playlists = playlists;
         response.Artists = artists.Take(limit).Select(a => a.ToResponse()).ToList();
-        response.Tracks = recordings.Take(limit).Select(r => r.ToResponse(_imageService)).ToList();
+        response.Tracks = recordings.Take(limit).Select(r => r.ToResponse(_imageService, likedRecordingIds.Contains(r.Id))).ToList();
 
         response.Albums = albums
             .Take(limit)
@@ -575,7 +583,7 @@ private void RemoveDuplicatesFromChangeTracker()
             }
             else if (recordingScore >= albumScore && bestRecording != null)
             {
-                response.BestMatch = new BestMatch { Type = "track", Data = bestRecording.ToResponse(_imageService) };
+                response.BestMatch = new BestMatch { Type = "track", Data = bestRecording.ToResponse(_imageService, likedRecordingIds.Contains(bestRecording.Id)) };
             }
             else if (bestAlbum != null)
             {

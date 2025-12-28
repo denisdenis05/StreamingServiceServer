@@ -89,13 +89,188 @@ public class LibraryService : ILibraryService
             .ToListAsync(cancellationToken);
     }
     
-    public async Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, CancellationToken cancellationToken)
+    public async Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, Guid userId, CancellationToken cancellationToken)
     {
+        var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, cancellationToken);
+
         return await _dbContext.PlaylistRecordings
             .Where(playlistRecording => playlistRecording.PlaylistId == playlistId)
             .OrderBy(playlistRecording => playlistRecording.Order)
-            .Select(playlistRecording => playlistRecording.ToResponse())
+            .Select(playlistRecording => playlistRecording.ToResponse(likedRecordingIds.Contains(playlistRecording.RecordingId)))
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<List<ReleaseResponse>> GetLibraryAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var playlists = await _dbContext.Playlists
+            .Include(p => p.Owner)
+            .Where(p => p.OwnerId == userId)
+            .ToListAsync(cancellationToken);
+
+        var likedAlbums = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .OrderBy(r => Guid.NewGuid())
+            .Take(10)
+            .ToListAsync(cancellationToken);
+
+        var response = new List<ReleaseResponse>();
+
+        response.AddRange(playlists.Select(p => new ReleaseResponse
+        {
+            Id = p.Id,
+            Title = p.Name,
+            ArtistName = p.Owner.Username,
+            Cover = p.Cover,
+            Type = "Playlist"
+        }));
+
+        response.AddRange(likedAlbums.Select(r => new ReleaseResponse
+        {
+            Id = r.Id,
+            Title = r.Title,
+            ArtistName = r.Artist.Name,
+            Cover = !string.IsNullOrEmpty(r.OptimizedCover) ? r.OptimizedCover : r.Cover,
+            SmallCover = !string.IsNullOrEmpty(r.OptimizedSmallCover) ? r.OptimizedSmallCover : r.SmallCover,
+            VerySmallCover = !string.IsNullOrEmpty(r.OptimizedVerySmallCover) ? r.OptimizedVerySmallCover : r.VerySmallCover,
+            Type = "Album"
+        }));
+
+        return response.OrderBy(x => x.Title).ToList();
+    }
+
+    public async Task RemoveRecordingFromPlaylistAsync(Guid userId, Guid playlistId, Guid recordingId, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        var recordingToRemove = await _dbContext.PlaylistRecordings
+            .FirstOrDefaultAsync(pr => pr.PlaylistId == playlistId && pr.RecordingId == recordingId, cancellationToken);
+
+        if (recordingToRemove != null)
+        {
+            _dbContext.PlaylistRecordings.Remove(recordingToRemove);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task UpdatePlaylistAsync(Guid userId, Guid playlistId, string name, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        if (playlist.IsSystem)
+        {
+            throw new InvalidOperationException("Cannot modify system playlists.");
+        }
+
+        playlist.Name = name;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AddRecordingsToPlaylistAsync(Guid userId, Guid playlistId, List<AddSongToPlaylistRequest> songs, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .Include(p => p.PlaylistRecordings)
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        var currentMaxOrder = playlist.PlaylistRecordings.Any() 
+            ? playlist.PlaylistRecordings.Max(pr => pr.Order) 
+            : -1;
+
+        foreach (var song in songs)
+        {
+            playlist.PlaylistRecordings.Add(new PlaylistRecording
+            {
+                PlaylistId = playlistId,
+                RecordingId = song.Id,
+                Title = song.Title,
+                Artist = song.Artist,
+                Album = song.Album,
+                Cover = song.Cover,
+                Order = ++currentMaxOrder,
+                AddedById = userId
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ToggleLikeAsync(Guid userId, Guid recordingId, AddSongToPlaylistRequest songDetails, CancellationToken cancellationToken)
+    {
+        var likedPlaylist = await _dbContext.Playlists
+            .Include(p => p.PlaylistRecordings)
+            .FirstOrDefaultAsync(p => p.OwnerId == userId && p.IsSystem, cancellationToken);
+
+        if (likedPlaylist == null)
+        {
+            likedPlaylist = new Playlist
+            {
+                Id = Guid.NewGuid(),
+                Name = "Liked Songs",
+                OwnerId = userId,
+                IsSystem = true,
+                Cover = string.Empty
+            };
+            _dbContext.Playlists.Add(likedPlaylist);
+            // Save to ensure ID exists for recordings
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var existingRecording = likedPlaylist.PlaylistRecordings
+            .FirstOrDefault(pr => pr.RecordingId == recordingId);
+
+        if (existingRecording != null)
+        {
+            _dbContext.PlaylistRecordings.Remove(existingRecording);
+        }
+        else
+        {
+            var maxOrder = likedPlaylist.PlaylistRecordings.Any() 
+                ? likedPlaylist.PlaylistRecordings.Max(pr => pr.Order) 
+                : -1;
+
+            likedPlaylist.PlaylistRecordings.Add(new PlaylistRecording
+            {
+                PlaylistId = likedPlaylist.Id,
+                RecordingId = recordingId,
+                Title = songDetails.Title,
+                Artist = songDetails.Artist,
+                Album = songDetails.Album,
+                Cover = songDetails.Cover,
+                Order = maxOrder + 1,
+                AddedById = userId
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<HashSet<Guid>> GetLikedRecordingIdsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var likedPlaylist = await _dbContext.Playlists
+            .Include(p => p.PlaylistRecordings)
+            .FirstOrDefaultAsync(p => p.OwnerId == userId && p.IsSystem, cancellationToken);
+
+        if (likedPlaylist == null)
+        {
+            return new HashSet<Guid>();
+        }
+
+        return likedPlaylist.PlaylistRecordings.Select(pr => pr.RecordingId).ToHashSet();
+    }
 }

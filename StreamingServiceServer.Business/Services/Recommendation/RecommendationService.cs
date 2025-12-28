@@ -105,20 +105,61 @@ public class RecommendationService : IRecommendationService
         var recentListens = await _dbContext.Listens
             .Where(l => l.UserId == userId)
             .OrderByDescending(l => l.StartTime)
-            .Select(l => l.RecordingId)
-            .Distinct()
-            .Take(20)
+            .Take(50)
             .ToListAsync();
 
-        var releases = await _dbContext.Recordings
-            .Where(r => recentListens.Contains(r.Id))
+        var recordingIds = recentListens.Where(l => l.PlaylistId == null).Select(l => l.RecordingId).Distinct().ToList();
+        var playlistIds = recentListens.Where(l => l.PlaylistId != null).Select(l => l.PlaylistId!.Value).Distinct().ToList();
+
+        var recordings = await _dbContext.Recordings
+            .Where(r => recordingIds.Contains(r.Id))
             .Include(r => r.Release)
             .ThenInclude(rel => rel.Artist)
-            .Select(r => r.Release)
-            .Distinct()
-            .Take(10)
             .ToListAsync();
 
-        return releases.Select(r => r.ToResponse(_imageService)).ToList();
+        var playlists = await _dbContext.Playlists
+            .Include(p => p.Owner)
+            .Where(p => playlistIds.Contains(p.Id))
+            .ToListAsync();
+
+        var response = new List<ReleaseResponse>();
+        var addedIds = new HashSet<Guid>();
+
+        foreach (var listen in recentListens)
+        {
+            if (response.Count >= 10) break;
+
+            if (listen.PlaylistId.HasValue)
+            {
+                if (addedIds.Contains(listen.PlaylistId.Value)) continue;
+
+                var playlist = playlists.FirstOrDefault(p => p.Id == listen.PlaylistId.Value);
+                if (playlist != null)
+                {
+                    response.Add(new ReleaseResponse
+                    {
+                        Id = playlist.Id,
+                        Title = playlist.Name,
+                        ArtistName = playlist.Owner.Username,
+                        Cover = playlist.Cover,
+                        Type = "Playlist"
+                    });
+                    addedIds.Add(playlist.Id);
+                }
+            }
+            else
+            {
+                var recording = recordings.FirstOrDefault(r => r.Id == listen.RecordingId);
+                if (recording != null && recording.Release != null)
+                {
+                    if (addedIds.Contains(recording.Release.Id)) continue;
+
+                    response.Add(recording.Release.ToResponse(_imageService));
+                    addedIds.Add(recording.Release.Id);
+                }
+            }
+        }
+
+        return response;
     }
 }

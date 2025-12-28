@@ -52,6 +52,7 @@ public class CoverOptimizationService : BackgroundService
         var dbContext = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
 
         var releases = await dbContext.Releases
+            .Include(r => r.Recordings)
             .Where(r => r.OptimizedCover == "" || r.OptimizedSmallCover == "" || r.OptimizedVerySmallCover == "")
             .OrderByDescending(r => r.DateAdded)
             .Take(50) 
@@ -62,6 +63,37 @@ public class CoverOptimizationService : BackgroundService
             if (stoppingToken.IsCancellationRequested) break;
 
             await OptimizeEntityAsync(release, dbContext, stoppingToken);
+            
+            if (!string.IsNullOrEmpty(release.OptimizedCover) || 
+                !string.IsNullOrEmpty(release.OptimizedSmallCover) || 
+                !string.IsNullOrEmpty(release.OptimizedVerySmallCover))
+            {
+                foreach (var recording in release.Recordings)
+                {
+                    bool changed = false;
+                    if (!string.IsNullOrEmpty(release.OptimizedCover) && string.IsNullOrEmpty(recording.OptimizedCover))
+                    {
+                        recording.OptimizedCover = release.OptimizedCover;
+                        changed = true;
+                    }
+                    if (!string.IsNullOrEmpty(release.OptimizedSmallCover) && string.IsNullOrEmpty(recording.OptimizedSmallCover))
+                    {
+                        recording.OptimizedSmallCover = release.OptimizedSmallCover;
+                        changed = true;
+                    }
+                    if (!string.IsNullOrEmpty(release.OptimizedVerySmallCover) && string.IsNullOrEmpty(recording.OptimizedVerySmallCover))
+                    {
+                        recording.OptimizedVerySmallCover = release.OptimizedVerySmallCover;
+                        changed = true;
+                    }
+                    
+                    if (changed)
+                    {
+                        _logger.LogInformation("Propagated optimized covers from Release {ReleaseId} to Recording {RecordingId}", release.Id, recording.Id);
+                    }
+                }
+                await dbContext.SaveChangesAsync(stoppingToken);
+            }
         }
     }
 

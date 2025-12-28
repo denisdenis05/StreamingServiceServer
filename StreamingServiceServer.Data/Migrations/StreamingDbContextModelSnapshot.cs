@@ -284,14 +284,28 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<Guid>("AddedById")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Album")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Artist")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Cover")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<int>("Order")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("PlaylistId", "RecordingId");
 
                     b.HasIndex("Order");
-
-                    b.HasIndex("RecordingId");
 
                     b.ToTable("PlaylistRecordings");
                 });
@@ -333,6 +347,9 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.Property<string>("PauseSeekEvents")
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("PlaylistId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("RecordingId")
                         .HasColumnType("uuid");
@@ -579,15 +596,7 @@ namespace StreamingServiceServer.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("StreamingServiceServer.Data.Models.Recording", "Recording")
-                        .WithMany("PlaylistRecordings")
-                        .HasForeignKey("RecordingId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
                     b.Navigation("Playlist");
-
-                    b.Navigation("Recording");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Listen", b =>
@@ -663,8 +672,6 @@ namespace StreamingServiceServer.Data.Migrations
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>
                 {
                     b.Navigation("ArtistCredit");
-
-                    b.Navigation("PlaylistRecordings");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Release", b =>

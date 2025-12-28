@@ -20,13 +20,11 @@ public static class LibraryExtensions
     public static RecordingResponse ToResponse(this PlaylistRecording playlistRecording) => 
         new RecordingResponse
         {
-            Id = playlistRecording.Recording.Id,
-            Title = playlistRecording.Recording.Title,
-            ArtistName = playlistRecording.Recording.ArtistCredit
-                .Select(ac => ac.Artist.Name)
-                .FirstOrDefault(),
-            ReleaseTitle = playlistRecording.Recording.Release.Title,
-            Cover = playlistRecording.Recording.Cover,
+            Id = playlistRecording.RecordingId,
+            Title = playlistRecording.Title,
+            ArtistName = playlistRecording.Artist,
+            ReleaseTitle = playlistRecording.Album,
+            Cover = playlistRecording.Cover,
             PositionInAlbum = playlistRecording.Order
         };
 }

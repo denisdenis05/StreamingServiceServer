@@ -98,4 +98,108 @@ public class LibraryService : ILibraryService
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<List<ReleaseResponse>> GetLibraryAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var playlists = await _dbContext.Playlists
+            .Include(p => p.Owner)
+            .Where(p => p.OwnerId == userId)
+            .ToListAsync(cancellationToken);
+
+        var likedAlbums = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .OrderBy(r => Guid.NewGuid())
+            .Take(10)
+            .ToListAsync(cancellationToken);
+
+        var response = new List<ReleaseResponse>();
+
+        response.AddRange(playlists.Select(p => new ReleaseResponse
+        {
+            Id = p.Id,
+            Title = p.Name,
+            ArtistName = p.Owner.Username,
+            Cover = p.Cover,
+            Type = "Playlist"
+        }));
+
+        response.AddRange(likedAlbums.Select(r => new ReleaseResponse
+        {
+            Id = r.Id,
+            Title = r.Title,
+            ArtistName = r.Artist.Name,
+            Cover = !string.IsNullOrEmpty(r.OptimizedCover) ? r.OptimizedCover : r.Cover,
+            SmallCover = !string.IsNullOrEmpty(r.OptimizedSmallCover) ? r.OptimizedSmallCover : r.SmallCover,
+            VerySmallCover = !string.IsNullOrEmpty(r.OptimizedVerySmallCover) ? r.OptimizedVerySmallCover : r.VerySmallCover,
+            Type = "Album"
+        }));
+
+        return response.OrderBy(x => x.Title).ToList();
+    }
+
+    public async Task RemoveRecordingFromPlaylistAsync(Guid userId, Guid playlistId, Guid recordingId, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        var recordingToRemove = await _dbContext.PlaylistRecordings
+            .FirstOrDefaultAsync(pr => pr.PlaylistId == playlistId && pr.RecordingId == recordingId, cancellationToken);
+
+        if (recordingToRemove != null)
+        {
+            _dbContext.PlaylistRecordings.Remove(recordingToRemove);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task UpdatePlaylistAsync(Guid userId, Guid playlistId, string name, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        playlist.Name = name;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AddRecordingsToPlaylistAsync(Guid userId, Guid playlistId, List<AddSongToPlaylistRequest> songs, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .Include(p => p.PlaylistRecordings)
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        var currentMaxOrder = playlist.PlaylistRecordings.Any() 
+            ? playlist.PlaylistRecordings.Max(pr => pr.Order) 
+            : -1;
+
+        foreach (var song in songs)
+        {
+            playlist.PlaylistRecordings.Add(new PlaylistRecording
+            {
+                PlaylistId = playlistId,
+                RecordingId = song.Id,
+                Title = song.Title,
+                Artist = song.Artist,
+                Album = song.Album,
+                Cover = song.Cover,
+                Order = ++currentMaxOrder,
+                AddedById = userId
+            });
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
 }

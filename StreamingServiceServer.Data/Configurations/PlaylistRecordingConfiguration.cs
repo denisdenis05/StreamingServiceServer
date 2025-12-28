@@ -16,10 +16,6 @@ public class PlaylistRecordingConfiguration : IEntityTypeConfiguration<PlaylistR
             .WithMany(p => p.PlaylistRecordings)
             .HasForeignKey(pr => pr.PlaylistId);
 
-        builder.HasOne(pr => pr.Recording)
-            .WithMany(r => r.PlaylistRecordings) 
-            .HasForeignKey(pr => pr.RecordingId);
-
         builder.Property(pr => pr.Order)
             .IsRequired();
 

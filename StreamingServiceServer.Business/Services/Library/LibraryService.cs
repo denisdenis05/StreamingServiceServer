@@ -95,7 +95,12 @@ public class LibraryService : ILibraryService
     {
         var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, cancellationToken);
 
-        return await _dbContext.PlaylistRecordings
+        var isSystemPlaylist = await _dbContext.Playlists
+            .Where(p => p.Id == playlistId)
+            .Select(p => p.IsSystem)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var query = _dbContext.PlaylistRecordings
             .Where(playlistRecording => playlistRecording.PlaylistId == playlistId)
             .GroupJoin(
                 _dbContext.Recordings,
@@ -106,8 +111,18 @@ public class LibraryService : ILibraryService
             .SelectMany(
                 x => x.recordings.DefaultIfEmpty(),
                 (x, recording) => new { x.playlistRecording, recording }
-            )
-            .OrderBy(x => x.playlistRecording.Order)
+            );
+
+        if (isSystemPlaylist)
+        {
+            query = query.OrderByDescending(x => x.playlistRecording.Order);
+        }
+        else
+        {
+            query = query.OrderBy(x => x.playlistRecording.Order);
+        }
+
+        return await query
             .Select(x => new RecordingResponse
             {
                 Id = x.playlistRecording.RecordingId,

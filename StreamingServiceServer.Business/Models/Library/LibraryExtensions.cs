@@ -17,7 +17,7 @@ public static class LibraryExtensions
             CreatedAt = playlist.CreatedAt 
         };
 
-    public static RecordingResponse ToResponse(this PlaylistRecording playlistRecording) => 
+    public static RecordingResponse ToResponse(this PlaylistRecording playlistRecording, bool isLiked = false) => 
         new RecordingResponse
         {
             Id = playlistRecording.RecordingId,
@@ -25,6 +25,7 @@ public static class LibraryExtensions
             ArtistName = playlistRecording.Artist,
             ReleaseTitle = playlistRecording.Album,
             Cover = playlistRecording.Cover,
-            PositionInAlbum = playlistRecording.Order
+            PositionInAlbum = playlistRecording.Order,
+            IsLiked = isLiked
         };
 }

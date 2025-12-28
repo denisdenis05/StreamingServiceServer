@@ -13,4 +13,6 @@ public class Playlist
     public User Owner { get; set; } = null!; 
 
     public virtual ICollection<PlaylistRecording> PlaylistRecordings { get; set; } = new List<PlaylistRecording>();
+    
+    public bool IsSystem { get; set; } = false;
 }

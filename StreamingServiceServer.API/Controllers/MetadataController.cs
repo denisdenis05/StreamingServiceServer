@@ -20,7 +20,14 @@ public class MetadataController : ControllerBase
     [HttpGet("search")]
     public async Task<IActionResult> GeneralSearch([FromQuery] string query, [FromQuery] int limit = 10)
     {
-        var response = await _metadataService.GeneralSearch(query, limit);
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var response = await _metadataService.GeneralSearch(query, limit, userId);
         
         return Ok(response);
     }
@@ -80,7 +87,14 @@ public class MetadataController : ControllerBase
     [HttpGet("get-recordings")]
     public async Task<IActionResult> GetAllRecordings([FromQuery] Guid albumId)
     {
-        var response = await _metadataService.GetRecordingsByAlbumId(albumId);
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var response = await _metadataService.GetRecordingsByAlbumId(albumId, userId);
         
         return Ok(response);
     }

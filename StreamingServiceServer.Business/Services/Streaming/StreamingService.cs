@@ -16,7 +16,7 @@ public class StreamingService : IStreamingService
 
     public async Task<string> GetFullStreamingPath(Guid songId)
     {
-        var record = await _metadataService.GetRecordingById(songId);
+        var record = await _metadataService.GetRecordingById(songId, Guid.Empty);
 
         if (record == null)
             throw new Exception("Record not found");
@@ -46,7 +46,7 @@ public class StreamingService : IStreamingService
     
     public async Task<string> GetStreamingPath(Guid songId)
     {
-        var record = await _metadataService.GetRecordingById(songId);
+        var record = await _metadataService.GetRecordingById(songId, Guid.Empty);
 
         if (record == null)
         {

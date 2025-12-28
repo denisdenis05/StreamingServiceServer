@@ -50,7 +50,14 @@ public class LibraryController : ControllerBase
     [HttpGet("playlists/{id:guid}/recordings")]
     public async Task<IActionResult> GetPlaylistRecordings(Guid id, CancellationToken cancellationToken)
     {
-        var recordings = await _libraryService.GetPlaylistRecordingsAsync(id, cancellationToken);
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var recordings = await _libraryService.GetPlaylistRecordingsAsync(id, userId, cancellationToken);
         return Ok(recordings);
     }
     [HttpGet]
@@ -106,6 +113,19 @@ public class LibraryController : ControllerBase
         }
 
         await _libraryService.AddRecordingsToPlaylistAsync(userId, playlistId, songs, cancellationToken);
+        return Ok();
+    }
+    [HttpPost("likes/{recordingId}")]
+    public async Task<IActionResult> ToggleLike(Guid recordingId, [FromBody] AddSongToPlaylistRequest songDetails, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        await _libraryService.ToggleLikeAsync(userId, recordingId, songDetails, cancellationToken);
         return Ok();
     }
 }

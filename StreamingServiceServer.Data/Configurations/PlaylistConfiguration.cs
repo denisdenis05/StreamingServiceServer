@@ -29,5 +29,8 @@ public class PlaylistConfiguration : IEntityTypeConfiguration<Playlist>
         
         builder.Property(p => p.CreatedAt)
             .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+        builder.Property(p => p.IsSystem)
+            .HasDefaultValue(false);
     }
 }

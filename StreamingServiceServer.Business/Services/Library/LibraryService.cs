@@ -12,11 +12,13 @@ using Microsoft.EntityFrameworkCore;
 public class LibraryService : ILibraryService
 {
     private readonly StreamingDbContext _dbContext;
+    private readonly IExternalMusicSearchService _externalMusicSearchService;
     const string DefaultPlaylistName = "New Playlist";
 
-    public LibraryService(StreamingDbContext dbContext)
+    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService)
     {
         _dbContext = dbContext;
+        _externalMusicSearchService = externalMusicSearchService;
     }
 
     public async Task<Playlist> CreatePlaylistAsync(Guid ownerId, CreatePlaylistRequest request, CancellationToken cancellationToken)
@@ -95,8 +97,27 @@ public class LibraryService : ILibraryService
 
         return await _dbContext.PlaylistRecordings
             .Where(playlistRecording => playlistRecording.PlaylistId == playlistId)
-            .OrderBy(playlistRecording => playlistRecording.Order)
-            .Select(playlistRecording => playlistRecording.ToResponse(likedRecordingIds.Contains(playlistRecording.RecordingId)))
+            .GroupJoin(
+                _dbContext.Recordings,
+                playlistRecording => playlistRecording.RecordingId,
+                recording => recording.Id,
+                (playlistRecording, recordings) => new { playlistRecording, recordings }
+            )
+            .SelectMany(
+                x => x.recordings.DefaultIfEmpty(),
+                (x, recording) => new { x.playlistRecording, recording }
+            )
+            .OrderBy(x => x.playlistRecording.Order)
+            .Select(x => new RecordingResponse
+            {
+                Id = x.playlistRecording.RecordingId,
+                Title = x.playlistRecording.Title,
+                ArtistName = x.playlistRecording.Artist,
+                ReleaseTitle = x.playlistRecording.Album,
+                Cover = x.recording != null && !string.IsNullOrEmpty(x.recording.Cover) ? x.recording.Cover : x.playlistRecording.Cover,
+                PositionInAlbum = x.playlistRecording.Order,
+                IsLiked = likedRecordingIds.Contains(x.playlistRecording.RecordingId)
+            })
             .ToListAsync(cancellationToken);
     }
 
@@ -272,5 +293,114 @@ public class LibraryService : ILibraryService
         }
 
         return likedPlaylist.PlaylistRecordings.Select(pr => pr.RecordingId).ToHashSet();
+    }
+
+    public async Task AddRecordingsToPlaylistFuzzyAsync(Guid userId, Guid playlistId, List<AddRecordingToPlaylistFuzzyRequest> requests, CancellationToken cancellationToken)
+    {
+        var playlist = await _dbContext.Playlists
+            .Include(p => p.PlaylistRecordings)
+            .FirstOrDefaultAsync(p => p.Id == playlistId && p.OwnerId == userId, cancellationToken);
+
+        if (playlist == null)
+        {
+            throw new InvalidOperationException("Playlist not found or user is not the owner.");
+        }
+
+        var currentMaxOrder = playlist.PlaylistRecordings.Any() 
+            ? playlist.PlaylistRecordings.Max(pr => pr.Order) 
+            : -1;
+
+        foreach (var request in requests)
+        {
+            var candidates = await _dbContext.Recordings
+                .Include(r => r.ArtistCredit)
+                .ThenInclude(ac => ac.Artist)
+                .Include(r => r.Release)
+                .Where(r => r.Title.ToLower().Contains(request.Name.ToLower()))
+                .ToListAsync(cancellationToken);
+
+            var bestMatch = candidates
+                .Select(r => new 
+                { 
+                    Recording = r, 
+                    NameScore = FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
+                    ArtistScore = r.ArtistCredit.Any() 
+                        ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? "").ToLower(), request.ArtistName.ToLower()))
+                        : 0,
+                    ReleaseScore = r.Release != null 
+                        ? FuzzySharp.Fuzz.Ratio(r.Release.Title.ToLower(), request.ReleaseName.ToLower())
+                        : 0
+                })
+                .Where(x => x.NameScore > 90 && (x.ArtistScore > 90 || x.ReleaseScore > 90))
+                .OrderByDescending(x => x.NameScore + Math.Max(x.ArtistScore, x.ReleaseScore))
+                .FirstOrDefault();
+
+            Guid recordingId = Guid.Empty;
+            string title = string.Empty;
+            string artist = string.Empty;
+            string album = string.Empty;
+            string cover = string.Empty;
+            bool found = false;
+
+            if (bestMatch != null)
+            {
+                found = true;
+                recordingId = bestMatch.Recording.Id;
+                title = bestMatch.Recording.Title;
+                artist = bestMatch.Recording.ArtistCredit.FirstOrDefault()?.Name 
+                         ?? bestMatch.Recording.ArtistCredit.FirstOrDefault()?.Artist?.Name 
+                         ?? "Unknown Artist";
+                album = bestMatch.Recording.Release?.Title ?? "Unknown Album";
+                cover = bestMatch.Recording.Cover;
+            }
+            else
+            {
+                var query = $"recording:\"{request.Name}\" AND artist:\"{request.ArtistName}\"";
+                var externalRecordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
+
+                var bestExternalMatch = externalRecordings
+                    .Select(r => new 
+                    { 
+                        Recording = r, 
+                        NameScore = FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
+                        ArtistScore = r.ArtistCredit.Any() 
+                            ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? "").ToLower(), request.ArtistName.ToLower()))
+                            : 0,
+                        ReleaseScore = r.Releases != null && r.Releases.Any()
+                            ? r.Releases.Max(rel => FuzzySharp.Fuzz.Ratio(rel.Title.ToLower(), request.ReleaseName.ToLower()))
+                            : 0
+                    })
+                    .Where(x => x.NameScore > 90 && (x.ArtistScore > 90 || x.ReleaseScore > 90))
+                    .OrderByDescending(x => x.NameScore + Math.Max(x.ArtistScore, x.ReleaseScore))
+                    .FirstOrDefault();
+
+                if (bestExternalMatch != null)
+                {
+                    found = true;
+                    recordingId = bestExternalMatch.Recording.Id;
+                    title = bestExternalMatch.Recording.Title ?? "Unknown Title";
+                    artist = bestExternalMatch.Recording.ArtistCredit.FirstOrDefault()?.Name ?? "Unknown Artist";
+                    album = bestExternalMatch.Recording.Releases.FirstOrDefault()?.Title ?? "Unknown Album";
+                    cover = bestExternalMatch.Recording.Cover?.Cover ?? string.Empty;
+                }
+            }
+
+            if (found)
+            {
+                playlist.PlaylistRecordings.Add(new PlaylistRecording
+                {
+                    PlaylistId = playlistId,
+                    RecordingId = recordingId,
+                    Title = title,
+                    Artist = artist,
+                    Album = album,
+                    Cover = cover,
+                    Order = ++currentMaxOrder,
+                    AddedById = userId
+                });
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 }

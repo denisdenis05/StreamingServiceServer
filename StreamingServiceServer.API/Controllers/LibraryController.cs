@@ -128,4 +128,18 @@ public class LibraryController : ControllerBase
         await _libraryService.ToggleLikeAsync(userId, recordingId, songDetails, cancellationToken);
         return Ok();
     }
+
+    [HttpPost("playlists/{playlistId}/recordings/fuzzy")]
+    public async Task<IActionResult> AddRecordingsToPlaylistFuzzy(Guid playlistId, [FromBody] List<AddRecordingToPlaylistFuzzyRequest> requests, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        await _libraryService.AddRecordingsToPlaylistFuzzyAsync(userId, playlistId, requests, cancellationToken);
+        return Ok();
+    }
 }

@@ -10,6 +10,9 @@ public class Recording
     public string Cover { get; set; }
     public string? SmallCover { get; set; }
     public string? VerySmallCover { get; set; }
+    public string OptimizedCover { get; set; } = string.Empty;
+    public string OptimizedSmallCover { get; set; } = string.Empty;
+    public string OptimizedVerySmallCover { get; set; } = string.Empty;
     public int PositionInAlbum { get; set; } = 0;
     public DateTime DateAdded { get; set; } = DateTime.UtcNow;
     public Release Release { get; set; }

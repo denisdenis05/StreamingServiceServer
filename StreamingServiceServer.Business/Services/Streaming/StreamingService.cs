@@ -88,7 +88,7 @@ public class StreamingService : IStreamingService
         
         if (matchingFile != null)
         {
-            return Path.Combine($"TEMP/{songId}.mp3");
+            return Path.Combine("TEMP", Path.GetFileName(matchingFile));
         }
 
         return null;

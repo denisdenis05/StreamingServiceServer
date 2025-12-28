@@ -24,7 +24,7 @@ public class PreviewDownloaderService : IPreviewDownloaderService
             Directory.CreateDirectory(tempPath);
         }
 
-        var outputPath = Path.Combine(tempPath, $"{recording.Id}.mp3");
+        var outputPath = Path.Combine(tempPath, $"{recording.Id}");
 
         if (File.Exists(outputPath))
         {

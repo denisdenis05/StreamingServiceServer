@@ -16,6 +16,7 @@ builder.Services.AddApplicationServices();
 builder.Services.RegisterHelpers();
 builder.Services.AddHostedService<MusicDownloader>();
 builder.Services.AddHostedService<PendingDownloadChecker>();
+builder.Services.AddHostedService<StreamingServiceServer.Background.CoverOptimizationService>();
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();

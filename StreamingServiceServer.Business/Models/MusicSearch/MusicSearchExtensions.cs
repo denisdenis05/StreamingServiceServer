@@ -137,14 +137,18 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
-            Cover =  recording.VerySmallCover,
+            Cover =  !string.IsNullOrEmpty(recording.OptimizedCover) ? recording.OptimizedCover : recording.Cover,
+            SmallCover =  !string.IsNullOrEmpty(recording.OptimizedSmallCover) ? recording.OptimizedSmallCover : recording.SmallCover,
+            VerySmallCover =  !string.IsNullOrEmpty(recording.OptimizedVerySmallCover) ? recording.OptimizedVerySmallCover : recording.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
         };
 
         if (string.IsNullOrEmpty(response.Cover))
         {
             var covers = imageService.GetAlbumCover(recording.Release.Id);
-            response.Cover = covers.VerySmallCover;
+            response.Cover = covers.Cover;
+            response.SmallCover = covers.SmallCover;
+            response.VerySmallCover = covers.VerySmallCover;
         }
 
         return response;
@@ -158,7 +162,9 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.ArtistCredit.FirstOrDefault()?.Artist.Name,
             ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,
-            Cover =  recording.Cover.VerySmallCover,
+            Cover =  recording.Cover.Cover,
+            SmallCover =  recording.Cover.SmallCover,
+            VerySmallCover =  recording.Cover.VerySmallCover,
             PositionInAlbum = recording.PositionInAlbum,
         };
 
@@ -168,7 +174,9 @@ public static class MusicBrainzMapper
             if (releaseId != null)
             {
                 var covers = imageService.GetAlbumCover(releaseId.Value);
-                response.Cover = covers.VerySmallCover;
+                response.Cover = covers.Cover;
+                response.SmallCover = covers.SmallCover;
+                response.VerySmallCover = covers.VerySmallCover;
             }
         }
 
@@ -184,13 +192,17 @@ public static class MusicBrainzMapper
             ArtistName = release.Artist?.Name
                          ?? release.ArtistCredit?.FirstOrDefault()?.Artist?.Name
                          ?? string.Empty,
-            Cover = release.Cover.VerySmallCover
+            Cover = release.Cover.Cover,
+            SmallCover = release.Cover.SmallCover,
+            VerySmallCover = release.Cover.VerySmallCover
         };
 
         if (string.IsNullOrEmpty(response.Cover))
         {
             var covers = imageService.GetAlbumCover(release.Id);
-            response.Cover = covers.VerySmallCover;
+            response.Cover = covers.Cover;
+            response.SmallCover = covers.SmallCover;
+            response.VerySmallCover = covers.VerySmallCover;
         }
 
         return response;
@@ -203,13 +215,17 @@ public static class MusicBrainzMapper
             Id = release.Id,
             Title = release.Title,
             ArtistName = release.Artist?.Name ?? string.Empty,
-            Cover = release.Cover
+            Cover = !string.IsNullOrEmpty(release.OptimizedCover) ? release.OptimizedCover : release.Cover,
+            SmallCover = !string.IsNullOrEmpty(release.OptimizedSmallCover) ? release.OptimizedSmallCover : release.SmallCover,
+            VerySmallCover = !string.IsNullOrEmpty(release.OptimizedVerySmallCover) ? release.OptimizedVerySmallCover : release.VerySmallCover
         };
 
         if (string.IsNullOrEmpty(response.Cover))
         {
             var covers = imageService.GetAlbumCover(release.Id);
-            response.Cover = covers.VerySmallCover;
+            response.Cover = covers.Cover;
+            response.SmallCover = covers.SmallCover;
+            response.VerySmallCover = covers.VerySmallCover;
         }
 
         return response;

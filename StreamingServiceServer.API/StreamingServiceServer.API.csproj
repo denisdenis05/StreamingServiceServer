@@ -9,6 +9,7 @@
         <ProjectReference Include="..\StreamingServiceServer.Business\StreamingServiceServer.Business.csproj" />
         <ProjectReference Include="..\StreamingServiceServer.Downloader\StreamingServiceServer.Downloader.csproj" />
         <ProjectReference Include="..\StreamingServiceServer.PreviewDownloader\StreamingServiceServer.PreviewDownloader.csproj" />
+        <ProjectReference Include="..\StreamingServiceServer.Background\StreamingServiceServer.Background.csproj" />
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />

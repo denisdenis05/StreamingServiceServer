@@ -48,75 +48,108 @@ public class CoverOptimizationService : BackgroundService
 
     private async Task OptimizeReleasesAsync(CancellationToken stoppingToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        var failedIds = new HashSet<Guid>();
 
-        var releases = await dbContext.Releases
-            .Include(r => r.Recordings)
-            .Where(r => r.OptimizedCover == "" || r.OptimizedSmallCover == "" || r.OptimizedVerySmallCover == "")
-            .OrderByDescending(r => r.DateAdded)
-            .Take(50) 
-            .ToListAsync(stoppingToken);
-
-        foreach (var release in releases)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            if (stoppingToken.IsCancellationRequested) break;
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
 
-            await OptimizeEntityAsync(release, dbContext, stoppingToken);
-            
-            if (!string.IsNullOrEmpty(release.OptimizedCover) || 
-                !string.IsNullOrEmpty(release.OptimizedSmallCover) || 
-                !string.IsNullOrEmpty(release.OptimizedVerySmallCover))
+            var releases = await dbContext.Releases
+                .Include(r => r.Recordings)
+                .Where(r => (r.OptimizedCover == "" || r.OptimizedSmallCover == "" || r.OptimizedVerySmallCover == "") && !failedIds.Contains(r.Id))
+                .OrderByDescending(r => r.DateAdded)
+                .Take(10)
+                .ToListAsync(stoppingToken);
+
+            if (!releases.Any()) break;
+
+            foreach (var release in releases)
             {
-                foreach (var recording in release.Recordings)
+                if (stoppingToken.IsCancellationRequested) break;
+
+                await OptimizeEntityAsync(release, dbContext, stoppingToken);
+
+                if (string.IsNullOrEmpty(release.OptimizedCover) && 
+                    string.IsNullOrEmpty(release.OptimizedSmallCover) && 
+                    string.IsNullOrEmpty(release.OptimizedVerySmallCover))
                 {
-                    bool changed = false;
-                    if (!string.IsNullOrEmpty(release.OptimizedCover) && string.IsNullOrEmpty(recording.OptimizedCover))
+                    failedIds.Add(release.Id);
+                }
+                
+                if (!string.IsNullOrEmpty(release.OptimizedCover) || 
+                    !string.IsNullOrEmpty(release.OptimizedSmallCover) || 
+                    !string.IsNullOrEmpty(release.OptimizedVerySmallCover))
+                {
+                    foreach (var recording in release.Recordings)
                     {
-                        recording.OptimizedCover = release.OptimizedCover;
-                        changed = true;
-                    }
-                    if (!string.IsNullOrEmpty(release.OptimizedSmallCover) && string.IsNullOrEmpty(recording.OptimizedSmallCover))
-                    {
-                        recording.OptimizedSmallCover = release.OptimizedSmallCover;
-                        changed = true;
-                    }
-                    if (!string.IsNullOrEmpty(release.OptimizedVerySmallCover) && string.IsNullOrEmpty(recording.OptimizedVerySmallCover))
-                    {
-                        recording.OptimizedVerySmallCover = release.OptimizedVerySmallCover;
-                        changed = true;
-                    }
-                    
-                    if (changed)
-                    {
-                        _logger.LogInformation("Propagated optimized covers from Release {ReleaseId} to Recording {RecordingId}", release.Id, recording.Id);
+                        bool changed = false;
+                        if (!string.IsNullOrEmpty(release.OptimizedCover) && string.IsNullOrEmpty(recording.OptimizedCover))
+                        {
+                            recording.OptimizedCover = release.OptimizedCover;
+                            changed = true;
+                        }
+                        if (!string.IsNullOrEmpty(release.OptimizedSmallCover) && string.IsNullOrEmpty(recording.OptimizedSmallCover))
+                        {
+                            recording.OptimizedSmallCover = release.OptimizedSmallCover;
+                            changed = true;
+                        }
+                        if (!string.IsNullOrEmpty(release.OptimizedVerySmallCover) && string.IsNullOrEmpty(recording.OptimizedVerySmallCover))
+                        {
+                            recording.OptimizedVerySmallCover = release.OptimizedVerySmallCover;
+                            changed = true;
+                        }
+                        
+                        if (changed)
+                        {
+                            _logger.LogInformation("Propagated optimized covers from Release {ReleaseId} to Recording {RecordingId}", release.Id, recording.Id);
+                        }
                     }
                 }
-                await dbContext.SaveChangesAsync(stoppingToken);
             }
+
+            await dbContext.SaveChangesAsync(stoppingToken);
+            await Task.Delay(1000, stoppingToken);
         }
     }
 
     private async Task OptimizeRecordingsAsync(CancellationToken stoppingToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        var failedIds = new HashSet<Guid>();
 
-        var recordings = await dbContext.Recordings
-            .Where(r => r.OptimizedCover == "" || r.OptimizedSmallCover == "" || r.OptimizedVerySmallCover == "")
-            .OrderByDescending(r => r.DateAdded)
-            .Take(50)
-            .ToListAsync(stoppingToken);
-
-        foreach (var recording in recordings)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            if (stoppingToken.IsCancellationRequested) break;
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
 
-            await OptimizeEntityAsync(recording, dbContext, stoppingToken);
+            var recordings = await dbContext.Recordings
+                .Where(r => (r.OptimizedCover == "" || r.OptimizedSmallCover == "" || r.OptimizedVerySmallCover == "") && !failedIds.Contains(r.Id))
+                .OrderByDescending(r => r.DateAdded)
+                .Take(10)
+                .ToListAsync(stoppingToken);
+
+            if (!recordings.Any()) break;
+
+            foreach (var recording in recordings)
+            {
+                if (stoppingToken.IsCancellationRequested) break;
+
+                await OptimizeEntityAsync(recording, dbContext, stoppingToken);
+
+                if (string.IsNullOrEmpty(recording.OptimizedCover) && 
+                    string.IsNullOrEmpty(recording.OptimizedSmallCover) && 
+                    string.IsNullOrEmpty(recording.OptimizedVerySmallCover))
+                {
+                    failedIds.Add(recording.Id);
+                }
+            }
+
+            await dbContext.SaveChangesAsync(stoppingToken);
+            await Task.Delay(1000, stoppingToken);
         }
     }
 
-    private async Task OptimizeEntityAsync(dynamic entity, StreamingDbContext dbContext, CancellationToken stoppingToken)
+    private async Task<bool> OptimizeEntityAsync(dynamic entity, StreamingDbContext dbContext, CancellationToken stoppingToken)
     {        
         var tasks = new List<Task<(string Type, string Url)>>();
 
@@ -135,7 +168,7 @@ public class CoverOptimizationService : BackgroundService
             tasks.Add(ResolveUrlAsync("VerySmallCover", entity.VerySmallCover, stoppingToken));
         }
 
-        if (tasks.Count == 0) return;
+        if (tasks.Count == 0) return false;
 
         var results = await Task.WhenAll(tasks);
         bool changed = false;
@@ -163,9 +196,9 @@ public class CoverOptimizationService : BackgroundService
 
         if (changed)
         {
-            await dbContext.SaveChangesAsync(stoppingToken);
             _logger.LogInformation("Optimized covers for {Type} {Id}", (string)entity.GetType().Name, (object)entity.Id);
         }
+        return changed;
     }
 
     private async Task<(string Type, string Url)> ResolveUrlAsync(string type, string url, CancellationToken stoppingToken)

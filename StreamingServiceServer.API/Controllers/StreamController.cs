@@ -1,4 +1,5 @@
 using System.Net;
+
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -54,6 +55,8 @@ public class StreamController : ControllerBase
         var internalPath = $"/protected/{encodedPath}";
 
         Response.Headers["X-Accel-Redirect"] = internalPath;
+        Response.Headers["Accept-Ranges"] = "bytes";
+        Response.Headers["Content-Type"] = _streamingService.GetContentType(trackPath);
         return new EmptyResult();
 
     }

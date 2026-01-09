@@ -93,4 +93,20 @@ public class StreamingService : IStreamingService
 
         return null;
     }
+
+    public string GetContentType(string path)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        return extension switch
+        {
+            ".flac" => "audio/flac",
+            ".mp3" => "audio/mpeg",
+            ".opus" => "audio/opus",
+            ".ogg" => "audio/ogg",
+            ".wav" => "audio/wav",
+            ".m4a" => "audio/mp4",
+            ".aac" => "audio/aac",
+            _ => "application/octet-stream"
+        };
+    }
 }

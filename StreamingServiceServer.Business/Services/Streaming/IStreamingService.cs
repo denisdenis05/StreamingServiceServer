@@ -6,4 +6,5 @@ public interface IStreamingService
 {
     Task<string> GetFullStreamingPath(Guid songId);
     Task<string> GetStreamingPath(Guid songId);
+    string GetContentType(string path);
 }

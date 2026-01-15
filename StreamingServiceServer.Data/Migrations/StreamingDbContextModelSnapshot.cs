@@ -425,6 +425,18 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<int?>("Length")
                         .HasColumnType("integer");
 
+                    b.Property<string>("LocalCover")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LocalSmallCover")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LocalVerySmallCover")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("OptimizedCover")
                         .IsRequired()
                         .HasColumnType("text");
@@ -501,6 +513,18 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.Property<DateTime>("DateAdded")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LocalCover")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LocalSmallCover")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LocalVerySmallCover")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<string>("OptimizedCover")
                         .IsRequired()

@@ -137,9 +137,9 @@ public static class MusicBrainzMapper
             Title = recording.Title,
             ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
-            Cover =  !string.IsNullOrEmpty(recording.OptimizedCover) ? recording.OptimizedCover : recording.Cover,
-            SmallCover =  !string.IsNullOrEmpty(recording.OptimizedSmallCover) ? recording.OptimizedSmallCover : recording.SmallCover,
-            VerySmallCover =  !string.IsNullOrEmpty(recording.OptimizedVerySmallCover) ? recording.OptimizedVerySmallCover : recording.VerySmallCover,
+            Cover = !string.IsNullOrEmpty(recording.LocalCover) ? recording.LocalCover : (!string.IsNullOrEmpty(recording.OptimizedCover) ? recording.OptimizedCover : recording.Cover),
+            SmallCover = !string.IsNullOrEmpty(recording.LocalSmallCover) ? recording.LocalSmallCover : (!string.IsNullOrEmpty(recording.OptimizedSmallCover) ? recording.OptimizedSmallCover : recording.SmallCover),
+            VerySmallCover = !string.IsNullOrEmpty(recording.LocalVerySmallCover) ? recording.LocalVerySmallCover : (!string.IsNullOrEmpty(recording.OptimizedVerySmallCover) ? recording.OptimizedVerySmallCover : recording.VerySmallCover),
             PositionInAlbum = recording.PositionInAlbum,
             IsLiked = isLiked
         };
@@ -217,9 +217,9 @@ public static class MusicBrainzMapper
             Id = release.Id,
             Title = release.Title,
             ArtistName = release.Artist?.Name ?? string.Empty,
-            Cover = !string.IsNullOrEmpty(release.OptimizedCover) ? release.OptimizedCover : release.Cover,
-            SmallCover = !string.IsNullOrEmpty(release.OptimizedSmallCover) ? release.OptimizedSmallCover : release.SmallCover,
-            VerySmallCover = !string.IsNullOrEmpty(release.OptimizedVerySmallCover) ? release.OptimizedVerySmallCover : release.VerySmallCover
+            Cover = !string.IsNullOrEmpty(release.LocalCover) ? release.LocalCover : (!string.IsNullOrEmpty(release.OptimizedCover) ? release.OptimizedCover : release.Cover),
+            SmallCover = !string.IsNullOrEmpty(release.LocalSmallCover) ? release.LocalSmallCover : (!string.IsNullOrEmpty(release.OptimizedSmallCover) ? release.OptimizedSmallCover : release.SmallCover),
+            VerySmallCover = !string.IsNullOrEmpty(release.LocalVerySmallCover) ? release.LocalVerySmallCover : (!string.IsNullOrEmpty(release.OptimizedVerySmallCover) ? release.OptimizedVerySmallCover : release.VerySmallCover)
         };
 
         if (string.IsNullOrEmpty(response.Cover))

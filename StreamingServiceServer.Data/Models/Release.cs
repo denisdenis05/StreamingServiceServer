@@ -10,6 +10,9 @@ public class Release
     public string OptimizedCover { get; set; } = string.Empty;
     public string OptimizedSmallCover { get; set; } = string.Empty;
     public string OptimizedVerySmallCover { get; set; } = string.Empty;
+    public string LocalCover { get; set; } = string.Empty;
+    public string LocalSmallCover { get; set; } = string.Empty;
+    public string LocalVerySmallCover { get; set; } = string.Empty;
     public Artist Artist { get; set; }
     public DateTime DateAdded { get; set; } = DateTime.UtcNow;
     public ICollection<Recording> Recordings { get; set; } = new List<Recording>();

@@ -48,7 +48,7 @@ public class LibraryController : ControllerBase
     }
 
     [HttpGet("playlists/{id:guid}/recordings")]
-    public async Task<IActionResult> GetPlaylistRecordings(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetPlaylistRecordings(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
@@ -57,7 +57,7 @@ public class LibraryController : ControllerBase
             return Unauthorized("Invalid or missing user ID in token.");
         }
 
-        var recordings = await _libraryService.GetPlaylistRecordingsAsync(id, userId, cancellationToken);
+        var recordings = await _libraryService.GetPlaylistRecordingsAsync(id, userId, page, pageSize, cancellationToken);
         return Ok(recordings);
     }
     [HttpGet]

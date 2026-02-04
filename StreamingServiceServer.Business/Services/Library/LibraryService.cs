@@ -91,7 +91,7 @@ public class LibraryService : ILibraryService
             .ToListAsync(cancellationToken);
     }
     
-    public async Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, Guid userId, CancellationToken cancellationToken)
+    public async Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, Guid userId, int page, int pageSize, CancellationToken cancellationToken)
     {
         var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, cancellationToken);
 
@@ -133,6 +133,8 @@ public class LibraryService : ILibraryService
                 PositionInAlbum = x.playlistRecording.Order,
                 IsLiked = likedRecordingIds.Contains(x.playlistRecording.RecordingId)
             })
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .ToListAsync(cancellationToken);
     }
 
@@ -327,18 +329,34 @@ public class LibraryService : ILibraryService
 
         foreach (var request in requests)
         {
-            var candidates = await _dbContext.Recordings
+            var strippedName = StripFeatureInfo(request.Name);
+            var useStripped = !string.Equals(request.Name, strippedName, StringComparison.OrdinalIgnoreCase);
+
+            var candidatesQuery = _dbContext.Recordings
                 .Include(r => r.ArtistCredit)
                 .ThenInclude(ac => ac.Artist)
                 .Include(r => r.Release)
-                .Where(r => r.Title.ToLower().Contains(request.Name.ToLower()))
-                .ToListAsync(cancellationToken);
+                .AsQueryable();
+
+            if (useStripped)
+            {
+                candidatesQuery = candidatesQuery.Where(r => r.Title.ToLower().Contains(request.Name.ToLower()) || r.Title.ToLower().Contains(strippedName.ToLower()));
+            }
+            else
+            {
+                candidatesQuery = candidatesQuery.Where(r => r.Title.ToLower().Contains(request.Name.ToLower()));
+            }
+
+            var candidates = await candidatesQuery.ToListAsync(cancellationToken);
 
             var bestMatch = candidates
                 .Select(r => new 
                 { 
                     Recording = r, 
-                    NameScore = FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
+                    NameScore = Math.Max(
+                        FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
+                        useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), strippedName.ToLower()) : 0
+                    ),
                     ArtistScore = r.ArtistCredit.Any() 
                         ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? "").ToLower(), request.ArtistName.ToLower()))
                         : 0,
@@ -373,11 +391,21 @@ public class LibraryService : ILibraryService
                 var query = $"recording:\"{request.Name}\" AND artist:\"{request.ArtistName}\"";
                 var externalRecordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
 
+                if (useStripped && !externalRecordings.Any())
+                {
+                     var strippedQuery = $"recording:\"{strippedName}\" AND artist:\"{request.ArtistName}\"";
+                     var strippedExternalRecordings = await _externalMusicSearchService.SearchRecordingsAsync(strippedQuery);
+                     externalRecordings.AddRange(strippedExternalRecordings);
+                }
+
                 var bestExternalMatch = externalRecordings
                     .Select(r => new 
                     { 
                         Recording = r, 
-                        NameScore = FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
+                        NameScore = Math.Max(
+                            FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
+                            useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), strippedName.ToLower()) : 0
+                        ),
                         ArtistScore = r.ArtistCredit.Any() 
                             ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? "").ToLower(), request.ArtistName.ToLower()))
                             : 0,
@@ -417,5 +445,15 @@ public class LibraryService : ILibraryService
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private string StripFeatureInfo(string title)
+    {
+        if (string.IsNullOrEmpty(title)) return title;
+        
+        // Regex to match (feat. ...) or [feat. ...] or (ft. ...) or [ft. ...] case insensitive
+        // We want to remove the whole bracket group
+        var pattern = @"\s*[\[\(]\s*(feat|ft)\.?\s+.*?[\]\)]";
+        return System.Text.RegularExpressions.Regex.Replace(title, pattern, "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
     }
 }

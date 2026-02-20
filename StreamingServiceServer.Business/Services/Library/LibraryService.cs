@@ -126,6 +126,7 @@ public class LibraryService : ILibraryService
             .Select(x => new RecordingResponse
             {
                 Id = x.playlistRecording.RecordingId,
+                ReleaseId = x.recording != null ? x.recording.Release.Id : (Guid?)null,
                 Title = x.playlistRecording.Title,
                 ArtistName = x.playlistRecording.Artist,
                 ReleaseTitle = x.playlistRecording.Album,

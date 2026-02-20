@@ -134,6 +134,7 @@ public static class MusicBrainzMapper
         var response = new RecordingResponse
         {
             Id = recording.Id,
+            ReleaseId = recording.Release?.Id,
             Title = recording.Title,
             ArtistName = recording.Release.Artist.Name,
             ReleaseTitle = recording.Release?.Title ?? string.Empty,
@@ -160,6 +161,7 @@ public static class MusicBrainzMapper
         var response = new RecordingResponse
         {
             Id = recording.Id,
+            ReleaseId = recording.Releases?.FirstOrDefault()?.Id,
             Title = recording.Title,
             ArtistName = recording.ArtistCredit.FirstOrDefault()?.Artist.Name,
             ReleaseTitle = recording.Releases?.FirstOrDefault()?.Title,

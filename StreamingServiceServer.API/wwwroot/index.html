@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>resonance — streaming service dashboard</title>
+  <link rel="stylesheet" href="/css/dashboard.css" />
+</head>
+<body>
+
+  <!-- Sticky Minimal Header Nav -->
+  <header class="site-header">
+    <a href="#overview" class="brand-logo">resonance.</a>
+    <nav class="main-nav">
+      <a href="#overview" class="nav-link active">overview</a>
+      <a href="#queue" class="nav-link">queue</a>
+      <a href="#failed" class="nav-link">failed</a>
+      <a href="#downloaded" class="nav-link">library</a>
+      <a href="#settings" class="nav-link">settings</a>
+      <a href="#how-it-works" class="nav-link">flow</a>
+      <button id="btn-open-add-modal" class="btn-cta">+ queue album</button>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <!-- ==================== OVERVIEW VIEW ==================== -->
+    <section id="view-overview" class="page-view active">
+      
+      <!-- Hero Section -->
+      <div class="hero-section">
+        <h1>your music library, <i>effortlessly gathered & synced</i></h1>
+        <p class="hero-subtext">
+          a warm, quiet dashboard to monitor torrent downloads, inspect audio metadata, and replace recordings whenever high fidelity audio is available.
+        </p>
+        <div class="hero-cta-wrapper">
+          <a href="#queue" class="btn-cta">view download queue &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Plain Numerals Stats Section (No icons, no cards, no borders per stat) -->
+      <section class="stats-section">
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div id="stat-queued" class="stat-number">0</div>
+            <div class="stat-label">queued in pipeline</div>
+          </div>
+          <div class="stat-item">
+            <div id="stat-downloading" class="stat-number">0</div>
+            <div class="stat-label">active torrents</div>
+          </div>
+          <div class="stat-item">
+            <div id="stat-downloaded" class="stat-number">0</div>
+            <div class="stat-label">downloaded albums</div>
+          </div>
+          <div class="stat-item">
+            <div id="stat-recordings" class="stat-number">0</div>
+            <div class="stat-label">indexed tracks</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Carousel 1: Queued Downloads -->
+      <section class="carousel-container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">queued <i>in download pipeline</i></h2>
+            <div class="section-subtitle">albums scheduled or currently downloading via torrent</div>
+          </div>
+          <div class="carousel-controls">
+            <button class="carousel-btn" data-target="queued-carousel-track" data-dir="left">&larr;</button>
+            <button class="carousel-btn" data-target="queued-carousel-track" data-dir="right">&rarr;</button>
+          </div>
+        </div>
+        <div id="queued-carousel-track" class="carousel-track">
+          <!-- Populated by JS -->
+        </div>
+      </section>
+
+      <!-- Carousel 2: Downloaded Albums -->
+      <section class="carousel-container">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">recent <i>downloaded releases</i></h2>
+            <div class="section-subtitle">albums completed and indexed into your local library</div>
+          </div>
+          <div class="carousel-controls">
+            <button class="carousel-btn" data-target="downloaded-carousel-track" data-dir="left">&larr;</button>
+            <button class="carousel-btn" data-target="downloaded-carousel-track" data-dir="right">&rarr;</button>
+          </div>
+        </div>
+        <div id="downloaded-carousel-track" class="carousel-track">
+          <!-- Populated by JS -->
+        </div>
+      </section>
+
+      <!-- Alternating Process / Step Section -->
+      <section id="how-it-works" class="process-section">
+        <div style="margin-bottom: 3rem; text-align: center;">
+          <h2>how the <i>pipeline works</i></h2>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">three simple steps from album request to local playback</p>
+        </div>
+
+        <!-- Step 1 -->
+        <div class="process-step">
+          <div class="step-text">
+            <div class="step-number">01</div>
+            <h3>scrapes & matches torrents</h3>
+            <p>
+              when an album is queued, background workers query configured music torrent sources, evaluate artist and release similarity, and select the highest quality matching torrent.
+            </p>
+          </div>
+          <div class="step-visual">
+            <div class="mockup-box">
+              <div style="font-size: 0.8rem; color: var(--accent-terracotta); text-transform: lowercase;">[torrent crawler]</div>
+              <div style="font-size: 1rem; margin-top: 0.5rem; font-weight: 500;">Searching: Radiohead - In Rainbows</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">Match score: 98% • FLAC [24bit/96kHz]</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="process-step">
+          <div class="step-text">
+            <div class="step-number">02</div>
+            <h3>downloads & indexes metadata</h3>
+            <p>
+              the pending torrent checker monitors download progress, retrieves album artwork, aligns track numbers, and writes metadata directly into the streaming database.
+            </p>
+          </div>
+          <div class="step-visual">
+            <div class="mockup-box">
+              <div style="font-size: 0.8rem; color: var(--accent-olive); text-transform: lowercase;">[metadata engine]</div>
+              <div style="font-size: 1rem; margin-top: 0.5rem; font-weight: 500;">10 Tracks Matched</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">Cover optimized • Ready for streaming client</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="process-step">
+          <div class="step-text">
+            <div class="step-number">03</div>
+            <h3>custom audio file replacement</h3>
+            <p>
+              want a vinyl rip or remastered mix instead? drag & drop audio files onto any album page to immediately swap or update track recordings in your library.
+            </p>
+          </div>
+          <div class="step-visual">
+            <div class="mockup-box">
+              <div style="font-size: 0.8rem; color: var(--accent-ochre); text-transform: lowercase;">[manual override]</div>
+              <div style="font-size: 1rem; margin-top: 0.5rem; font-weight: 500;">Audio Files Replaced</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">Updated 12 track recordings with uploaded FLAC master</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Social Proof Quote Section -->
+      <section class="quote-section">
+        <div class="quote-text">
+          &ldquo;a quiet, beautiful home for all my rare records and daily listens.&rdquo;
+        </div>
+        <div class="quote-author">
+          marcus k. &mdash; stockholm
+        </div>
+      </section>
+
+    </section>
+
+    <!-- ==================== QUEUE VIEW ==================== -->
+    <section id="view-queue" class="page-view">
+      <div style="padding: var(--spacing-md) 0 1rem; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <h1>download queue & <i>torrent status</i></h1>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">monitor active downloads, pending releases, and scraping pipeline status.</p>
+        </div>
+        <div>
+          <button class="btn-secondary" onclick="requeueAllActiveQueue()">↻ requeue all active</button>
+        </div>
+      </div>
+
+      <table class="table-view">
+        <thead>
+          <tr>
+            <th>album title</th>
+            <th>artist</th>
+            <th>status</th>
+            <th>download source</th>
+            <th>actions</th>
+          </tr>
+        </thead>
+        <tbody id="queue-table-body">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ==================== FAILED QUEUE VIEW ==================== -->
+    <section id="view-failed" class="page-view">
+      <div style="padding: var(--spacing-md) 0 1rem; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <h1>failed downloads <i>queue</i></h1>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">albums where all download sources failed to find a match. review or retry requeueing.</p>
+        </div>
+        <div>
+          <button class="btn-cta" onclick="requeueAllFailed()">↻ requeue all failed</button>
+        </div>
+      </div>
+
+      <table class="table-view">
+        <thead>
+          <tr>
+            <th>album title</th>
+            <th>artist</th>
+            <th>status</th>
+            <th>actions</th>
+          </tr>
+        </thead>
+        <tbody id="failed-table-body">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ==================== DOWNLOADED VIEW ==================== -->
+    <section id="view-downloaded" class="page-view">
+      <div style="padding: var(--spacing-md) 0 1rem; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div>
+          <h1>downloaded <i>albums library</i></h1>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">all completed releases saved locally in your streaming service database.</p>
+        </div>
+        <div>
+          <input type="text" id="search-downloaded-input" placeholder="filter by title or artist..." class="form-input" style="width: 280px;" />
+        </div>
+      </div>
+
+      <div id="downloaded-grid-container" style="margin-top: 2rem; margin-bottom: var(--spacing-lg);">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <!-- ==================== SETTINGS VIEW ==================== -->
+    <section id="view-settings" class="page-view">
+      <div style="padding: var(--spacing-md) 0 1rem;">
+        <h1>download <i>settings</i></h1>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;">configure download providers, set priority order, and manage credentials. the dashboard is the source of truth.</p>
+      </div>
+
+      <!-- Provider Priority Order -->
+      <div class="settings-section">
+        <h3>provider priority <i>order</i></h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">drag to reorder. the top provider is tried first; lower ones are fallbacks.</p>
+        <div id="provider-priority-list" class="provider-priority-list">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Format Cascade -->
+      <div class="settings-section">
+        <h3>audio format <i>priority</i></h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">soulseek searches in this order. if the preferred format isn&rsquo;t found, it falls through to the next.</p>
+        <div class="format-cascade">
+          <div class="format-step format-flac">FLAC</div>
+          <span class="format-arrow">&rarr;</span>
+          <div class="format-step format-wav">WAV</div>
+          <span class="format-arrow">&rarr;</span>
+          <div class="format-step format-mp3">MP3</div>
+          <span class="format-arrow">&rarr;</span>
+          <div class="format-step format-any">Any Audio</div>
+        </div>
+      </div>
+
+      <!-- Provider Cards -->
+      <div id="provider-cards-container" class="provider-cards-grid">
+        <!-- Populated by JS -->
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem; margin-bottom: 3rem;">
+        <button id="btn-save-settings" class="btn-cta" onclick="saveProviderSettings()">save settings</button>
+      </div>
+
+      <div id="settings-status" style="margin-bottom: 2rem;"></div>
+    </section>
+
+    <!-- ==================== ALBUM DETAIL VIEW ==================== -->
+    <section id="view-album-detail" class="page-view">
+      <div id="album-detail-content" class="album-detail-view" style="display: block;">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Add Album Modal -->
+  <div id="add-album-modal" class="modal-backdrop">
+    <div class="modal-content">
+      <h2 style="margin-bottom: 0.5rem;">add album to <i>queue</i></h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+        enter the album title and artist name to schedule for torrent scraping.
+      </p>
+
+      <form id="add-album-form">
+        <div class="form-group">
+          <label class="form-label">album title</label>
+          <input type="text" id="input-album-title" class="form-input" required placeholder="e.g. Abbey Road" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">artist name</label>
+          <input type="text" id="input-album-artist" class="form-input" required placeholder="e.g. The Beatles" />
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+          <button type="button" id="btn-close-modal" class="btn-secondary">cancel</button>
+          <button type="submit" class="btn-cta">queue album</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Minimal Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">resonance.</div>
+          <div class="footer-tagline">an open music server dashboard with editorial clarity.</div>
+        </div>
+        <div>
+          <div class="footer-column-title">navigation</div>
+          <ul class="footer-links">
+            <li><a href="#overview">overview</a></li>
+            <li><a href="#queue">download queue</a></li>
+            <li><a href="#downloaded">library collection</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="footer-column-title">actions</div>
+          <ul class="footer-links">
+            <li><a href="javascript:document.getElementById('btn-open-add-modal').click()">add new album</a></li>
+            <li><a href="#how-it-works">pipeline flow</a></li>
+          </ul>
+        </div>
+        <div>
+          <div class="footer-column-title">system</div>
+          <ul class="footer-links">
+            <li><a href="/swagger" target="_blank">swagger api docs</a></li>
+            <li><a href="#">asp.net core 9</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div>&copy; 2026 resonance music server. warm cream aesthetic edition.</div>
+        <div>built for local streaming service backend.</div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>

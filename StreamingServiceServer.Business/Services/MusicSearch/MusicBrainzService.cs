@@ -17,11 +17,11 @@ public class MusicBrainzService : IExternalMusicSearchService
     {
         _httpClient = httpClient;
         _configuration = configuration;
-        _baseUrl = _configuration["Music:External:MusicBrainz:BaseUrl"];
-        _baseCoverUrl = _configuration["Music:External:AlbumCover:BaseUrl"];
+        _baseUrl = _configuration["Music:External:MusicBrainz:BaseUrl"] ?? "https://musicbrainz.org/ws/2/";
+        _baseCoverUrl = _configuration["Music:External:AlbumCover:BaseUrl"] ?? "https://coverartarchive.org/release/";
 
-        _httpClient.DefaultRequestHeaders.Add("User-Agent",
-            _configuration["Music:External:MusicBrainz:User-Agent"]); 
+        var userAgent = _configuration["Music:External:MusicBrainz:User-Agent"] ?? "StreamingService/1.0.0 (contact@example.com)";
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", userAgent); 
     }
 
     public async Task<List<ArtistDto>> SearchArtistsAsync(string query)

@@ -27,9 +27,9 @@ public class QBittorrentHelper: ITorrentHelper
         _httpClient = httpClient;
         _configuration = configuration;
         
-        _baseUrl = _configuration["Music:DownloadSource:Torrent:Url"].TrimEnd('/');
-        _username = _configuration["Music:DownloadSource:Torrent:User"];
-        _password = _configuration["Music:DownloadSource:Torrent:Password"];;
+        _baseUrl = (_configuration["Music:DownloadSource:Torrent:Url"] ?? "http://localhost:8080").TrimEnd('/');
+        _username = _configuration["Music:DownloadSource:Torrent:User"] ?? "admin";
+        _password = _configuration["Music:DownloadSource:Torrent:Password"] ?? "adminadmin";
     }
 
     public async Task LoginAsync()

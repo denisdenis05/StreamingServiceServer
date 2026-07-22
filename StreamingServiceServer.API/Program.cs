@@ -35,17 +35,18 @@ builder.Services.AddHttpClient("unsafeHttp", client =>
         };
     });
 
-builder.Services.AddAuthorization(options =>
-{
-    // Add a default policy that requires authentication
-    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
-});
+builder.Services.AddAuthorization();
 
 builder.Services.AddEndpointsApiExplorer(); 
 builder.Services.AddDbContext<StreamingDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    var connStr = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connStr) || connStr == "-")
+    {
+        connStr = "Host=localhost;Database=streaming_db;Username=postgres;Password=postgres";
+    }
+    options.UseNpgsql(connStr);
+});
 
 builder.Services.AddSwaggerGen(c =>
 {
@@ -120,6 +121,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowFrontend");
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseHttpsRedirection();
 app.UseAuthentication();    
 app.UseAuthorization();

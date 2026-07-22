@@ -21,9 +21,17 @@ public class PendingDownloadChecker : BackgroundService
     private readonly IMetadataService _metadataService;
     private readonly IConfiguration _configuration;
     private readonly IImageService _imageService;
+    private readonly DownloadProviderConfigService _configService;
     private string _musicLocation;
 
-    public PendingDownloadChecker(StreamingDbContext dbContext, ITorrentHelper torrentHelper, IExternalMusicSearchService externalMusicSearchService, IMetadataService metadataService, IConfiguration configuration, IImageService imageService)
+    public PendingDownloadChecker(
+        StreamingDbContext dbContext, 
+        ITorrentHelper torrentHelper, 
+        IExternalMusicSearchService externalMusicSearchService, 
+        IMetadataService metadataService, 
+        IConfiguration configuration, 
+        IImageService imageService,
+        DownloadProviderConfigService configService)
     {
         _dbContext = dbContext;
         _torrentHelper = torrentHelper;
@@ -31,8 +39,9 @@ public class PendingDownloadChecker : BackgroundService
         _metadataService = metadataService;
         _configuration = configuration;
         _imageService = imageService;
+        _configService = configService;
         
-        _musicLocation = _configuration["Music:Path"];
+        _musicLocation = _configuration["Music:Path"] ?? "./Music";
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,7 +50,7 @@ public class PendingDownloadChecker : BackgroundService
         {
             try
             {
-                await CheckPendingDownloadsAsync();
+                await CheckPendingDownloadsAsync(stoppingToken);
             }
             catch (Exception ex)
             {
@@ -52,32 +61,85 @@ public class PendingDownloadChecker : BackgroundService
         }
     }
 
-    private async Task CheckPendingDownloadsAsync()
+    private async Task CheckPendingDownloadsAsync(CancellationToken cancellationToken)
     {
-        await Task.Delay(3000);
+        await Task.Delay(3000, cancellationToken);
         var pending = _dbContext.PendingDownloads.ToList();
+
+        // Get providers so we can route by ProviderName
+        var providers = await _configService.GetActiveProvidersOrderedAsync();
 
         foreach (var item in pending)
         {
             try
             {
-                var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
-                if (info != null && info.Progress >= 1.0)
-                {
-                    var files = GetMusicFilesInSavePath(info.SavePath);
-                    var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+                var providerName = item.ProviderName ?? "Torrent";
+                var providerEntry = providers.FirstOrDefault(p => 
+                    p.provider.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase));
 
-                    MoveMatchedFiles(matches);
-                    await CleanUpTorrentAndFilesAsync(item.SourceName);
+                if (providerEntry.provider == null)
+                {
+                    // Fallback to torrent check for backward compatibility
+                    await CheckTorrentPendingAsync(item);
+                    continue;
+                }
+
+                var progressInfo = await providerEntry.provider.CheckProgressAsync(
+                    item.SourceName, cancellationToken);
+
+                if (progressInfo != null && progressInfo.Progress >= 1.0)
+                {
+                    Console.WriteLine($"[PendingDownloadChecker] {providerName} download complete for {item.Id}");
+
+                    var savePath = !string.IsNullOrWhiteSpace(progressInfo.SavePath)
+                        ? progressInfo.SavePath
+                        : item.SavePath ?? "";
+
+                    // For torrent: use the torrent info save path
+                    if (providerName == "Torrent")
+                    {
+                        var torrentInfo = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
+                        if (torrentInfo != null)
+                            savePath = torrentInfo.SavePath;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(savePath))
+                    {
+                        var files = GetMusicFilesInSavePath(savePath);
+                        var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+                        MoveMatchedFiles(matches);
+                    }
+
+                    // Clean up via provider
+                    await providerEntry.provider.CleanUpAsync(item.SourceName, true);
+
+                    // Save MusicBrainz metadata
                     await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
 
                     await RemoveAlbumFromDatabaseQueues(item.Id);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                Console.WriteLine($"[PendingDownloadChecker] Error: {item.Id}");
+                Console.WriteLine($"[PendingDownloadChecker] Error processing {item.Id}: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>Backward-compatible torrent check for items without ProviderName.</summary>
+    private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item)
+    {
+        var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
+        if (info != null && info.Progress >= 1.0)
+        {
+            var files = GetMusicFilesInSavePath(info.SavePath);
+            var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+
+            MoveMatchedFiles(matches);
+            await CleanUpTorrentAndFilesAsync(item.SourceName);
+            await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+
+            await RemoveAlbumFromDatabaseQueues(item.Id);
         }
     }
     

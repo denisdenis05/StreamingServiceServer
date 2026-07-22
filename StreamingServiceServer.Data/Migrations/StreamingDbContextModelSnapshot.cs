@@ -217,6 +217,63 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("ArtistTags");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.DownloadProviderConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ApiKey")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ApiUrl")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ExtraConfig")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FormatPreferences")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("LastUpdated")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Password")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("PriorityOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProviderName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderName")
+                        .IsUnique();
+
+                    b.ToTable("DownloadProviderConfigs");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.FailedDownload", b =>
                 {
                     b.Property<Guid>("Id")
@@ -399,6 +456,13 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("ProviderName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SavePath")
+                        .HasColumnType("text");
 
                     b.Property<string>("SourceName")
                         .IsRequired()

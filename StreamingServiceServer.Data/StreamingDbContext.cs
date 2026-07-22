@@ -22,6 +22,7 @@ public class StreamingDbContext : DbContext
     public DbSet<ReleaseToDownload> ReleasesToDownload { get; set; }
     public DbSet<FailedDownload> FailedDownloads { get; set; }
     public DbSet<PendingDownload> PendingDownloads { get; set; }
+    public DbSet<DownloadProviderConfig> DownloadProviderConfigs { get; set; }
     
     public virtual DbSet<User> Users { get; set; }
     public virtual DbSet<RefreshToken> RefreshTokens { get; set; }

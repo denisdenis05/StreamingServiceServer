@@ -169,9 +169,13 @@ public class SoulseekProvider : IDownloadProvider
         };
     }
 
-    public Task CleanUpAsync(string sourceIdentifier, bool deleteFiles)
+    public async Task CleanUpAsync(string sourceIdentifier, bool deleteFiles)
     {
-        return Task.CompletedTask;
+        var parts = sourceIdentifier.Split(':');
+        if (parts.Length < 3) return;
+
+        var username = parts[2];
+        await _slskdHelper.RemoveCompletedTransfersAsync(username);
     }
 
     // ─── Rate limiting & Search throttling ───

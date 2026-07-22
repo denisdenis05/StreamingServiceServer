@@ -268,6 +268,42 @@ public class SlskdHelper
     }
 
     /// <summary>
+    /// Remove completed/errored transfer records from Slskd for a specific user.
+    /// </summary>
+    public async Task RemoveCompletedTransfersAsync(string username, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var downloads = await GetDownloadsAsync(cancellationToken);
+            if (downloads == null) return;
+
+            var userTransfers = downloads.FirstOrDefault(d => 
+                d.Username?.Equals(username, StringComparison.OrdinalIgnoreCase) == true);
+
+            if (userTransfers?.Directories == null) return;
+
+            foreach (var dir in userTransfers.Directories)
+            {
+                if (dir.Files == null) continue;
+                foreach (var file in dir.Files)
+                {
+                    if (!string.IsNullOrWhiteSpace(file.Id))
+                    {
+                        try
+                        {
+                            var encodedUser = Uri.EscapeDataString(username);
+                            var req = new HttpRequestMessage(HttpMethod.Delete, $"{_baseUrl}/api/v0/transfers/downloads/{encodedUser}/{file.Id}");
+                            await SendAuthenticatedAsync(req, cancellationToken);
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>
     /// Test connection to the Slskd instance with detailed status message.
     /// </summary>
     public async Task<(bool success, string message)> TestConnectionDetailedAsync(CancellationToken cancellationToken = default)
@@ -400,6 +436,7 @@ public class SlskdTransferFile
 
 public class SlskdTransferItem
 {
+    public string? Id { get; set; }
     public string? Filename { get; set; }
     public string? State { get; set; }
     public long Size { get; set; }

@@ -249,121 +249,15 @@ public class PendingDownloadChecker : BackgroundService
         return result;
     }
 
-    private async Task<ICollection<MusicFileMatch>> MatchSongsWithMetadataAsync(
-        Guid albumId, 
+    private Task<ICollection<MusicFileMatch>> MatchSongsWithMetadataAsync(
+        Guid albumId,
         List<(string fileName, string fullPath)> files,
         IExternalMusicSearchService externalMusicSearchService,
         IImageService imageService)
     {
-        var recordings = await externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
-        var simpleRecordings = recordings.Select(recording => recording.ToResponse(imageService)).ToList();
-    
-        var matches = new List<MusicFileMatch>();
-    
-        var unmatchedFiles = new List<(string fileName, string fullPath)>(files);
-    
-        foreach (var recording in simpleRecordings.OrderBy(r => r.PositionInAlbum))
-        {
-            string target = $"{recording.PositionInAlbum} {recording.Title}";
-            string sanitizedTarget = StringSanitizers.SanitizeTitle(target).ToLower();
-    
-            (string fileName, string fullPath)? bestFile = null;
-            int bestScore = 0;
-    
-            foreach (var (fileName, fullPath) in unmatchedFiles)
-            {
-                var metadata = GetAudioMetadata(fullPath);
-
-                int combinedScore = 0;
-
-                if (metadata != null && !string.IsNullOrWhiteSpace(metadata.Title))
-                {
-                    int titleScore = Fuzz.TokenSetRatio(
-                        StringSanitizers.SanitizeTitle(metadata.Title).ToLower(),
-                        sanitizedTarget
-                    );
-
-                    combinedScore = titleScore;
-                }
-                else
-                {
-                    var (fileTrackNum, fileTitle) = ExtractTrackInfo(fileName);
-
-                    bool trackNumMatches = fileTrackNum.HasValue &&
-                                           fileTrackNum == recording.PositionInAlbum;
-
-                    int titleScore = Fuzz.TokenSetRatio(fileTitle, sanitizedTarget);
-
-                    combinedScore = titleScore;
-                    if (trackNumMatches)
-                        combinedScore += 15; 
-                }
-
-                if (combinedScore > bestScore)
-                {
-                    bestScore = combinedScore;
-                    bestFile = (fileName, fullPath);
-                }
-            }
-    
-            if (bestFile != null)
-            {
-                matches.Add(new MusicFileMatch
-                {
-                    FileName = bestFile.Value.fileName,
-                    FullPath = bestFile.Value.fullPath,
-                    Recording = recording,
-                    Score = bestScore
-                });
-    
-                unmatchedFiles.Remove(bestFile.Value);
-            }
-            else
-            {
-                matches.Add(new MusicFileMatch
-                {
-                    FileName = "<NO MATCH>",
-                    FullPath = string.Empty,
-                    Recording = recording,
-                    Score = 0
-                });
-            }
-        }
-    
-        return matches;
+        return SoulseekMatchingHelper.MatchSongsWithMetadataAsync(albumId, files, externalMusicSearchService, imageService);
     }
-    
-    private static string SanitizeFileNameTitle(string title)
-    {
-        title = Path.GetFileNameWithoutExtension(title);
-        return title.ToLowerInvariant();
-    }
-    
-    private static (int? trackNumber, string cleanTitle) ExtractTrackInfo(string fileName)
-    {
-        var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
 
-        var match = System.Text.RegularExpressions.Regex.Match(
-            nameWithoutExt,
-            @"^(?<num>\d{1,2})\s*[-._ ]?\s*(?<title>.*)$"
-        );
-
-        if (match.Success)
-        {
-            int num = int.Parse(match.Groups["num"].Value);
-            string title = match.Groups["title"].Value;
-            title = System.Text.RegularExpressions.Regex.Replace(title, @"[^\w\s]", " ");
-            title = System.Text.RegularExpressions.Regex.Replace(title, @"\s+", " ").Trim();
-            return (num, title.ToLowerInvariant());
-        }
-        else
-        {
-            var clean = System.Text.RegularExpressions.Regex.Replace(nameWithoutExt, @"[^\w\s]", " ");
-            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
-            return (null, clean.ToLowerInvariant());
-        }
-    }
-    
     private int MoveMatchedFiles(ICollection<MusicFileMatch> matches)
     {
         var baseMusicPath = _musicLocation;
@@ -372,7 +266,7 @@ public class PendingDownloadChecker : BackgroundService
         foreach (var match in matches)
         {
             if (match.Score == 0 || string.IsNullOrWhiteSpace(match.FullPath))
-                continue; 
+                continue;
 
             var recording = match.Recording;
             var relativePath = MusicLocationHelper.GetRelativeFolderPathForRecording(recording);
@@ -381,9 +275,7 @@ public class PendingDownloadChecker : BackgroundService
             Directory.CreateDirectory(destinationDir);
 
             var extension = Path.GetExtension(match.FullPath);
-
             var newFileName = recording.Id + extension;
-
             var destinationPath = Path.Combine(destinationDir, newFileName);
 
             try
@@ -403,7 +295,6 @@ public class PendingDownloadChecker : BackgroundService
     private async Task CleanUpTorrentAndFilesAsync(string torrentName)
     {
         var shouldTorrentClientCleanFiles = true;
-        
         await _torrentHelper.RemoveTorrentAsync(torrentName, shouldTorrentClientCleanFiles);
     }
 
@@ -425,25 +316,9 @@ public class PendingDownloadChecker : BackgroundService
 
         await dbContext.SaveChangesAsync();
     }
-    
+
     private AudioMetadata? GetAudioMetadata(string filePath)
     {
-        try
-        {
-            var file = TagLib.File.Create(filePath);
-            return new AudioMetadata
-            {
-                Title = file.Tag.Title,
-                Artist = file.Tag.FirstPerformer,
-                Album = file.Tag.Album,
-                TrackNumber = file.Tag.Track,
-                Year = file.Tag.Year
-            };
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Failed to read metadata: {ex.Message}");
-            return null;
-        }
+        return AudioMetadataHelper.GetAudioMetadata(filePath);
     }
 }

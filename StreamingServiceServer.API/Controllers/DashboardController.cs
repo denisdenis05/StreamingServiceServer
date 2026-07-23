@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StreamingServiceDownloader.Helpers;
+using StreamingServiceDownloader.Models;
+using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.MusicSearch;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
@@ -19,6 +21,8 @@ public class DashboardController : ControllerBase
     private readonly ILogger<DashboardController> _logger;
     private readonly DownloadProviderConfigService _providerConfigService;
     private readonly SlskdHelper _slskdHelper;
+    private readonly IExternalMusicSearchService _externalMusicSearchService;
+    private readonly IImageService _imageService;
 
     public DashboardController(
         StreamingDbContext dbContext,
@@ -27,7 +31,9 @@ public class DashboardController : ControllerBase
         IConfiguration configuration,
         ILogger<DashboardController> logger,
         DownloadProviderConfigService providerConfigService,
-        SlskdHelper slskdHelper)
+        SlskdHelper slskdHelper,
+        IExternalMusicSearchService externalMusicSearchService,
+        IImageService imageService)
     {
         _dbContext = dbContext;
         _torrentHelper = torrentHelper;
@@ -36,6 +42,8 @@ public class DashboardController : ControllerBase
         _logger = logger;
         _providerConfigService = providerConfigService;
         _slskdHelper = slskdHelper;
+        _externalMusicSearchService = externalMusicSearchService;
+        _imageService = imageService;
     }
 
     [Authorize(Roles = "Admin")]
@@ -1064,11 +1072,16 @@ public class DashboardController : ControllerBase
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+
     private async Task<int> ScanAndImportFromSoulseekAsync(Guid? targetAlbumId, CancellationToken cancellationToken)
     {
         var slskdDownloadDir = _configuration["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
+        _logger.LogInformation("[Soulseek Scan] Download dir: {Dir}", slskdDownloadDir);
         if (!Directory.Exists(slskdDownloadDir))
+        {
+            _logger.LogWarning("[Soulseek Scan] Download dir does not exist: {Dir}", slskdDownloadDir);
             return 0;
+        }
 
         var baseMusicPath = _configuration["Music:Path"] ?? "/nas/media/AudioFiles/";
         var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1076,15 +1089,16 @@ public class DashboardController : ControllerBase
             ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma"
         };
 
-        List<string> downloadDirs;
+        List<string> allDirectories;
         try
         {
-            downloadDirs = Directory.GetDirectories(slskdDownloadDir, "*", SearchOption.AllDirectories).ToList();
-            downloadDirs.Add(slskdDownloadDir);
+            allDirectories = Directory.GetDirectories(slskdDownloadDir, "*", SearchOption.AllDirectories).ToList();
+            allDirectories.Insert(0, slskdDownloadDir);
+            _logger.LogInformation("[Soulseek Scan] Found {Count} directories under {Dir}", allDirectories.Count, slskdDownloadDir);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error listing directories in slskd downloads folder");
+            _logger.LogError(ex, "[Soulseek Scan] Error listing directories");
             return 0;
         }
 
@@ -1094,11 +1108,10 @@ public class DashboardController : ControllerBase
             .AsQueryable();
 
         if (targetAlbumId.HasValue)
-        {
             query = query.Where(r => r.Id == targetAlbumId.Value);
-        }
 
         var releases = await query.ToListAsync(cancellationToken);
+        _logger.LogInformation("[Soulseek Scan] Processing {Count} release(s)", releases.Count);
         int importedCount = 0;
 
         foreach (var release in releases)
@@ -1106,11 +1119,15 @@ public class DashboardController : ControllerBase
             var artistName = release.Artist?.Name ?? "";
             var releaseTitle = release.Title ?? "";
 
-            var relativePath = StreamingServiceServer.Business.Helpers.MusicLocationHelper.GetRelativeFolderPathForRecording(new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
-            {
-                ArtistName = artistName,
-                ReleaseTitle = releaseTitle
-            });
+            _logger.LogInformation("[Soulseek Scan] --- Release: '{Title}' by '{Artist}' ({Count} recordings) ---",
+                releaseTitle, artistName, release.Recordings.Count);
+
+            var relativePath = StreamingServiceServer.Business.Helpers.MusicLocationHelper.GetRelativeFolderPathForRecording(
+                new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+                {
+                    ArtistName = artistName,
+                    ReleaseTitle = releaseTitle
+                });
 
             var destinationDir = Path.Combine(baseMusicPath, relativePath);
             Directory.CreateDirectory(destinationDir);
@@ -1120,128 +1137,218 @@ public class DashboardController : ControllerBase
             {
                 var existingFiles = Directory.GetFiles(destinationDir, rec.Id.ToString() + ".*");
                 if (existingFiles.Length == 0)
-                {
                     missingRecordings.Add(rec);
-                }
             }
+
+            _logger.LogInformation("[Soulseek Scan] {Missing}/{Total} recordings missing for '{Title}'",
+                missingRecordings.Count, release.Recordings.Count, releaseTitle);
 
             if (missingRecordings.Count == 0) continue;
 
-            // 1. Fuzzy match download directories against Album Title and Artist + Album Title
-            string sanitizedAlbum = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(releaseTitle).ToLowerInvariant();
-            string sanitizedArtistAlbum = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle($"{artistName} {releaseTitle}").ToLowerInvariant();
+            // Sanitize album title: strip brackets so "[2013] The Lost Tapes" matches "The Lost Tapes"
+            string sanitizedAlbum = StringSanitizers.SanitizeTitle(
+                SoulseekMatchingHelper.SanitizeFolderName(releaseTitle)).ToLowerInvariant();
+            string sanitizedArtistAlbum = StringSanitizers.SanitizeTitle(
+                SoulseekMatchingHelper.SanitizeFolderName($"{artistName} {releaseTitle}")).ToLowerInvariant();
 
-            var candidateDirs = new List<(string dirPath, int score)>();
+            _logger.LogInformation("[Soulseek Scan] Sanitized album key: '{Album}' | artist+album: '{ArtistAlbum}'",
+                sanitizedAlbum, sanitizedArtistAlbum);
 
-            foreach (var dir in downloadDirs)
+            // 1. Fuzzy search all directory names (> 60%) — strip brackets from folder names before comparing
+            var candidateDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var dirScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var dir in allDirectories)
             {
-                var dirName = Path.GetFileName(dir);
-                string sanitizedDir = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(dirName).ToLowerInvariant();
+                var rawDirName = Path.GetFileName(dir);
+                string sanitizedDir = StringSanitizers.SanitizeTitle(
+                    SoulseekMatchingHelper.SanitizeFolderName(rawDirName)).ToLowerInvariant();
 
-                int albumScore = FuzzySharp.Fuzz.PartialRatio(sanitizedAlbum, sanitizedDir);
-                int artistAlbumScore = FuzzySharp.Fuzz.PartialRatio(sanitizedArtistAlbum, sanitizedDir);
-                int bestDirScore = Math.Max(albumScore, artistAlbumScore);
+                int albumScore = FuzzySharp.Fuzz.TokenSetRatio(sanitizedAlbum, sanitizedDir);
+                int artistAlbumScore = FuzzySharp.Fuzz.TokenSetRatio(sanitizedArtistAlbum, sanitizedDir);
+                int score = Math.Max(albumScore, artistAlbumScore);
 
-                if (bestDirScore >= 60)
+                if (score > 60)
                 {
-                    candidateDirs.Add((dir, bestDirScore));
+                    candidateDirs.Add(dir);
+                    dirScores[dir] = score;
+                    _logger.LogInformation("[Soulseek Scan] Candidate folder: '{Dir}' => score {Score} (album={AlbumScore}, artist+album={ArtistScore})",
+                        rawDirName, score, albumScore, artistAlbumScore);
                 }
             }
 
-            var searchDirs = candidateDirs.Count > 0 
-                ? candidateDirs.OrderByDescending(cd => cd.score).Select(cd => cd.dirPath).ToList()
-                : downloadDirs;
+            _logger.LogInformation("[Soulseek Scan] {Count} candidate folder(s) found", candidateDirs.Count);
 
-            // 2. Gather audio files from candidate directories
-            var candidateFiles = new List<(string fileName, string fullPath)>();
-            foreach (var dir in searchDirs)
+            // Local function: match files in a folder using direct title-based matching against missingRecordings
+            async Task<bool> TryImportFromCandidateFolderAsync(string rootFolder, int folderScore)
             {
+                if (!Directory.Exists(rootFolder)) return false;
+
+                var folderFiles = new List<(string fileName, string fullPath)>();
                 try
                 {
-                    if (Directory.Exists(dir))
+                    foreach (var f in Directory.EnumerateFiles(rootFolder, "*.*", SearchOption.AllDirectories))
                     {
-                        foreach (var filePath in Directory.GetFiles(dir))
+                        if (allowedExtensions.Contains(Path.GetExtension(f)))
+                            folderFiles.Add((Path.GetFileName(f), f));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[Soulseek Scan] Cannot enumerate files in {Dir}", rootFolder);
+                    return false;
+                }
+
+                _logger.LogInformation("[Soulseek Scan] Folder '{Folder}' (score={Score}): {Count} audio file(s)",
+                    Path.GetFileName(rootFolder), folderScore, folderFiles.Count);
+
+                if (folderFiles.Count == 0) return false;
+
+                // Match each missing recording to a file by metadata tag or filename fuzzy score
+                // NOTE: We match against our DB Recording entities directly — do NOT filter by external API IDs
+                var matched = new List<(Recording recording, string fullPath, bool isMetadataMatch, int score)>();
+                var remainingFiles = new List<(string fileName, string fullPath)>(folderFiles);
+
+                foreach (var recording in missingRecordings)
+                {
+                    string targetTitle = recording.Title ?? "";
+                    string sanitizedTarget = StringSanitizers.SanitizeTitle(targetTitle).ToLowerInvariant();
+
+                    (string fileName, string fullPath)? bestFile = null;
+                    bool isMeta = false;
+                    int bestScore = 0;
+
+                    foreach (var (fileName, fullPath) in remainingFiles)
+                    {
+                        var meta = AudioMetadataHelper.GetAudioMetadata(fullPath);
+
+                        // Prefer metadata match (album+title from audio tags)
+                        if (AudioMetadataHelper.IsMetadataMatch(meta, releaseTitle, targetTitle))
                         {
-                            if (allowedExtensions.Contains(Path.GetExtension(filePath)))
+                            bestFile = (fileName, fullPath);
+                            isMeta = true;
+                            bestScore = 100;
+                            break;
+                        }
+
+                        // Fallback: fuzzy on ID3 title tag if available
+                        int score = 0;
+                        if (meta != null && !string.IsNullOrWhiteSpace(meta.Title))
+                        {
+                            score = FuzzySharp.Fuzz.TokenSetRatio(
+                                StringSanitizers.SanitizeTitle(meta.Title).ToLowerInvariant(),
+                                sanitizedTarget);
+                        }
+                        else
+                        {
+                            // Fallback: fuzzy on filename
+                            string fileNameClean = StringSanitizers.SanitizeTitle(
+                                Path.GetFileNameWithoutExtension(fileName)).ToLowerInvariant();
+                            score = FuzzySharp.Fuzz.TokenSetRatio(fileNameClean, sanitizedTarget);
+
+                            if (recording.PositionInAlbum > 0)
                             {
-                                candidateFiles.Add((Path.GetFileName(filePath), filePath));
+                                string posStr = recording.PositionInAlbum.ToString();
+                                string posPadded = recording.PositionInAlbum.ToString("D2");
+                                if (fileName.Contains(posStr) || fileName.Contains(posPadded))
+                                    score += 10;
                             }
                         }
-                    }
-                }
-                catch
-                {
-                    // Ignore inaccessible folders
-                }
-            }
 
-            if (candidateFiles.Count == 0) continue;
-
-            // 3. Match missing recordings to candidate files & move matched files
-            foreach (var recording in missingRecordings)
-            {
-                string targetTitle = recording.Title ?? "";
-                string sanitizedTarget = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(targetTitle).ToLowerInvariant();
-
-                (string fileName, string fullPath)? bestMatch = null;
-                int bestScore = 0;
-
-                foreach (var file in candidateFiles)
-                {
-                    string fileNameClean = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(Path.GetFileNameWithoutExtension(file.fileName)).ToLowerInvariant();
-                    int score = FuzzySharp.Fuzz.PartialRatio(sanitizedTarget, fileNameClean);
-
-                    if (recording.PositionInAlbum > 0)
-                    {
-                        string posStr = recording.PositionInAlbum.ToString();
-                        if (file.fileName.StartsWith(posStr) || file.fileName.Contains($" {posStr} ") || file.fileName.Contains($"0{posStr}"))
+                        if (score > bestScore && score >= 60)
                         {
-                            score += 15;
+                            bestScore = score;
+                            bestFile = (fileName, fullPath);
                         }
                     }
 
-                    if (score > bestScore && score >= 65)
+                    if (bestFile != null)
                     {
-                        bestScore = score;
-                        bestMatch = file;
+                        _logger.LogInformation("[Soulseek Scan] Matched '{Track}' => '{File}' (meta={IsMeta}, score={Score})",
+                            targetTitle, bestFile.Value.fileName, isMeta, bestScore);
+                        matched.Add((recording, bestFile.Value.fullPath, isMeta, bestScore));
+                        remainingFiles.Remove(bestFile.Value);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("[Soulseek Scan] No match for '{Track}' in '{Folder}'",
+                            targetTitle, Path.GetFileName(rootFolder));
                     }
                 }
 
-                if (bestMatch.HasValue)
+                int metaCount = matched.Count(m => m.isMetadataMatch);
+                _logger.LogInformation("[Soulseek Scan] Folder '{Folder}': {Total} matched ({Meta} via metadata), score={FolderScore}",
+                    Path.GetFileName(rootFolder), matched.Count, metaCount, folderScore);
+
+                // Validation: if folder score >= 90, trust it unconditionally
+                // Otherwise require at least 1 metadata match or >= min(3, missingCount) filename matches
+                if (folderScore < 90)
                 {
-                    var ext = Path.GetExtension(bestMatch.Value.fullPath);
+                    int minRequired = Math.Min(3, missingRecordings.Count);
+                    bool isValid = metaCount > 0 || matched.Count >= minRequired;
+                    if (!isValid)
+                    {
+                        _logger.LogInformation("[Soulseek Scan] Validation FAILED for '{Folder}': {Matched}/{Min} matches, {Meta} metadata",
+                            Path.GetFileName(rootFolder), matched.Count, minRequired, metaCount);
+                        return false;
+                    }
+                }
+
+                // Copy matched files
+                int copied = 0;
+                foreach (var (recording, sourcePath, _, _) in matched)
+                {
+                    var ext = Path.GetExtension(sourcePath);
                     var destPath = Path.Combine(destinationDir, recording.Id.ToString() + ext);
                     try
                     {
-                        if (System.IO.File.Exists(destPath))
-                        {
-                            System.IO.File.Delete(destPath);
-                        }
-
-                        try
-                        {
-                            System.IO.File.Move(bestMatch.Value.fullPath, destPath, overwrite: true);
-                        }
-                        catch (IOException)
-                        {
-                            System.IO.File.Copy(bestMatch.Value.fullPath, destPath, overwrite: true);
-                            System.IO.File.Delete(bestMatch.Value.fullPath);
-                        }
-
-                        importedCount++;
-                        candidateFiles.RemoveAll(f => f.fullPath == bestMatch.Value.fullPath);
+                        System.IO.File.Copy(sourcePath, destPath, overwrite: true);
+                        _logger.LogInformation("[Soulseek Scan] Copied '{Source}' => '{Dest}'", sourcePath, destPath);
+                        copied++;
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to move audio file from {Source} to {Dest}", bestMatch.Value.fullPath, destPath);
+                        _logger.LogError(ex, "[Soulseek Scan] Failed to copy '{Source}' => '{Dest}'", sourcePath, destPath);
                     }
+                }
+
+                importedCount += copied;
+                return copied > 0;
+            }
+
+            // 2. Try candidate folders (sorted by score descending)
+            bool importedFromSet = false;
+            var sortedCandidates = candidateDirs.OrderByDescending(d => dirScores.GetValueOrDefault(d, 0)).ToList();
+
+            foreach (var candidateDir in sortedCandidates)
+            {
+                int folderScore = dirScores.GetValueOrDefault(candidateDir, 0);
+                if (await TryImportFromCandidateFolderAsync(candidateDir, folderScore))
+                {
+                    importedFromSet = true;
+                    break;
+                }
+            }
+
+            // 3. If still 0 matches, fall back to ALL remaining folders
+            if (!importedFromSet)
+            {
+                _logger.LogInformation("[Soulseek Scan] No candidate matched, falling back to all {Count} remaining dirs", 
+                    allDirectories.Count - candidateDirs.Count);
+                var remainingDirs = allDirectories.Where(d => !candidateDirs.Contains(d)).ToList();
+                foreach (var dir in remainingDirs)
+                {
+                    if (await TryImportFromCandidateFolderAsync(dir, 0))
+                        break;
                 }
             }
         }
 
         await PerformFullAnalysisScanAsync(cancellationToken);
+        _logger.LogInformation("[Soulseek Scan] Done. Total imported: {Count}", importedCount);
         return importedCount;
     }
+
 }
 
 public class AddAlbumRequest

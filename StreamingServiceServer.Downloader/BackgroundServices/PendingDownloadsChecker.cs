@@ -2,6 +2,7 @@ using System.Net;
 using FuzzySharp;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using StreamingServiceDownloader.Helpers;
 using StreamingServiceDownloader.Models;
@@ -15,31 +16,19 @@ namespace StreamingServiceDownloader.BackgroundServices;
 
 public class PendingDownloadChecker : BackgroundService
 {
-    private readonly StreamingDbContext _dbContext;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITorrentHelper _torrentHelper;
-    private readonly IExternalMusicSearchService _externalMusicSearchService;
-    private readonly IMetadataService _metadataService;
     private readonly IConfiguration _configuration;
-    private readonly IImageService _imageService;
-    private readonly DownloadProviderConfigService _configService;
     private string _musicLocation;
 
     public PendingDownloadChecker(
-        StreamingDbContext dbContext, 
+        IServiceScopeFactory scopeFactory, 
         ITorrentHelper torrentHelper, 
-        IExternalMusicSearchService externalMusicSearchService, 
-        IMetadataService metadataService, 
-        IConfiguration configuration, 
-        IImageService imageService,
-        DownloadProviderConfigService configService)
+        IConfiguration configuration)
     {
-        _dbContext = dbContext;
+        _scopeFactory = scopeFactory;
         _torrentHelper = torrentHelper;
-        _externalMusicSearchService = externalMusicSearchService;
-        _metadataService = metadataService;
         _configuration = configuration;
-        _imageService = imageService;
-        _configService = configService;
         
         _musicLocation = _configuration["Music:Path"] ?? "./Music";
     }
@@ -64,10 +53,18 @@ public class PendingDownloadChecker : BackgroundService
     private async Task CheckPendingDownloadsAsync(CancellationToken cancellationToken)
     {
         await Task.Delay(3000, cancellationToken);
-        var pending = _dbContext.PendingDownloads.ToList();
+
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        var configService = scope.ServiceProvider.GetRequiredService<DownloadProviderConfigService>();
+        var metadataService = scope.ServiceProvider.GetRequiredService<IMetadataService>();
+        var externalMusicSearchService = scope.ServiceProvider.GetRequiredService<IExternalMusicSearchService>();
+        var imageService = scope.ServiceProvider.GetRequiredService<IImageService>();
+
+        var pending = dbContext.PendingDownloads.ToList();
 
         // Get providers so we can route by ProviderName
-        var providers = await _configService.GetActiveProvidersOrderedAsync();
+        var providers = await configService.GetActiveProvidersOrderedAsync();
 
         foreach (var item in pending)
         {
@@ -80,7 +77,7 @@ public class PendingDownloadChecker : BackgroundService
                 if (providerEntry.provider == null)
                 {
                     // Fallback to torrent check for backward compatibility
-                    await CheckTorrentPendingAsync(item);
+                    await CheckTorrentPendingAsync(item, scope.ServiceProvider);
                     continue;
                 }
 
@@ -113,14 +110,14 @@ public class PendingDownloadChecker : BackgroundService
                             continue;
                         }
 
-                        var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+                        var matches = await MatchSongsWithMetadataAsync(item.Id, files, externalMusicSearchService, imageService);
                         var movedCount = MoveMatchedFiles(matches);
 
                         if (movedCount > 0)
                         {
                             // Save MusicBrainz metadata
-                            await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-                            await RemoveAlbumFromDatabaseQueues(item.Id);
+                            await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                            await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
                             await providerEntry.provider.CleanUpAsync(item.SourceName, true);
                         }
                         else
@@ -186,8 +183,13 @@ public class PendingDownloadChecker : BackgroundService
     }
 
     /// <summary>Backward-compatible torrent check for items without ProviderName.</summary>
-    private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item)
+    private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item, IServiceProvider serviceProvider)
     {
+        var dbContext = serviceProvider.GetRequiredService<StreamingDbContext>();
+        var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
+        var externalMusicSearchService = serviceProvider.GetRequiredService<IExternalMusicSearchService>();
+        var imageService = serviceProvider.GetRequiredService<IImageService>();
+
         var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
         if (info != null && info.Progress >= 1.0)
         {
@@ -199,14 +201,14 @@ public class PendingDownloadChecker : BackgroundService
                 return;
             }
 
-            var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+            var matches = await MatchSongsWithMetadataAsync(item.Id, files, externalMusicSearchService, imageService);
             var movedCount = MoveMatchedFiles(matches);
 
             if (movedCount > 0)
             {
                 await CleanUpTorrentAndFilesAsync(item.SourceName);
-                await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-                await RemoveAlbumFromDatabaseQueues(item.Id);
+                await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
             }
         }
     }
@@ -249,10 +251,12 @@ public class PendingDownloadChecker : BackgroundService
 
     private async Task<ICollection<MusicFileMatch>> MatchSongsWithMetadataAsync(
         Guid albumId, 
-        List<(string fileName, string fullPath)> files)
+        List<(string fileName, string fullPath)> files,
+        IExternalMusicSearchService externalMusicSearchService,
+        IImageService imageService)
     {
-        var recordings = await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
-        var simpleRecordings = recordings.Select(recording => recording.ToResponse(_imageService)).ToList();
+        var recordings = await externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
+        var simpleRecordings = recordings.Select(recording => recording.ToResponse(imageService)).ToList();
     
         var matches = new List<MusicFileMatch>();
     
@@ -403,23 +407,23 @@ public class PendingDownloadChecker : BackgroundService
         await _torrentHelper.RemoveTorrentAsync(torrentName, shouldTorrentClientCleanFiles);
     }
 
-    private async Task RemoveAlbumFromDatabaseQueues(Guid albumId)
+    private async Task RemoveAlbumFromDatabaseQueues(Guid albumId, StreamingDbContext dbContext)
     {
-        var releaseToDownload = await _dbContext.ReleasesToDownload
+        var releaseToDownload = await dbContext.ReleasesToDownload
             .FirstOrDefaultAsync(r => r.Id == albumId);
         if (releaseToDownload != null)
         {
-            _dbContext.ReleasesToDownload.Remove(releaseToDownload);
+            dbContext.ReleasesToDownload.Remove(releaseToDownload);
         }
 
-        var pendingDownload = await _dbContext.PendingDownloads
+        var pendingDownload = await dbContext.PendingDownloads
             .FirstOrDefaultAsync(p => p.Id == albumId);
         if (pendingDownload != null)
         {
-            _dbContext.PendingDownloads.Remove(pendingDownload);
+            dbContext.PendingDownloads.Remove(pendingDownload);
         }
 
-        await _dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync();
     }
     
     private AudioMetadata? GetAudioMetadata(string filePath)

@@ -1294,7 +1294,7 @@ public class DashboardController : ControllerBase
                     }
                 }
 
-                // Copy matched files
+                // Move matched files into library
                 int copied = 0;
                 foreach (var (recording, sourcePath, _, _) in matched)
                 {
@@ -1302,13 +1302,22 @@ public class DashboardController : ControllerBase
                     var destPath = Path.Combine(destinationDir, recording.Id.ToString() + ext);
                     try
                     {
-                        System.IO.File.Copy(sourcePath, destPath, overwrite: true);
-                        _logger.LogInformation("[Soulseek Scan] Copied '{Source}' => '{Dest}'", sourcePath, destPath);
+                        try
+                        {
+                            System.IO.File.Move(sourcePath, destPath, overwrite: true);
+                        }
+                        catch (IOException)
+                        {
+                            // Cross-device move: fall back to copy + delete
+                            System.IO.File.Copy(sourcePath, destPath, overwrite: true);
+                            System.IO.File.Delete(sourcePath);
+                        }
+                        _logger.LogInformation("[Soulseek Scan] Moved '{Source}' => '{Dest}'", sourcePath, destPath);
                         copied++;
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "[Soulseek Scan] Failed to copy '{Source}' => '{Dest}'", sourcePath, destPath);
+                        _logger.LogError(ex, "[Soulseek Scan] Failed to move '{Source}' => '{Dest}'", sourcePath, destPath);
                     }
                 }
 

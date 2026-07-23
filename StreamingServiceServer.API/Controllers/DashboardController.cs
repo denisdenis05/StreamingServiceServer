@@ -38,7 +38,7 @@ public class DashboardController : ControllerBase
         _slskdHelper = slskdHelper;
     }
 
-    [AllowAnonymous]
+    [Authorize(Roles = "Admin")]
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats(CancellationToken cancellationToken)
     {
@@ -82,7 +82,7 @@ public class DashboardController : ControllerBase
         });
     }
 
-    [AllowAnonymous]
+    [Authorize(Roles = "Admin")]
     [HttpGet("queued")]
     public async Task<IActionResult> GetQueuedAlbums(CancellationToken cancellationToken)
     {
@@ -150,7 +150,7 @@ public class DashboardController : ControllerBase
         return Ok(result);
     }
 
-    [AllowAnonymous]
+    [Authorize(Roles = "Admin")]
     [HttpGet("failed")]
     public async Task<IActionResult> GetFailedAlbums(CancellationToken cancellationToken)
     {
@@ -258,7 +258,7 @@ public class DashboardController : ControllerBase
         }
     }
 
-    [AllowAnonymous]
+    [Authorize(Roles = "Admin")]
     [HttpGet("downloaded")]
     public async Task<IActionResult> GetDownloadedAlbums([FromQuery] string? search, CancellationToken cancellationToken)
     {
@@ -297,7 +297,7 @@ public class DashboardController : ControllerBase
         }
     }
 
-    [AllowAnonymous]
+    [Authorize(Roles = "Admin")]
     [HttpGet("album/{id:guid}")]
     public async Task<IActionResult> GetAlbumDetail(Guid id, CancellationToken cancellationToken)
     {
@@ -799,7 +799,7 @@ public class DashboardController : ControllerBase
 
     // ═══════════════════════ SETTINGS ENDPOINTS ═══════════════════════
 
-    [AllowAnonymous]
+    [Authorize(Roles = "Admin")]
     [HttpGet("settings/providers")]
     public async Task<IActionResult> GetProviderSettings(CancellationToken cancellationToken)
     {

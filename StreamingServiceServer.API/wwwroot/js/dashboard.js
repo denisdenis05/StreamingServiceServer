@@ -33,15 +33,17 @@ async function initApp() {
   await refreshData();
   handleRoute();
   
-  // Periodically refresh queued downloads & stats every 10 seconds
+  // Periodically refresh queued downloads & stats every 10 seconds if admin
   setInterval(async () => {
-    await fetchStats();
-    await fetchQueued();
-    renderStats();
-    if (getCurrentView() === 'overview') {
-      renderQueuedCarousel();
-    } else if (getCurrentView() === 'queue') {
-      renderQueueTable();
+    if (isAdmin()) {
+      await fetchStats();
+      await fetchQueued();
+      renderStats();
+      if (getCurrentView() === 'overview') {
+        renderQueuedCarousel();
+      } else if (getCurrentView() === 'queue') {
+        renderQueueTable();
+      }
     }
   }, 10000);
 }
@@ -91,8 +93,13 @@ function setAuthToken(token, username, role) {
 
 function handleLogout() {
   setAuthToken('', '', '');
+  state.stats = {};
+  state.queued = [];
+  state.downloaded = [];
+  state.failed = [];
   alert('signed out successfully.');
   window.location.hash = '#overview';
+  handleRoute();
 }
 
 function updateAuthUI() {
@@ -117,7 +124,7 @@ async function tryRefreshToken() {
     if (res.ok) {
       const data = await res.json();
       if (data.token) {
-        setAuthToken(data.token, state.username || 'user');
+        setAuthToken(data.token, state.username || 'user', data.role);
       }
     }
   } catch (err) {
@@ -133,7 +140,7 @@ function authFetch(url, options = {}) {
   return fetch(url, options).then(async (response) => {
     if (response.status === 401 || response.status === 403) {
       if (response.status === 403) {
-        alert('Access Denied: Only Admin users are authorized to perform this action.');
+        alert('Access Denied: Only Admin users are authorized to view or manage library data.');
       } else {
         openAuthModal();
       }
@@ -164,6 +171,19 @@ function openAuthModal() {
 function closeAuthModal() {
   const modal = document.getElementById('auth-prompt-modal');
   if (modal) modal.style.display = 'none';
+}
+
+function renderAdminOnlyNotice(message = "Admin authentication required to view library, queue, and download statistics.") {
+  return `
+    <div style="padding: 3rem 2rem; text-align: center; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px; margin: 1.5rem 0; width: 100%;">
+      <div style="font-size: 2.2rem; margin-bottom: 0.6rem;">🔒</div>
+      <h3 style="font-size: 1.2rem; margin-bottom: 0.4rem;">admin access <i>required</i></h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 440px; margin: 0 auto 1.2rem auto;">
+        ${message}
+      </p>
+      <button onclick="openAuthModal()" class="btn-cta">sign in as admin</button>
+    </div>
+  `;
 }
 
 // ─── ROUTING & VIEW NAVIGATION ───
@@ -221,12 +241,21 @@ function handleRoute() {
 }
 
 async function refreshData() {
+  if (!isAdmin()) {
+    state.stats = {};
+    state.queued = [];
+    state.downloaded = [];
+    state.failed = [];
+    renderStats();
+    return;
+  }
+
   try {
     const [statsRes, queuedRes, downloadedRes, failedRes] = await Promise.all([
-      fetch(`${API_BASE}/stats`),
-      fetch(`${API_BASE}/queued`),
-      fetch(`${API_BASE}/downloaded`),
-      fetch(`${API_BASE}/failed`)
+      authFetch(`${API_BASE}/stats`),
+      authFetch(`${API_BASE}/queued`),
+      authFetch(`${API_BASE}/downloaded`),
+      authFetch(`${API_BASE}/failed`)
     ]);
 
     if (statsRes.ok) state.stats = await statsRes.json();
@@ -240,8 +269,9 @@ async function refreshData() {
 }
 
 async function fetchStats() {
+  if (!isAdmin()) return;
   try {
-    const res = await fetch(`${API_BASE}/stats`);
+    const res = await authFetch(`${API_BASE}/stats`);
     if (res.ok) state.stats = await res.json();
   } catch (err) {
     console.error('Failed to fetch stats:', err);
@@ -249,8 +279,9 @@ async function fetchStats() {
 }
 
 async function fetchQueued() {
+  if (!isAdmin()) return;
   try {
-    const res = await fetch(`${API_BASE}/queued`);
+    const res = await authFetch(`${API_BASE}/queued`);
     if (res.ok) state.queued = await res.json();
   } catch (err) {
     console.error('Failed to fetch queued albums:', err);
@@ -258,9 +289,10 @@ async function fetchQueued() {
 }
 
 async function fetchDownloaded(search = '') {
+  if (!isAdmin()) return;
   try {
     const url = search ? `${API_BASE}/downloaded?search=${encodeURIComponent(search)}` : `${API_BASE}/downloaded`;
-    const res = await fetch(url);
+    const res = await authFetch(url);
     if (res.ok) state.downloaded = await res.json();
   } catch (err) {
     console.error('Failed to fetch downloaded albums:', err);
@@ -268,10 +300,10 @@ async function fetchDownloaded(search = '') {
 }
 
 function renderStats() {
-  document.getElementById('stat-queued').textContent = state.stats.queuedCount ?? 0;
-  document.getElementById('stat-downloading').textContent = state.stats.activeTorrents ?? 0;
-  document.getElementById('stat-downloaded').textContent = state.stats.downloadedCount ?? 0;
-  document.getElementById('stat-recordings').textContent = state.stats.recordingsCount ?? 0;
+  document.getElementById('stat-queued').textContent = isAdmin() ? (state.stats.queuedCount ?? 0) : '—';
+  document.getElementById('stat-downloading').textContent = isAdmin() ? (state.stats.activeTorrents ?? 0) : '—';
+  document.getElementById('stat-downloaded').textContent = isAdmin() ? (state.stats.downloadedCount ?? 0) : '—';
+  document.getElementById('stat-recordings').textContent = isAdmin() ? (state.stats.recordingsCount ?? 0) : '—';
 }
 
 function renderOverview() {
@@ -283,6 +315,11 @@ function renderQueuedCarousel() {
   const track = document.getElementById('queued-carousel-track');
   if (!track) return;
   
+  if (!isAdmin()) {
+    track.innerHTML = renderAdminOnlyNotice("Sign in with an admin account to view active and queued downloads.");
+    return;
+  }
+
   if (state.queued.length === 0) {
     track.innerHTML = `
       <div style="padding: 2rem; color: var(--text-muted); font-size: 0.95rem;">
@@ -332,6 +369,11 @@ function renderDownloadedCarousel() {
   const track = document.getElementById('downloaded-carousel-track');
   if (!track) return;
 
+  if (!isAdmin()) {
+    track.innerHTML = renderAdminOnlyNotice("Sign in with an admin account to view downloaded releases in your library.");
+    return;
+  }
+
   if (state.downloaded.length === 0) {
     track.innerHTML = `
       <div style="padding: 2rem; color: var(--text-muted); font-size: 0.95rem;">
@@ -363,6 +405,11 @@ function renderDownloadedCarousel() {
 function renderQueueTable() {
   const container = document.getElementById('queue-table-body');
   if (!container) return;
+
+  if (!isAdmin()) {
+    container.innerHTML = `<tr><td colspan="5">${renderAdminOnlyNotice("Admin authentication required to view download queue.")}</td></tr>`;
+    return;
+  }
 
   if (state.queued.length === 0) {
     container.innerHTML = `
@@ -401,6 +448,11 @@ function renderFailedTable() {
   const container = document.getElementById('failed-table-body');
   if (!container) return;
 
+  if (!isAdmin()) {
+    container.innerHTML = `<tr><td colspan="4">${renderAdminOnlyNotice("Admin authentication required to view failed download releases.")}</td></tr>`;
+    return;
+  }
+
   const failedItems = state.failed || [];
   if (failedItems.length === 0) {
     container.innerHTML = `
@@ -435,6 +487,11 @@ function renderFailedTable() {
 function renderDownloadedGrid() {
   const container = document.getElementById('downloaded-grid-container');
   if (!container) return;
+
+  if (!isAdmin()) {
+    container.innerHTML = renderAdminOnlyNotice("Admin authentication required to view album library collection.");
+    return;
+  }
 
   if (state.downloaded.length === 0) {
     container.innerHTML = `
@@ -471,10 +528,15 @@ async function loadAlbumDetail(id) {
   const container = document.getElementById('album-detail-content');
   if (!container) return;
 
+  if (!isAdmin()) {
+    container.innerHTML = renderAdminOnlyNotice("Admin authentication required to view album details.");
+    return;
+  }
+
   container.innerHTML = `<div style="padding: 3rem; text-align: center; color: var(--text-muted);">loading album details...</div>`;
 
   try {
-    const res = await fetch(`${API_BASE}/album/${id}`);
+    const res = await authFetch(`${API_BASE}/album/${id}`);
     if (!res.ok) {
       container.innerHTML = `<div style="padding: 3rem; color: var(--accent-terracotta);">Album not found.</div>`;
       return;
@@ -483,7 +545,7 @@ async function loadAlbumDetail(id) {
     const album = await res.json();
     renderAlbumDetail(album);
   } catch (err) {
-    container.innerHTML = `<div style="padding: 3rem; color: var(--accent-terracotta);">Failed to load album details.</div>`;
+    container.innerHTML = renderAdminOnlyNotice("Admin authentication required to view album details.");
   }
 }
 
@@ -887,6 +949,7 @@ function setupAuthForms() {
         if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-olive);">successfully authenticated!</span>`;
         setTimeout(() => {
           window.location.hash = '#overview';
+          refreshData().then(() => handleRoute());
         }, 800);
       } catch (err) {
         if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-terracotta);">${err.message}</span>`;
@@ -909,6 +972,7 @@ function setupAuthForms() {
         if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-olive);">successfully authenticated!</span>`;
         setTimeout(() => {
           closeAuthModal();
+          refreshData().then(() => handleRoute());
         }, 800);
       } catch (err) {
         if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-terracotta);">${err.message}</span>`;
@@ -947,8 +1011,15 @@ async function executeAuthRequest(isRegister, identifier, password, username, re
 let providerSettingsCache = [];
 
 async function loadProviderSettings() {
+  const container = document.getElementById('provider-cards-container');
+
+  if (!isAdmin()) {
+    if (container) container.innerHTML = renderAdminOnlyNotice("Admin authentication required to view download provider settings.");
+    return;
+  }
+
   try {
-    const res = await fetch(`${API_BASE}/settings/providers`);
+    const res = await authFetch(`${API_BASE}/settings/providers`);
     if (res.ok) {
       providerSettingsCache = await res.json();
       renderProviderPriorityList();
@@ -956,12 +1027,18 @@ async function loadProviderSettings() {
     }
   } catch (err) {
     console.error('Failed to load provider settings:', err);
+    if (container) container.innerHTML = renderAdminOnlyNotice("Admin authentication required to view download provider settings.");
   }
 }
 
 function renderProviderPriorityList() {
   const list = document.getElementById('provider-priority-list');
   if (!list) return;
+
+  if (!isAdmin()) {
+    list.innerHTML = renderAdminOnlyNotice("Admin authentication required.");
+    return;
+  }
 
   const sorted = [...providerSettingsCache].sort((a, b) => a.priorityOrder - b.priorityOrder);
 
@@ -1032,6 +1109,11 @@ function toggleProvider(id, enabled) {
 function renderProviderCards() {
   const container = document.getElementById('provider-cards-container');
   if (!container) return;
+
+  if (!isAdmin()) {
+    container.innerHTML = renderAdminOnlyNotice("Admin authentication required.");
+    return;
+  }
 
   container.innerHTML = providerSettingsCache.map(p => {
     const isSoulseek = p.providerName === 'Soulseek';

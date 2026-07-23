@@ -877,6 +877,309 @@ public class DashboardController : ControllerBase
             return Ok(new { success = false, message = $"Connection failed: {ex.Message}" });
         }
     }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("analysis")]
+    public async Task<IActionResult> GetAnalysis(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var results = await _dbContext.AlbumAnalysisResults
+                .Include(a => a.Album)
+                .ThenInclude(r => r!.Artist)
+                .OrderByDescending(a => a.MissingTracks)
+                .ThenBy(a => a.Album != null ? a.Album.Title : "")
+                .ToListAsync(cancellationToken);
+
+            if (results.Count == 0)
+            {
+                await PerformFullAnalysisScanAsync(cancellationToken);
+                results = await _dbContext.AlbumAnalysisResults
+                    .Include(a => a.Album)
+                    .ThenInclude(r => r!.Artist)
+                    .OrderByDescending(a => a.MissingTracks)
+                    .ThenBy(a => a.Album != null ? a.Album.Title : "")
+                    .ToListAsync(cancellationToken);
+            }
+
+            var mappedList = results.Select(r => new
+            {
+                albumId = r.AlbumId,
+                title = r.Album?.Title ?? "Unknown",
+                artistName = r.Album?.Artist?.Name ?? "Unknown Artist",
+                cover = !string.IsNullOrWhiteSpace(r.Album?.LocalSmallCover) ? r.Album.LocalSmallCover : (!string.IsNullOrWhiteSpace(r.Album?.SmallCover) ? r.Album.SmallCover : r.Album?.Cover ?? ""),
+                totalTracks = r.TotalTracks,
+                presentTracks = r.PresentTracks,
+                missingTracks = r.MissingTracks,
+                lastAnalyzedAt = r.LastAnalyzedAt
+            }).ToList();
+
+            var summary = new
+            {
+                totalAlbums = mappedList.Count,
+                completeAlbums = mappedList.Count(a => a.missingTracks == 0),
+                missingAlbums = mappedList.Count(a => a.missingTracks > 0),
+                totalMissingTracks = mappedList.Sum(a => a.missingTracks)
+            };
+
+            return Ok(new { success = true, summary, items = mappedList });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get album analysis");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("analysis/scan")]
+    public async Task<IActionResult> RescanAnalysis(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PerformFullAnalysisScanAsync(cancellationToken);
+            return await GetAnalysis(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to rescan album analysis");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("analysis/scan-soulseek")]
+    public async Task<IActionResult> ScanSoulseekFolder(CancellationToken cancellationToken)
+    {
+        try
+        {
+            int imported = await ScanAndImportFromSoulseekAsync(null, cancellationToken);
+            var results = await _dbContext.AlbumAnalysisResults
+                .Include(a => a.Album)
+                .ThenInclude(r => r!.Artist)
+                .OrderByDescending(a => a.MissingTracks)
+                .ThenBy(a => a.Album != null ? a.Album.Title : "")
+                .ToListAsync(cancellationToken);
+
+            var mappedList = results.Select(r => new
+            {
+                albumId = r.AlbumId,
+                title = r.Album?.Title ?? "Unknown",
+                artistName = r.Album?.Artist?.Name ?? "Unknown Artist",
+                cover = !string.IsNullOrWhiteSpace(r.Album?.LocalSmallCover) ? r.Album.LocalSmallCover : (!string.IsNullOrWhiteSpace(r.Album?.SmallCover) ? r.Album.SmallCover : r.Album?.Cover ?? ""),
+                totalTracks = r.TotalTracks,
+                presentTracks = r.PresentTracks,
+                missingTracks = r.MissingTracks,
+                lastAnalyzedAt = r.LastAnalyzedAt
+            }).ToList();
+
+            var summary = new
+            {
+                totalAlbums = mappedList.Count,
+                completeAlbums = mappedList.Count(a => a.missingTracks == 0),
+                missingAlbums = mappedList.Count(a => a.missingTracks > 0),
+                totalMissingTracks = mappedList.Sum(a => a.missingTracks)
+            };
+
+            return Ok(new { success = true, importedCount = imported, summary, items = mappedList });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to scan soulseek downloads folder");
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("analysis/album/{id}/scan-soulseek")]
+    public async Task<IActionResult> ScanSingleAlbumSoulseek(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            int imported = await ScanAndImportFromSoulseekAsync(id, cancellationToken);
+            return Ok(new { success = true, importedCount = imported, message = $"Imported {imported} tracks from Soulseek downloads." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to scan soulseek folder for album {Id}", id);
+            return StatusCode(500, new { success = false, message = ex.Message });
+        }
+    }
+
+    private async Task PerformFullAnalysisScanAsync(CancellationToken cancellationToken)
+    {
+        var baseMusicPath = _configuration["Music:Path"] ?? "/nas/media/AudioFiles/";
+        var releases = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .Include(r => r.Recordings)
+            .ToListAsync(cancellationToken);
+
+        foreach (var release in releases)
+        {
+            var relativePath = StreamingServiceServer.Business.Helpers.MusicLocationHelper.GetRelativeFolderPathForRecording(new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+            {
+                ArtistName = release.Artist?.Name ?? "",
+                ReleaseTitle = release.Title ?? ""
+            });
+
+            var folderPath = Path.Combine(baseMusicPath, relativePath);
+            int total = release.Recordings.Count;
+            int present = 0;
+            var missingIds = new List<Guid>();
+
+            if (Directory.Exists(folderPath))
+            {
+                foreach (var recording in release.Recordings)
+                {
+                    var files = Directory.GetFiles(folderPath, recording.Id.ToString() + ".*");
+                    if (files.Length > 0)
+                    {
+                        present++;
+                    }
+                    else
+                    {
+                        missingIds.Add(recording.Id);
+                    }
+                }
+            }
+            else
+            {
+                missingIds.AddRange(release.Recordings.Select(r => r.Id));
+            }
+
+            var analysis = await _dbContext.AlbumAnalysisResults.FirstOrDefaultAsync(a => a.AlbumId == release.Id, cancellationToken);
+            if (analysis == null)
+            {
+                analysis = new AlbumAnalysisResult { AlbumId = release.Id };
+                _dbContext.AlbumAnalysisResults.Add(analysis);
+            }
+
+            analysis.TotalTracks = total;
+            analysis.PresentTracks = present;
+            analysis.MissingTracks = Math.Max(0, total - present);
+            analysis.MissingRecordingIdsJson = System.Text.Json.JsonSerializer.Serialize(missingIds);
+            analysis.LastAnalyzedAt = DateTime.UtcNow;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<int> ScanAndImportFromSoulseekAsync(Guid? targetAlbumId, CancellationToken cancellationToken)
+    {
+        var slskdDownloadDir = _configuration["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
+        if (!Directory.Exists(slskdDownloadDir))
+            return 0;
+
+        var baseMusicPath = _configuration["Music:Path"] ?? "/nas/media/AudioFiles/";
+        var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma"
+        };
+
+        var allDownloadFiles = new List<(string fileName, string fullPath)>();
+        try
+        {
+            foreach (var filePath in Directory.EnumerateFiles(slskdDownloadDir, "*.*", SearchOption.AllDirectories))
+            {
+                if (allowedExtensions.Contains(Path.GetExtension(filePath)))
+                {
+                    allDownloadFiles.Add((Path.GetFileName(filePath), filePath));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing files in slskd downloads folder");
+            return 0;
+        }
+
+        if (allDownloadFiles.Count == 0) return 0;
+
+        var query = _dbContext.Releases
+            .Include(r => r.Artist)
+            .Include(r => r.Recordings)
+            .AsQueryable();
+
+        if (targetAlbumId.HasValue)
+        {
+            query = query.Where(r => r.Id == targetAlbumId.Value);
+        }
+
+        var releases = await query.ToListAsync(cancellationToken);
+        int importedCount = 0;
+
+        foreach (var release in releases)
+        {
+            var relativePath = StreamingServiceServer.Business.Helpers.MusicLocationHelper.GetRelativeFolderPathForRecording(new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+            {
+                ArtistName = release.Artist?.Name ?? "",
+                ReleaseTitle = release.Title ?? ""
+            });
+
+            var destinationDir = Path.Combine(baseMusicPath, relativePath);
+            Directory.CreateDirectory(destinationDir);
+
+            var missingRecordings = new List<Recording>();
+            foreach (var rec in release.Recordings)
+            {
+                var existingFiles = Directory.GetFiles(destinationDir, rec.Id.ToString() + ".*");
+                if (existingFiles.Length == 0)
+                {
+                    missingRecordings.Add(rec);
+                }
+            }
+
+            if (missingRecordings.Count == 0) continue;
+
+            foreach (var recording in missingRecordings)
+            {
+                string targetTitle = recording.Title ?? "";
+                string sanitizedTarget = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(targetTitle).ToLowerInvariant();
+
+                (string fileName, string fullPath)? bestMatch = null;
+                int bestScore = 0;
+
+                foreach (var file in allDownloadFiles)
+                {
+                    string fileNameClean = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(Path.GetFileNameWithoutExtension(file.fileName)).ToLowerInvariant();
+                    int score = FuzzySharp.Fuzz.PartialRatio(sanitizedTarget, fileNameClean);
+
+                    if (recording.PositionInAlbum > 0)
+                    {
+                        string posStr = recording.PositionInAlbum.ToString();
+                        if (file.fileName.StartsWith(posStr) || file.fileName.Contains($" {posStr} ") || file.fileName.Contains($"0{posStr}"))
+                        {
+                            score += 15;
+                        }
+                    }
+
+                    if (score > bestScore && score >= 70)
+                    {
+                        bestScore = score;
+                        bestMatch = file;
+                    }
+                }
+
+                if (bestMatch.HasValue)
+                {
+                    var ext = Path.GetExtension(bestMatch.Value.fullPath);
+                    var destPath = Path.Combine(destinationDir, recording.Id.ToString() + ext);
+                    try
+                    {
+                        System.IO.File.Copy(bestMatch.Value.fullPath, destPath, overwrite: true);
+                        importedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to copy audio file from {Source} to {Dest}", bestMatch.Value.fullPath, destPath);
+                    }
+                }
+            }
+        }
+
+        await PerformFullAnalysisScanAsync(cancellationToken);
+        return importedCount;
+    }
 }
 
 public class AddAlbumRequest

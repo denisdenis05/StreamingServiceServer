@@ -30,6 +30,7 @@ public class StreamingDbContext : DbContext
     public virtual DbSet<PlaylistRecording> PlaylistRecordings { get; set; }
     
     public virtual DbSet<Listen> Listens { get; set; }
+    public DbSet<AlbumAnalysisResult> AlbumAnalysisResults { get; set; }
     
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

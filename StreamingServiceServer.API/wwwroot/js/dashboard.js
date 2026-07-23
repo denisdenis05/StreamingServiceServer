@@ -194,6 +194,7 @@ function getCurrentView() {
   if (hash.startsWith('#queue')) return 'queue';
   if (hash.startsWith('#failed')) return 'failed';
   if (hash.startsWith('#downloaded')) return 'downloaded';
+  if (hash.startsWith('#analysis')) return 'analysis';
   if (hash.startsWith('#settings')) return 'settings';
   if (hash.startsWith('#login')) return 'login';
   return 'overview';
@@ -224,6 +225,10 @@ function handleRoute() {
     document.getElementById('view-failed').classList.add('active');
     document.querySelector('.nav-link[href="#failed"]')?.classList.add('active');
     renderFailedTable();
+  } else if (hash === '#analysis') {
+    document.getElementById('view-analysis').classList.add('active');
+    document.querySelector('.nav-link[href="#analysis"]')?.classList.add('active');
+    fetchAnalysisData();
   } else if (hash === '#settings') {
     document.getElementById('view-settings').classList.add('active');
     document.querySelector('.nav-link[href="#settings"]')?.classList.add('active');
@@ -1246,4 +1251,191 @@ async function testProviderConnection(id) {
       if (resultEl) resultEl.innerHTML = `<span style="color: var(--accent-terracotta);">connection error.</span>`;
     }
   }
+}
+
+// ─── AUDIO INTEGRITY ANALYSIS ───
+
+let analysisState = {
+  summary: { totalAlbums: 0, completeAlbums: 0, missingAlbums: 0, totalMissingTracks: 0 },
+  items: [],
+  filterText: ''
+};
+
+async function fetchAnalysisData() {
+  const container = document.getElementById('analysis-list-container');
+  if (!container) return;
+
+  if (!isAdmin()) {
+    container.innerHTML = renderAdminOnlyNotice("Admin authentication required to run library audio integrity analysis.");
+    return;
+  }
+
+  container.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-muted);">loading album audio analysis...</div>`;
+
+  try {
+    const res = await authFetch('/api/dashboard/analysis');
+    const data = await res.json();
+    if (data.success) {
+      analysisState.summary = data.summary || {};
+      analysisState.items = data.items || [];
+      renderAnalysisUI();
+    } else {
+      container.innerHTML = `<div style="padding: 2rem; color: var(--accent-terracotta); text-align: center;">Error: ${data.message}</div>`;
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      container.innerHTML = `<div style="padding: 2rem; color: var(--accent-terracotta); text-align: center;">Failed to load analysis: ${err.message}</div>`;
+    }
+  }
+}
+
+async function triggerAnalysisScan() {
+  const btn = document.getElementById('btn-analysis-scan');
+  const notice = document.getElementById('analysis-status-notice');
+  if (btn) btn.disabled = true;
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Scanning library audio files on disk... Please wait.</div>`;
+
+  try {
+    const res = await authFetch('/api/dashboard/analysis/scan', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      analysisState.summary = data.summary || {};
+      analysisState.items = data.items || [];
+      renderAnalysisUI();
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">Scan complete! Re-checked all library audio files.</div>`;
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Scan error: ${err.message}</div>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function triggerSoulseekImportAll() {
+  const btn = document.getElementById('btn-analysis-soulseek');
+  const notice = document.getElementById('analysis-status-notice');
+  if (btn) btn.disabled = true;
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Scanning /nas/slskd-data/downloads/ for missing album tracks and importing...</div>`;
+
+  try {
+    const res = await authFetch('/api/dashboard/analysis/scan-soulseek', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      const summary = data.summary || (data.data && data.data.summary) || {};
+      const items = data.items || (data.data && data.data.items) || [];
+      analysisState.summary = summary;
+      analysisState.items = items;
+      renderAnalysisUI();
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">Soulseek import complete! Imported ${data.importedCount || 0} audio tracks into your library.</div>`;
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${err.message}</div>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function triggerSoulseekImportSingle(albumId) {
+  const notice = document.getElementById('analysis-status-notice');
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Scanning Soulseek folder for album files...</div>`;
+
+  try {
+    const res = await authFetch(`/api/dashboard/analysis/album/${albumId}/scan-soulseek`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">${data.message || 'Import completed.'}</div>`;
+      await fetchAnalysisData();
+    } else {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${data.message}</div>`;
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import failed: ${err.message}</div>`;
+    }
+  }
+}
+
+function filterAnalysisList() {
+  const input = document.getElementById('analysis-search-input');
+  analysisState.filterText = (input ? input.value : '').toLowerCase();
+  renderAnalysisUI(false);
+}
+
+function renderAnalysisUI(updateStats = true) {
+  if (updateStats) {
+    const s = analysisState.summary || {};
+    const totalEl = document.getElementById('stat-analysis-total');
+    const compEl = document.getElementById('stat-analysis-complete');
+    const missAlbEl = document.getElementById('stat-analysis-missing-albums');
+    const missTrkEl = document.getElementById('stat-analysis-missing-tracks');
+
+    if (totalEl) totalEl.textContent = s.totalAlbums || 0;
+    if (compEl) compEl.textContent = s.completeAlbums || 0;
+    if (missAlbEl) missAlbEl.textContent = s.missingAlbums || 0;
+    if (missTrkEl) missTrkEl.textContent = s.totalMissingTracks || 0;
+  }
+
+  const container = document.getElementById('analysis-list-container');
+  if (!container) return;
+
+  const query = analysisState.filterText.trim();
+  let items = analysisState.items || [];
+
+  if (query) {
+    items = items.filter(item => 
+      (item.title && item.title.toLowerCase().includes(query)) ||
+      (item.artistName && item.artistName.toLowerCase().includes(query))
+    );
+  }
+
+  const countEl = document.getElementById('analysis-filter-count');
+  if (countEl) {
+    countEl.textContent = query ? `showing ${items.length} of ${analysisState.items.length} albums` : `showing all ${items.length} albums`;
+  }
+
+  if (items.length === 0) {
+    container.innerHTML = `<div style="padding: 3rem; text-align: center; color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px;">No albums match the criteria.</div>`;
+    return;
+  }
+
+  let html = `<div style="display: flex; flex-direction: column; gap: 0.75rem;">`;
+
+  items.forEach(item => {
+    const coverUrl = item.cover || 'https://via.placeholder.com/100?text=No+Cover';
+    const isComplete = item.missingTracks === 0;
+    const badgeBg = isComplete ? '#e8f5e9' : '#ffebee';
+    const badgeColor = isComplete ? '#2e7d32' : '#c62828';
+    const badgeBorder = isComplete ? '#c8e6c9' : '#ffcdd2';
+    const badgeText = isComplete ? `0 / ${item.totalTracks} missing` : `${item.missingTracks} / ${item.totalTracks} missing`;
+
+    html += `
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.2rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 1rem; flex: 1; min-width: 260px;">
+          <img src="${coverUrl}" style="width: 54px; height: 54px; border-radius: 6px; object-fit: cover;" alt="${escapeHtml(item.title)}" onerror="this.src='https://via.placeholder.com/100?text=No+Cover'" />
+          <div>
+            <div style="font-weight: 600; font-size: 1rem;">
+              <a href="#album?id=${item.albumId}" style="text-decoration: none; color: inherit;">${escapeHtml(item.title)}</a>
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.2rem;">${escapeHtml(item.artistName)}</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+          <div style="padding: 0.35rem 0.8rem; background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; border-radius: 20px; font-weight: 600; font-size: 0.85rem;">
+            ${badgeText}
+          </div>
+          <button class="btn-secondary" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="triggerSoulseekImportSingle('${item.albumId}')">
+            scan inside soulseek folder
+          </button>
+        </div>
+      </div>
+    `;
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
 }

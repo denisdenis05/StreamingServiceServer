@@ -91,7 +91,7 @@ public class PendingDownloadChecker : BackgroundService
                 {
                     Console.WriteLine($"[PendingDownloadChecker] {providerName} download complete for {item.Id}");
 
-                    var savePath = !string.IsNullOrWhiteSpace(progressInfo.SavePath)
+                    var rawSavePath = !string.IsNullOrWhiteSpace(progressInfo.SavePath)
                         ? progressInfo.SavePath
                         : item.SavePath ?? "";
 
@@ -99,24 +99,35 @@ public class PendingDownloadChecker : BackgroundService
                     if (providerName == "Torrent")
                     {
                         var torrentInfo = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
-                        if (torrentInfo != null)
-                            savePath = torrentInfo.SavePath;
+                        if (torrentInfo != null && !string.IsNullOrWhiteSpace(torrentInfo.SavePath))
+                            rawSavePath = torrentInfo.SavePath;
                     }
 
-                    if (!string.IsNullOrWhiteSpace(savePath))
+                    var resolvedSavePath = ResolveSavePath(rawSavePath);
+                    if (!string.IsNullOrWhiteSpace(resolvedSavePath))
                     {
-                        var files = GetMusicFilesInSavePath(savePath);
+                        var files = GetMusicFilesInSavePath(resolvedSavePath);
+                        if (files.Count == 0)
+                        {
+                            Console.WriteLine($"[PendingDownloadChecker] WARNING: No music files found at resolved path '{resolvedSavePath}' (raw: '{rawSavePath}') for album {item.Id}. Will retry...");
+                            continue;
+                        }
+
                         var matches = await MatchSongsWithMetadataAsync(item.Id, files);
-                        MoveMatchedFiles(matches);
+                        var movedCount = MoveMatchedFiles(matches);
+
+                        if (movedCount > 0)
+                        {
+                            // Save MusicBrainz metadata
+                            await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                            await RemoveAlbumFromDatabaseQueues(item.Id);
+                            await providerEntry.provider.CleanUpAsync(item.SourceName, true);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[PendingDownloadChecker] WARNING: 0 files matched/moved for album {item.Id} at path '{resolvedSavePath}'. Will retry...");
+                        }
                     }
-
-                    // Clean up via provider
-                    await providerEntry.provider.CleanUpAsync(item.SourceName, true);
-
-                    // Save MusicBrainz metadata
-                    await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-
-                    await RemoveAlbumFromDatabaseQueues(item.Id);
                 }
             }
             catch (Exception ex)
@@ -126,20 +137,77 @@ public class PendingDownloadChecker : BackgroundService
         }
     }
 
+    private string ResolveSavePath(string rawSavePath)
+    {
+        if (string.IsNullOrWhiteSpace(rawSavePath))
+            return string.Empty;
+
+        // 1. Direct match if path exists
+        if (Directory.Exists(rawSavePath))
+            return rawSavePath;
+
+        var downloadBase = _configuration["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
+        const string slskdDefaultDir = "/nas/slskd-data/downloads";
+
+        // 2. Try combining configured DownloadPath with rawSavePath
+        var combinedConfigured = Path.Combine(downloadBase, rawSavePath.TrimStart('/', '\\'));
+        if (Directory.Exists(combinedConfigured))
+            return combinedConfigured;
+
+        // 3. Try combining default slskd dir with rawSavePath
+        var combinedSlskd = Path.Combine(slskdDefaultDir, rawSavePath.TrimStart('/', '\\'));
+        if (Directory.Exists(combinedSlskd))
+            return combinedSlskd;
+
+        // 4. Handle Docker container internal paths (e.g. /app/downloads/username/folder or /downloads/folder)
+        var normalized = rawSavePath.Replace('\\', '/');
+        if (normalized.Contains("/downloads/"))
+        {
+            var relativePart = normalized.Substring(normalized.IndexOf("/downloads/") + "/downloads/".Length);
+            var alt1 = Path.Combine(downloadBase, relativePart);
+            if (Directory.Exists(alt1)) return alt1;
+
+            var alt2 = Path.Combine(slskdDefaultDir, relativePart);
+            if (Directory.Exists(alt2)) return alt2;
+        }
+
+        // 5. Try using just the leaf folder name in download directories
+        var folderName = Path.GetFileName(rawSavePath.TrimEnd('/', '\\'));
+        if (!string.IsNullOrWhiteSpace(folderName))
+        {
+            var alt3 = Path.Combine(downloadBase, folderName);
+            if (Directory.Exists(alt3)) return alt3;
+
+            var alt4 = Path.Combine(slskdDefaultDir, folderName);
+            if (Directory.Exists(alt4)) return alt4;
+        }
+
+        return rawSavePath;
+    }
+
     /// <summary>Backward-compatible torrent check for items without ProviderName.</summary>
     private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item)
     {
         var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
         if (info != null && info.Progress >= 1.0)
         {
-            var files = GetMusicFilesInSavePath(info.SavePath);
+            var resolvedSavePath = ResolveSavePath(info.SavePath);
+            var files = GetMusicFilesInSavePath(resolvedSavePath);
+            if (files.Count == 0)
+            {
+                Console.WriteLine($"[PendingDownloadChecker] WARNING: Torrent complete but 0 files found at '{resolvedSavePath}'. Will retry...");
+                return;
+            }
+
             var matches = await MatchSongsWithMetadataAsync(item.Id, files);
+            var movedCount = MoveMatchedFiles(matches);
 
-            MoveMatchedFiles(matches);
-            await CleanUpTorrentAndFilesAsync(item.SourceName);
-            await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-
-            await RemoveAlbumFromDatabaseQueues(item.Id);
+            if (movedCount > 0)
+            {
+                await CleanUpTorrentAndFilesAsync(item.SourceName);
+                await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                await RemoveAlbumFromDatabaseQueues(item.Id);
+            }
         }
     }
     
@@ -292,9 +360,10 @@ public class PendingDownloadChecker : BackgroundService
         }
     }
     
-    private void MoveMatchedFiles(ICollection<MusicFileMatch> matches)
+    private int MoveMatchedFiles(ICollection<MusicFileMatch> matches)
     {
         var baseMusicPath = _musicLocation;
+        int movedCount = 0;
 
         foreach (var match in matches)
         {
@@ -316,12 +385,15 @@ public class PendingDownloadChecker : BackgroundService
             try
             {
                 File.Move(match.FullPath, destinationPath, overwrite: true);
+                movedCount++;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to move {match.FileName}: {ex.Message}");
             }
         }
+
+        return movedCount;
     }
 
     private async Task CleanUpTorrentAndFilesAsync(string torrentName)

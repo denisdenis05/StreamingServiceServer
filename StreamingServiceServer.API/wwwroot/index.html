@@ -16,6 +16,7 @@
       <a href="#queue" class="nav-link">queue</a>
       <a href="#failed" class="nav-link">failed</a>
       <a href="#downloaded" class="nav-link">library</a>
+      <a href="#analysis" class="nav-link">analysis</a>
       <a href="#settings" class="nav-link">settings</a>
       <a href="#how-it-works" class="nav-link">flow</a>
       <a href="#login" id="nav-login-link" class="nav-link">login</a>
@@ -267,8 +268,18 @@
       </div>
 
       <!-- Provider Cards -->
+      <!-- Provider Cards -->
       <div id="provider-cards-container" class="provider-cards-grid">
         <!-- Populated by JS -->
+      </div>
+
+      <!-- Audio File Analysis Section -->
+      <div class="settings-section" style="margin-top: 2rem;">
+        <h3>library <i>file integrity</i></h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">analyze missing track files across all library releases, re-scan audio files on disk, or import missing tracks from Soulseek downloads.</p>
+        <a href="#analysis" class="btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem;">
+          &rarr; open audio analysis page
+        </a>
       </div>
 
       <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem; margin-bottom: 3rem;">
@@ -276,6 +287,57 @@
       </div>
 
       <div id="settings-status" style="margin-bottom: 2rem;"></div>
+    </section>
+
+    <!-- ==================== ANALYSIS VIEW ==================== -->
+    <section id="view-analysis" class="page-view">
+      <div style="padding: var(--spacing-md) 0 1rem; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h1>library <i>audio analysis</i></h1>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">inspect track availability on disk for each album, scan for missing files, and import directly from Soulseek downloads.</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <button id="btn-analysis-scan" class="btn-secondary" onclick="triggerAnalysisScan()">
+            &circlearrowright; scan again
+          </button>
+          <button id="btn-analysis-soulseek" class="btn-cta" onclick="triggerSoulseekImportAll()">
+            &darr; scan inside soulseek folder
+          </button>
+        </div>
+      </div>
+
+      <!-- Analysis KPI Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+        <div style="background: var(--bg-card); border: 1px solid var(--border-light); padding: 1.2rem; border-radius: 8px;">
+          <div id="stat-analysis-total" style="font-size: 2rem; font-weight: 700;">0</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted);">total albums analyzed</div>
+        </div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border-light); padding: 1.2rem; border-radius: 8px;">
+          <div id="stat-analysis-complete" style="font-size: 2rem; font-weight: 700; color: #2e7d32;">0</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted);">fully available albums</div>
+        </div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border-light); padding: 1.2rem; border-radius: 8px;">
+          <div id="stat-analysis-missing-albums" style="font-size: 2rem; font-weight: 700; color: #c62828;">0</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted);">albums with missing tracks</div>
+        </div>
+        <div style="background: var(--bg-card); border: 1px solid var(--border-light); padding: 1.2rem; border-radius: 8px;">
+          <div id="stat-analysis-missing-tracks" style="font-size: 2rem; font-weight: 700; color: #c62828;">0</div>
+          <div style="font-size: 0.85rem; color: var(--text-muted);">total missing tracks</div>
+        </div>
+      </div>
+
+      <!-- Search / Filter bar -->
+      <div style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center;">
+        <input type="text" id="analysis-search-input" class="form-input" placeholder="filter by artist or album title..." oninput="filterAnalysisList()" style="max-width: 400px;" />
+        <span id="analysis-filter-count" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+      </div>
+
+      <div id="analysis-status-notice" style="margin-bottom: 1rem;"></div>
+
+      <!-- Analysis List Container -->
+      <div id="analysis-list-container">
+        <!-- Populated by JS -->
+      </div>
     </section>
 
     <!-- ==================== ALBUM DETAIL VIEW ==================== -->

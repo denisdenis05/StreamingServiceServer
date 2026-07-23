@@ -16,6 +16,25 @@ const state = {
   userRole: localStorage.getItem('resonance_role') || ''
 };
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+async function parseJsonResponse(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return { success: false, message: text || `HTTP ${res.status}` };
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
 });
@@ -1274,17 +1293,17 @@ async function fetchAnalysisData() {
 
   try {
     const res = await authFetch('/api/dashboard/analysis');
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (data.success) {
       analysisState.summary = data.summary || {};
       analysisState.items = data.items || [];
       renderAnalysisUI();
     } else {
-      container.innerHTML = `<div style="padding: 2rem; color: var(--accent-terracotta); text-align: center;">Error: ${data.message}</div>`;
+      container.innerHTML = `<div style="padding: 2rem; color: var(--accent-terracotta); text-align: center;">Error: ${escapeHtml(data.message)}</div>`;
     }
   } catch (err) {
     if (err.message !== 'Authentication/Authorization required') {
-      container.innerHTML = `<div style="padding: 2rem; color: var(--accent-terracotta); text-align: center;">Failed to load analysis: ${err.message}</div>`;
+      container.innerHTML = `<div style="padding: 2rem; color: var(--accent-terracotta); text-align: center;">Failed to load analysis: ${escapeHtml(err.message)}</div>`;
     }
   }
 }
@@ -1297,16 +1316,18 @@ async function triggerAnalysisScan() {
 
   try {
     const res = await authFetch('/api/dashboard/analysis/scan', { method: 'POST' });
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (data.success) {
       analysisState.summary = data.summary || {};
       analysisState.items = data.items || [];
       renderAnalysisUI();
       if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">Scan complete! Re-checked all library audio files.</div>`;
+    } else {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Scan error: ${escapeHtml(data.message)}</div>`;
     }
   } catch (err) {
     if (err.message !== 'Authentication/Authorization required') {
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Scan error: ${err.message}</div>`;
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Scan error: ${escapeHtml(err.message)}</div>`;
     }
   } finally {
     if (btn) btn.disabled = false;
@@ -1321,7 +1342,7 @@ async function triggerSoulseekImportAll() {
 
   try {
     const res = await authFetch('/api/dashboard/analysis/scan-soulseek', { method: 'POST' });
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (data.success) {
       const summary = data.summary || (data.data && data.data.summary) || {};
       const items = data.items || (data.data && data.data.items) || [];
@@ -1329,10 +1350,12 @@ async function triggerSoulseekImportAll() {
       analysisState.items = items;
       renderAnalysisUI();
       if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">Soulseek import complete! Imported ${data.importedCount || 0} audio tracks into your library.</div>`;
+    } else {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${escapeHtml(data.message)}</div>`;
     }
   } catch (err) {
     if (err.message !== 'Authentication/Authorization required') {
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${err.message}</div>`;
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${escapeHtml(err.message)}</div>`;
     }
   } finally {
     if (btn) btn.disabled = false;
@@ -1345,16 +1368,16 @@ async function triggerSoulseekImportSingle(albumId) {
 
   try {
     const res = await authFetch(`/api/dashboard/analysis/album/${albumId}/scan-soulseek`, { method: 'POST' });
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (data.success) {
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">${data.message || 'Import completed.'}</div>`;
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">${escapeHtml(data.message || 'Import completed.')}</div>`;
       await fetchAnalysisData();
     } else {
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${data.message}</div>`;
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${escapeHtml(data.message)}</div>`;
     }
   } catch (err) {
     if (err.message !== 'Authentication/Authorization required') {
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import failed: ${err.message}</div>`;
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import failed: ${escapeHtml(err.message)}</div>`;
     }
   }
 }

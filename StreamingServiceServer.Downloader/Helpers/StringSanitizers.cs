@@ -2,8 +2,9 @@ namespace StreamingServiceDownloader.Helpers;
 
 public static class StringSanitizers
 {
-    public static string SanitizeTitle(string title)
+    public static string SanitizeTitle(string? title)
     {
+        if (string.IsNullOrWhiteSpace(title)) return string.Empty;
         title = System.Text.RegularExpressions.Regex.Replace(title, @"\[[^\]]*\]", "");
         title = System.Text.RegularExpressions.Regex.Replace(title, @"\([^\)]*\)", "");
         

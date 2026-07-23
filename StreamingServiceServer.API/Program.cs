@@ -46,6 +46,7 @@ builder.Services.AddDbContext<StreamingDbContext>(options =>
         connStr = "Host=localhost;Database=streaming_db;Username=postgres;Password=postgres";
     }
     options.UseNpgsql(connStr);
+    options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 
 builder.Services.AddSwaggerGen(c =>

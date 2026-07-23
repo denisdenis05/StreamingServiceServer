@@ -18,6 +18,11 @@
       <a href="#downloaded" class="nav-link">library</a>
       <a href="#settings" class="nav-link">settings</a>
       <a href="#how-it-works" class="nav-link">flow</a>
+      <a href="#login" id="nav-login-link" class="nav-link">login</a>
+      <div id="header-user-badge" style="display:none; align-items:center; gap:0.5rem; margin-right: 0.5rem;">
+        <span id="user-display-name" style="font-size:0.85rem; font-weight:500; color:var(--accent-olive);"></span>
+        <button onclick="handleLogout()" class="btn-secondary" style="padding:0.25rem 0.6rem; font-size:0.75rem;">logout</button>
+      </div>
       <button id="btn-open-add-modal" class="btn-cta">+ queue album</button>
     </nav>
   </header>
@@ -31,7 +36,7 @@
       <div class="hero-section">
         <h1>your music library, <i>effortlessly gathered & synced</i></h1>
         <p class="hero-subtext">
-          a warm, quiet dashboard to monitor torrent downloads, inspect audio metadata, and replace recordings whenever high fidelity audio is available.
+          a warm, quiet dashboard to monitor Soulseek & torrent downloads, inspect audio metadata, and replace recordings whenever high fidelity audio is available.
         </p>
         <div class="hero-cta-wrapper">
           <a href="#queue" class="btn-cta">view download queue &rarr;</a>
@@ -47,7 +52,7 @@
           </div>
           <div class="stat-item">
             <div id="stat-downloading" class="stat-number">0</div>
-            <div class="stat-label">active torrents</div>
+            <div class="stat-label">active downloads</div>
           </div>
           <div class="stat-item">
             <div id="stat-downloaded" class="stat-number">0</div>
@@ -65,7 +70,7 @@
         <div class="section-header">
           <div>
             <h2 class="section-title">queued <i>in download pipeline</i></h2>
-            <div class="section-subtitle">albums scheduled or currently downloading via torrent</div>
+            <div class="section-subtitle">albums scheduled or currently downloading via Soulseek / torrent</div>
           </div>
           <div class="carousel-controls">
             <button class="carousel-btn" data-target="queued-carousel-track" data-dir="left">&larr;</button>
@@ -105,16 +110,16 @@
         <div class="process-step">
           <div class="step-text">
             <div class="step-number">01</div>
-            <h3>scrapes & matches torrents</h3>
+            <h3>searches soulseek & torrents</h3>
             <p>
-              when an album is queued, background workers query configured music torrent sources, evaluate artist and release similarity, and select the highest quality matching torrent.
+              when an album is queued, background workers query configured providers in priority order (Soulseek / Torrent), evaluate release completeness & audio quality, and enqueue the best matching source.
             </p>
           </div>
           <div class="step-visual">
             <div class="mockup-box">
-              <div style="font-size: 0.8rem; color: var(--accent-terracotta); text-transform: lowercase;">[torrent crawler]</div>
+              <div style="font-size: 0.8rem; color: var(--accent-terracotta); text-transform: lowercase;">[soulseek & torrent crawler]</div>
               <div style="font-size: 1rem; margin-top: 0.5rem; font-weight: 500;">Searching: Radiohead - In Rainbows</div>
-              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">Match score: 98% • FLAC [24bit/96kHz]</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">Matched: Soulseek • FLAC [24bit/96kHz]</div>
             </div>
           </div>
         </div>
@@ -125,7 +130,7 @@
             <div class="step-number">02</div>
             <h3>downloads & indexes metadata</h3>
             <p>
-              the pending torrent checker monitors download progress, retrieves album artwork, aligns track numbers, and writes metadata directly into the streaming database.
+              the pending download checker monitors provider progress, retrieves album artwork, aligns track numbers, and writes metadata directly into the streaming database.
             </p>
           </div>
           <div class="step-visual">
@@ -172,8 +177,8 @@
     <section id="view-queue" class="page-view">
       <div style="padding: var(--spacing-md) 0 1rem; display: flex; justify-content: space-between; align-items: flex-end;">
         <div>
-          <h1>download queue & <i>torrent status</i></h1>
-          <p style="color: var(--text-muted); margin-top: 0.5rem;">monitor active downloads, pending releases, and scraping pipeline status.</p>
+          <h1>download queue & <i>provider status</i></h1>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">monitor active downloads, Soulseek / torrent transfers, and pipeline status.</p>
         </div>
         <div>
           <button class="btn-secondary" onclick="requeueAllActiveQueue()">↻ requeue all active</button>
@@ -290,14 +295,84 @@
       </div>
     </section>
 
+    <!-- ==================== LOGIN VIEW ==================== -->
+    <section id="view-login" class="page-view">
+      <div style="max-width: 440px; margin: 3rem auto; padding: 2.5rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
+        <h2 id="auth-page-title" style="font-size: 1.8rem; margin-bottom: 0.5rem; text-align: center;">sign in to <i>resonance</i></h2>
+        <p id="auth-page-subtitle" style="color: var(--text-muted); font-size: 0.9rem; text-align: center; margin-bottom: 2rem;">
+          authenticate to manage download queues, requeue releases, or update provider settings.
+        </p>
+
+        <form id="auth-page-form">
+          <div id="auth-page-username-group" class="form-group" style="display: none;">
+            <label class="form-label">username</label>
+            <input type="text" id="input-page-username" class="form-input" placeholder="choose a username" />
+          </div>
+          <div class="form-group">
+            <label id="label-page-identifier" class="form-label">email or username</label>
+            <input type="text" id="input-page-identifier" class="form-input" required placeholder="user@example.com or username" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">password</label>
+            <input type="password" id="input-page-password" class="form-input" required placeholder="••••••••" />
+          </div>
+          <div id="auth-page-remember-group" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;">
+            <input type="checkbox" id="input-page-remember" checked />
+            <label for="input-page-remember" style="font-size: 0.85rem; color: var(--text-muted);">keep me logged in</label>
+          </div>
+
+          <div id="auth-page-status" style="margin-bottom: 1rem; font-size: 0.85rem; text-align: center;"></div>
+
+          <button type="submit" id="btn-page-auth-submit" class="btn-cta" style="width: 100%; justify-content: center; padding: 0.8rem;">sign in</button>
+        </form>
+
+        <div style="margin-top: 1.5rem; text-align: center; font-size: 0.85rem; color: var(--text-muted);">
+          <span id="auth-page-toggle-prompt">don't have an account?</span>
+          <a href="javascript:void(0)" onclick="togglePageAuthMode()" id="btn-page-auth-toggle" style="color: var(--accent-terracotta); text-decoration: underline; margin-left: 0.3rem;">register new account</a>
+        </div>
+      </div>
+    </section>
+
   </main>
+
+  <!-- Auth Prompt Modal -->
+  <div id="auth-prompt-modal" class="modal-backdrop">
+    <div class="modal-content" style="max-width: 420px;">
+      <h2 style="margin-bottom: 0.5rem;">authentication <i>required</i></h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+        please sign in to queue, requeue, delete, or manage settings.
+      </p>
+
+      <form id="auth-modal-form">
+        <div id="auth-modal-username-group" class="form-group" style="display: none;">
+          <label class="form-label">username</label>
+          <input type="text" id="input-modal-username" class="form-input" placeholder="choose a username" />
+        </div>
+        <div class="form-group">
+          <label id="label-modal-identifier" class="form-label">email or username</label>
+          <input type="text" id="input-modal-identifier" class="form-input" required placeholder="user@example.com or username" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">password</label>
+          <input type="password" id="input-modal-password" class="form-input" required placeholder="••••••••" />
+        </div>
+
+        <div id="auth-modal-status" style="margin-bottom: 1rem; font-size: 0.85rem; text-align: center;"></div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
+          <button type="button" onclick="closeAuthModal()" class="btn-secondary">cancel</button>
+          <button type="submit" id="btn-modal-auth-submit" class="btn-cta">sign in</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Add Album Modal -->
   <div id="add-album-modal" class="modal-backdrop">
     <div class="modal-content">
       <h2 style="margin-bottom: 0.5rem;">add album to <i>queue</i></h2>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
-        enter the album title and artist name to schedule for torrent scraping.
+        enter the album title and artist name to schedule for Soulseek & torrent download.
       </p>
 
       <form id="add-album-form">

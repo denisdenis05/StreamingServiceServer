@@ -1,6 +1,6 @@
 /* ==========================================================================
    Resonance Music Dashboard Client JavaScript
-   Handles API communication, navigation, rendering carousels, and album actions.
+   Handles API communication, navigation, rendering carousels, authentication, and album actions.
    ========================================================================== */
 
 const API_BASE = '/api/dashboard';
@@ -9,7 +9,11 @@ const state = {
   stats: {},
   queued: [],
   downloaded: [],
-  currentAlbumId: null
+  failed: [],
+  currentAlbumId: null,
+  authToken: localStorage.getItem('resonance_token') || '',
+  username: localStorage.getItem('resonance_user') || '',
+  userRole: localStorage.getItem('resonance_role') || ''
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,10 +23,13 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initApp() {
   setupNavigation();
   setupModal();
+  setupAuthForms();
   setupCarouselButtons();
   
   window.addEventListener('hashchange', handleRoute);
   
+  await tryRefreshToken();
+  updateAuthUI();
   await refreshData();
   handleRoute();
   
@@ -39,6 +46,128 @@ async function initApp() {
   }, 10000);
 }
 
+// ─── AUTHENTICATION & ROLE HELPERS ───
+
+function isAuthenticated() {
+  return !!state.authToken;
+}
+
+function isAdmin() {
+  const role = state.userRole || parseJwtRole(state.authToken);
+  return isAuthenticated() && role.toLowerCase() === 'admin';
+}
+
+function parseJwtRole(token) {
+  if (!token) return '';
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    const payload = JSON.parse(jsonPayload);
+    return payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || payload['role'] || '';
+  } catch {
+    return '';
+  }
+}
+
+function setAuthToken(token, username, role) {
+  state.authToken = token || '';
+  state.username = username || '';
+  state.userRole = role || parseJwtRole(token) || '';
+
+  if (token) {
+    localStorage.setItem('resonance_token', token);
+    localStorage.setItem('resonance_user', username);
+    localStorage.setItem('resonance_role', state.userRole);
+  } else {
+    localStorage.removeItem('resonance_token');
+    localStorage.removeItem('resonance_user');
+    localStorage.removeItem('resonance_role');
+  }
+  updateAuthUI();
+}
+
+function handleLogout() {
+  setAuthToken('', '', '');
+  alert('signed out successfully.');
+  window.location.hash = '#overview';
+}
+
+function updateAuthUI() {
+  const loginLink = document.getElementById('nav-login-link');
+  const userBadge = document.getElementById('header-user-badge');
+  const userNameEl = document.getElementById('user-display-name');
+
+  if (isAuthenticated()) {
+    if (loginLink) loginLink.style.display = 'none';
+    if (userBadge) userBadge.style.display = 'flex';
+    const roleIcon = isAdmin() ? '👑' : '👤';
+    if (userNameEl) userNameEl.textContent = `${roleIcon} ${state.username} (${(state.userRole || 'User').toLowerCase()})`;
+  } else {
+    if (loginLink) loginLink.style.display = 'inline-block';
+    if (userBadge) userBadge.style.display = 'none';
+  }
+}
+
+async function tryRefreshToken() {
+  try {
+    const res = await fetch('/Authentication/refresh-token', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.token) {
+        setAuthToken(data.token, state.username || 'user');
+      }
+    }
+  } catch (err) {
+    // Ignore refresh errors on initial load
+  }
+}
+
+function authFetch(url, options = {}) {
+  options.headers = options.headers || {};
+  if (state.authToken) {
+    options.headers['Authorization'] = `Bearer ${state.authToken}`;
+  }
+  return fetch(url, options).then(async (response) => {
+    if (response.status === 401 || response.status === 403) {
+      if (response.status === 403) {
+        alert('Access Denied: Only Admin users are authorized to perform this action.');
+      } else {
+        openAuthModal();
+      }
+      throw new Error('Authentication/Authorization required');
+    }
+    return response;
+  });
+}
+
+function requireAdminAuth(actionCallback) {
+  if (!isAuthenticated()) {
+    openAuthModal();
+    return false;
+  }
+  if (!isAdmin()) {
+    alert('Access Denied: Only Admin users are authorized to perform download & library actions.');
+    return false;
+  }
+  actionCallback();
+  return true;
+}
+
+function openAuthModal() {
+  const modal = document.getElementById('auth-prompt-modal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('auth-prompt-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+// ─── ROUTING & VIEW NAVIGATION ───
+
 function getCurrentView() {
   const hash = window.location.hash || '#overview';
   if (hash.startsWith('#album')) return 'album';
@@ -46,6 +175,7 @@ function getCurrentView() {
   if (hash.startsWith('#failed')) return 'failed';
   if (hash.startsWith('#downloaded')) return 'downloaded';
   if (hash.startsWith('#settings')) return 'settings';
+  if (hash.startsWith('#login')) return 'login';
   return 'overview';
 }
 
@@ -78,6 +208,9 @@ function handleRoute() {
     document.getElementById('view-settings').classList.add('active');
     document.querySelector('.nav-link[href="#settings"]')?.classList.add('active');
     loadProviderSettings();
+  } else if (hash === '#login') {
+    document.getElementById('view-login').classList.add('active');
+    document.querySelector('.nav-link[href="#login"]')?.classList.add('active');
   } else {
     document.getElementById('view-overview').classList.add('active');
     document.querySelector('.nav-link[href="#overview"]')?.classList.add('active');
@@ -440,7 +573,9 @@ function setupDropzone(albumId) {
   const statusDiv = document.getElementById('upload-status');
   if (!dropzone || !fileInput) return;
 
-  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('click', () => {
+    requireAdminAuth(() => fileInput.click());
+  });
 
   dropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -467,6 +602,8 @@ function setupDropzone(albumId) {
 }
 
 async function uploadAudioFiles(albumId, files) {
+  if (!requireAdminAuth(() => {})) return;
+
   const statusDiv = document.getElementById('upload-status');
   if (statusDiv) statusDiv.innerHTML = `<span style="color: var(--accent-ochre);">uploading ${files.length} file(s)...</span>`;
 
@@ -476,7 +613,7 @@ async function uploadAudioFiles(albumId, files) {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/album/${albumId}/replace-audio`, {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/replace-audio`, {
       method: 'POST',
       body: formData
     });
@@ -497,6 +634,8 @@ async function uploadAudioFiles(albumId, files) {
 }
 
 async function handleRequeue(id) {
+  if (!requireAdminAuth(() => {})) return;
+
   const confirmMsg = "⚠️ PERMANENTLY DELETE & REQUEUE ALBUM?\n\n" +
     "This action will:\n" +
     "1. Delete all existing physical audio files from disk.\n" +
@@ -507,7 +646,7 @@ async function handleRequeue(id) {
   if (!confirm(confirmMsg)) return;
 
   try {
-    const res = await fetch(`${API_BASE}/album/${id}/requeue`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/album/${id}/requeue`, { method: 'POST' });
     if (res.ok) {
       alert('album media deleted and re-queued for fresh download.');
       await refreshData();
@@ -515,15 +654,19 @@ async function handleRequeue(id) {
       else if (getCurrentView() === 'queue') renderQueueTable();
       else if (getCurrentView() === 'failed') renderFailedTable();
     } else {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(`failed to requeue: ${data.message || 'unknown error'}`);
     }
   } catch (err) {
-    alert('failed to requeue album.');
+    if (err.message !== 'Authentication/Authorization required') {
+      alert('failed to requeue album.');
+    }
   }
 }
 
 async function requeueAllFailed() {
+  if (!requireAdminAuth(() => {})) return;
+
   const confirmMsg = "↻ REQUEUE ALL FAILED DOWNLOADS?\n\n" +
     "This will move all failed albums back into the active download queue for fresh multi-provider scraping.\n\n" +
     "Proceed with requeueing all failed items?";
@@ -531,48 +674,56 @@ async function requeueAllFailed() {
   if (!confirm(confirmMsg)) return;
 
   try {
-    const res = await fetch(`${API_BASE}/failed/requeue-all`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/failed/requeue-all`, { method: 'POST' });
     if (res.ok) {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(data.message || 'All failed downloads requeued.');
       await refreshData();
       if (getCurrentView() === 'failed') renderFailedTable();
       else if (getCurrentView() === 'queue') renderQueueTable();
     } else {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(`Failed to requeue all: ${data.message || 'Unknown error'}`);
     }
   } catch (err) {
-    alert('Error requeueing all failed downloads.');
+    if (err.message !== 'Authentication/Authorization required') {
+      alert('Error requeueing all failed downloads.');
+    }
   }
 }
 
 async function requeueAllActiveQueue() {
+  if (!requireAdminAuth(() => {})) return;
+
   const confirmMsg = "⚠️ REQUEUE ALL ACTIVE QUEUED & PENDING ITEMS?\n\n" +
-    "This will reset all active torrents/transfers and re-add all queue items back to the download pipeline for fresh scraping.\n\n" +
+    "This will reset all active transfers (Soulseek & Torrents) and re-add all queue items back to the download pipeline for fresh multi-provider scraping.\n\n" +
     "Proceed with requeueing all active queue items?";
 
   if (!confirm(confirmMsg)) return;
 
   try {
-    const res = await fetch(`${API_BASE}/queue/requeue-all`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/queue/requeue-all`, { method: 'POST' });
     if (res.ok) {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(data.message || 'All queue items requeued.');
       await refreshData();
       renderQueueTable();
     } else {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       alert(`Failed to requeue all active queue: ${data.message || 'Unknown error'}`);
     }
   } catch (err) {
-    alert('Error requeueing active queue.');
+    if (err.message !== 'Authentication/Authorization required') {
+      alert('Error requeueing active queue.');
+    }
   }
 }
 
 async function handleSetDownloaded(id) {
+  if (!requireAdminAuth(() => {})) return;
+
   try {
-    const res = await fetch(`${API_BASE}/album/${id}/set-downloaded`, { method: 'POST' });
+    const res = await authFetch(`${API_BASE}/album/${id}/set-downloaded`, { method: 'POST' });
     if (res.ok) {
       alert('album marked as downloaded.');
       await refreshData();
@@ -580,21 +731,27 @@ async function handleSetDownloaded(id) {
       else if (getCurrentView() === 'queue') renderQueueTable();
     }
   } catch (err) {
-    alert('failed to set album as downloaded.');
+    if (err.message !== 'Authentication/Authorization required') {
+      alert('failed to set album as downloaded.');
+    }
   }
 }
 
 async function handleDeleteAlbum(id) {
+  if (!requireAdminAuth(() => {})) return;
+
   if (!confirm('are you sure you want to remove this album?')) return;
   try {
-    const res = await fetch(`${API_BASE}/album/${id}`, { method: 'DELETE' });
+    const res = await authFetch(`${API_BASE}/album/${id}`, { method: 'DELETE' });
     if (res.ok) {
       alert('album removed.');
       await refreshData();
       window.location.hash = '#overview';
     }
   } catch (err) {
-    alert('failed to remove album.');
+    if (err.message !== 'Authentication/Authorization required') {
+      alert('failed to remove album.');
+    }
   }
 }
 
@@ -628,7 +785,11 @@ function setupModal() {
   const form = document.getElementById('add-album-form');
 
   if (openBtn && modal) {
-    openBtn.addEventListener('click', () => modal.style.display = 'flex');
+    openBtn.addEventListener('click', () => {
+      requireAdminAuth(() => {
+        modal.style.display = 'flex';
+      });
+    });
   }
 
   if (closeBtn && modal) {
@@ -644,11 +805,13 @@ function setupModal() {
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (!requireAdminAuth(() => {})) return;
+
       const title = document.getElementById('input-album-title').value;
       const artist = document.getElementById('input-album-artist').value;
 
       try {
-        const res = await fetch(`${API_BASE}/album/add`, {
+        const res = await authFetch(`${API_BASE}/album/add`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title, artist })
@@ -663,10 +826,118 @@ function setupModal() {
           else if (getCurrentView() === 'queue') renderQueueTable();
         }
       } catch (err) {
-        alert('failed to add album to queue.');
+        if (err.message !== 'Authentication/Authorization required') {
+          alert('failed to add album to queue.');
+        }
       }
     });
   }
+}
+
+// ─── AUTHENTICATION FORMS & HANDLERS ───
+
+let isPageRegisterMode = false;
+
+function togglePageAuthMode() {
+  isPageRegisterMode = !isPageRegisterMode;
+  const title = document.getElementById('auth-page-title');
+  const subtitle = document.getElementById('auth-page-subtitle');
+  const userGroup = document.getElementById('auth-page-username-group');
+  const labelId = document.getElementById('label-page-identifier');
+  const submitBtn = document.getElementById('btn-page-auth-submit');
+  const togglePrompt = document.getElementById('auth-page-toggle-prompt');
+  const toggleBtn = document.getElementById('btn-page-auth-toggle');
+
+  if (isPageRegisterMode) {
+    if (title) title.innerHTML = 'create a <i>resonance account</i>';
+    if (subtitle) subtitle.textContent = 'register to manage library releases and configuration.';
+    if (userGroup) userGroup.style.display = 'block';
+    if (labelId) labelId.textContent = 'email address';
+    if (submitBtn) submitBtn.textContent = 'create account';
+    if (togglePrompt) togglePrompt.textContent = 'already have an account?';
+    if (toggleBtn) toggleBtn.textContent = 'sign in';
+  } else {
+    if (title) title.innerHTML = 'sign in to <i>resonance</i>';
+    if (subtitle) subtitle.textContent = 'authenticate to manage download queues, requeue releases, or update provider settings.';
+    if (userGroup) userGroup.style.display = 'none';
+    if (labelId) labelId.textContent = 'email or username';
+    if (submitBtn) submitBtn.textContent = 'sign in';
+    if (togglePrompt) togglePrompt.textContent = "don't have an account?";
+    if (toggleBtn) toggleBtn.textContent = 'register new account';
+  }
+}
+
+function setupAuthForms() {
+  const pageForm = document.getElementById('auth-page-form');
+  const modalForm = document.getElementById('auth-modal-form');
+
+  if (pageForm) {
+    pageForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const statusEl = document.getElementById('auth-page-status');
+      if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-ochre);">authenticating...</span>`;
+
+      const username = document.getElementById('input-page-username').value;
+      const identifier = document.getElementById('input-page-identifier').value;
+      const password = document.getElementById('input-page-password').value;
+      const remember = document.getElementById('input-page-remember').checked;
+
+      try {
+        await executeAuthRequest(isPageRegisterMode, identifier, password, username, remember);
+        if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-olive);">successfully authenticated!</span>`;
+        setTimeout(() => {
+          window.location.hash = '#overview';
+        }, 800);
+      } catch (err) {
+        if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-terracotta);">${err.message}</span>`;
+      }
+    });
+  }
+
+  if (modalForm) {
+    modalForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const statusEl = document.getElementById('auth-modal-status');
+      if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-ochre);">authenticating...</span>`;
+
+      const username = document.getElementById('input-modal-username')?.value || '';
+      const identifier = document.getElementById('input-modal-identifier').value;
+      const password = document.getElementById('input-modal-password').value;
+
+      try {
+        await executeAuthRequest(false, identifier, password, username, true);
+        if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-olive);">successfully authenticated!</span>`;
+        setTimeout(() => {
+          closeAuthModal();
+        }, 800);
+      } catch (err) {
+        if (statusEl) statusEl.innerHTML = `<span style="color: var(--accent-terracotta);">${err.message}</span>`;
+      }
+    });
+  }
+}
+
+async function executeAuthRequest(isRegister, identifier, password, username, remember) {
+  const url = isRegister ? '/Authentication/register' : '/Authentication/login';
+  const payload = isRegister
+    ? { email: identifier, username: username || identifier.split('@')[0], password: password }
+    : { emailOrUsername: identifier, password: password, keepMeLoggedIn: remember };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    throw new Error(isRegister ? 'Registration failed. User or email may already exist.' : 'Invalid email/username or password.');
+  }
+
+  const data = await res.json();
+  if (data.token) {
+    setAuthToken(data.token, data.username || username || identifier, data.role);
+  }
+  return data;
 }
 
 /* ==========================================================================
@@ -709,7 +980,6 @@ function renderProviderPriorityList() {
     </div>
   `).join('');
 
-  // Simple drag-to-reorder
   setupDragReorder(list);
 }
 
@@ -738,7 +1008,6 @@ function setupDragReorder(list) {
   list.addEventListener('dragend', () => {
     if (dragEl) dragEl.classList.remove('dragging');
     dragEl = null;
-    // Update priority orders based on DOM order
     const items = list.querySelectorAll('.priority-item');
     items.forEach((item, i) => {
       const id = item.dataset.id;
@@ -751,6 +1020,7 @@ function setupDragReorder(list) {
 }
 
 function toggleProvider(id, enabled) {
+  if (!requireAdminAuth(() => {})) return;
   const config = providerSettingsCache.find(p => p.id === id);
   if (config) {
     config.isEnabled = enabled;
@@ -765,7 +1035,6 @@ function renderProviderCards() {
 
   container.innerHTML = providerSettingsCache.map(p => {
     const isSoulseek = p.providerName === 'Soulseek';
-    const isTorrent = p.providerName === 'Torrent';
     const accentClass = isSoulseek ? 'accent-ochre' : 'accent-olive';
     const icon = isSoulseek ? '♫' : '▼';
 
@@ -822,11 +1091,14 @@ function renderProviderCards() {
 }
 
 function updateProviderField(id, field, value) {
+  if (!requireAdminAuth(() => {})) return;
   const config = providerSettingsCache.find(p => p.id === id);
   if (config) config[field] = value;
 }
 
 async function saveProviderSettings() {
+  if (!requireAdminAuth(() => {})) return;
+
   const statusDiv = document.getElementById('settings-status');
   try {
     const payload = providerSettingsCache.map(p => ({
@@ -841,7 +1113,7 @@ async function saveProviderSettings() {
       extraConfig: p.extraConfig
     }));
 
-    const res = await fetch(`${API_BASE}/settings/providers`, {
+    const res = await authFetch(`${API_BASE}/settings/providers`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -854,11 +1126,15 @@ async function saveProviderSettings() {
       if (statusDiv) statusDiv.innerHTML = `<span style="color: var(--accent-terracotta);">failed to save settings.</span>`;
     }
   } catch (err) {
-    if (statusDiv) statusDiv.innerHTML = `<span style="color: var(--accent-terracotta);">error saving settings: ${err.message}</span>`;
+    if (err.message !== 'Authentication/Authorization required') {
+      if (statusDiv) statusDiv.innerHTML = `<span style="color: var(--accent-terracotta);">error saving settings: ${err.message}</span>`;
+    }
   }
 }
 
 async function testProviderConnection(id) {
+  if (!requireAdminAuth(() => {})) return;
+
   const config = providerSettingsCache.find(p => p.id === id);
   if (!config) return;
 
@@ -866,7 +1142,7 @@ async function testProviderConnection(id) {
   if (resultEl) resultEl.innerHTML = `<span style="color: var(--accent-ochre);">testing...</span>`;
 
   try {
-    const res = await fetch(`${API_BASE}/settings/providers/test`, {
+    const res = await authFetch(`${API_BASE}/settings/providers/test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -884,6 +1160,8 @@ async function testProviderConnection(id) {
       resultEl.innerHTML = `<span style="color: ${color};">${data.message}</span>`;
     }
   } catch (err) {
-    if (resultEl) resultEl.innerHTML = `<span style="color: var(--accent-terracotta);">connection error.</span>`;
+    if (err.message !== 'Authentication/Authorization required') {
+      if (resultEl) resultEl.innerHTML = `<span style="color: var(--accent-terracotta);">connection error.</span>`;
+    }
   }
 }

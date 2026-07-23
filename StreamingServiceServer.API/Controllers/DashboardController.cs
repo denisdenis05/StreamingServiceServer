@@ -9,7 +9,6 @@ using StreamingServiceServer.Data.Models;
 namespace StreamingServiceServer.API.Controllers;
 
 [ApiController]
-[AllowAnonymous]
 [Route("api/[controller]")]
 public class DashboardController : ControllerBase
 {
@@ -39,6 +38,7 @@ public class DashboardController : ControllerBase
         _slskdHelper = slskdHelper;
     }
 
+    [AllowAnonymous]
     [HttpGet("stats")]
     public async Task<IActionResult> GetStats(CancellationToken cancellationToken)
     {
@@ -82,6 +82,7 @@ public class DashboardController : ControllerBase
         });
     }
 
+    [AllowAnonymous]
     [HttpGet("queued")]
     public async Task<IActionResult> GetQueuedAlbums(CancellationToken cancellationToken)
     {
@@ -149,6 +150,7 @@ public class DashboardController : ControllerBase
         return Ok(result);
     }
 
+    [AllowAnonymous]
     [HttpGet("failed")]
     public async Task<IActionResult> GetFailedAlbums(CancellationToken cancellationToken)
     {
@@ -172,6 +174,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("failed/requeue-all")]
     public async Task<IActionResult> RequeueAllFailed(CancellationToken cancellationToken)
     {
@@ -210,6 +213,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("queue/requeue-all")]
     public async Task<IActionResult> RequeueAllActiveQueue(CancellationToken cancellationToken)
     {
@@ -254,6 +258,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [AllowAnonymous]
     [HttpGet("downloaded")]
     public async Task<IActionResult> GetDownloadedAlbums([FromQuery] string? search, CancellationToken cancellationToken)
     {
@@ -292,6 +297,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [AllowAnonymous]
     [HttpGet("album/{id:guid}")]
     public async Task<IActionResult> GetAlbumDetail(Guid id, CancellationToken cancellationToken)
     {
@@ -363,6 +369,7 @@ public class DashboardController : ControllerBase
         return NotFound(new { message = "Album not found in library or queue." });
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("album/add")]
     public async Task<IActionResult> AddAlbumToQueue([FromBody] AddAlbumRequest request, CancellationToken cancellationToken)
     {
@@ -412,6 +419,7 @@ public class DashboardController : ControllerBase
         return Ok(new { message = "Album metadata fetched from MusicBrainz and added to download queue.", id = releaseId });
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("album/{id:guid}/requeue")]
     public async Task<IActionResult> RequeueAlbum(Guid id, CancellationToken cancellationToken)
     {
@@ -499,6 +507,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("album/{id:guid}/replace-audio")]
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = 536870912)] // 512 MB
@@ -641,6 +650,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("album/{id:guid}/set-downloaded")]
     public async Task<IActionResult> SetAsDownloaded(Guid id, [FromBody] SetDownloadedRequest? request, CancellationToken cancellationToken)
     {
@@ -705,6 +715,7 @@ public class DashboardController : ControllerBase
         return Ok(new { message = "Album metadata fetched and marked as downloaded." });
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpDelete("album/{id:guid}")]
     public async Task<IActionResult> DeleteAlbum(Guid id, CancellationToken cancellationToken)
     {
@@ -773,6 +784,7 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [AllowAnonymous]
     [HttpGet("placeholder-cover")]
     public IActionResult GetPlaceholderCover()
     {
@@ -787,6 +799,7 @@ public class DashboardController : ControllerBase
 
     // ═══════════════════════ SETTINGS ENDPOINTS ═══════════════════════
 
+    [AllowAnonymous]
     [HttpGet("settings/providers")]
     public async Task<IActionResult> GetProviderSettings(CancellationToken cancellationToken)
     {
@@ -808,6 +821,7 @@ public class DashboardController : ControllerBase
         return Ok(result);
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPut("settings/providers")]
     public async Task<IActionResult> UpdateProviderSettings(
         [FromBody] List<UpdateProviderRequest> providers, CancellationToken cancellationToken)
@@ -835,6 +849,7 @@ public class DashboardController : ControllerBase
         return Ok(new { message = "Provider settings updated." });
     }
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("settings/providers/test")]
     public async Task<IActionResult> TestProviderConnection(
         [FromBody] TestProviderRequest request, CancellationToken cancellationToken)

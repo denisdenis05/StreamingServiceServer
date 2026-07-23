@@ -48,6 +48,7 @@ public class AuthenticationService : IAuthenticationService
         {
             Id = user.Id,
             Username = user.Username,
+            Role = user.RoleStatus.ToString(),
             Token = GenerateJwtToken(user)
         };
     }
@@ -73,6 +74,9 @@ public class AuthenticationService : IAuthenticationService
             ProviderId = String.Empty,
         };
         
+        var isFirstUser = !await _dbContext.Users.AnyAsync();
+        userToAdd.RoleStatus = isFirstUser ? RoleStatus.Admin : RoleStatus.Admin;
+
         userToAdd.PasswordHash = _hasher.HashPassword(userToAdd, request.Password);
         
         await _dbContext.Users
@@ -83,6 +87,7 @@ public class AuthenticationService : IAuthenticationService
         {
             Id = userToAdd.Id,
             Username = userToAdd.Username,
+            Role = userToAdd.RoleStatus.ToString(),
             Token = GenerateJwtToken(userToAdd)
         };
     }

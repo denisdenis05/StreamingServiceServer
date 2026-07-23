@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using FuzzySharp;
 using StreamingServiceServer.Business.Helpers;
@@ -8,9 +10,12 @@ namespace StreamingServiceDownloader.Helpers;
 /// <summary>
 /// Soulseek download provider using Slskd daemon.
 /// Implements format-cascading search (FLAC → WAV → MP3 → Any audio),
-/// search rate limiting (min 6s delay), fallback query handling,
-/// two-pass candidate matching (strict artist folder match first),
-/// and file size/lock validation (500KB - 200MB per file).
+/// multi-tier search queries (Artist+Title, Artist+CoreTitle, Title-Only, CoreTitle-Only with diacritics/symbol normalization),
+/// peer free-slot & transfer speed prioritization,
+/// audio bitrate/quality scoring and fake FLAC detection,
+/// directory-based candidate grouping with track completeness scoring,
+/// strict artist verification for title-only queries,
+/// search rate limiting (min 6s delay), and file size/lock validation (500KB - 200MB).
 /// </summary>
 public class SoulseekProvider : IDownloadProvider
 {
@@ -31,6 +36,23 @@ public class SoulseekProvider : IDownloadProvider
         ["ANY"]  = new(StringComparer.OrdinalIgnoreCase) { ".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".alac", ".wma", ".opus" }
     };
 
+    private struct SearchQueryOption
+    {
+        public string Query { get; set; }
+        public bool ContainsArtist { get; set; }
+    }
+
+    private class CandidateDirectory
+    {
+        public string Username { get; set; } = string.Empty;
+        public string DirectoryPath { get; set; } = string.Empty;
+        public List<SlskdFileDownloadRequest> Files { get; set; } = new();
+        public int Score { get; set; }
+        public int FileCount => Files.Count;
+        public long UploadSpeed { get; set; }
+        public bool HasFreeSlots { get; set; }
+    }
+
     public string ProviderName => "Soulseek";
 
     public SoulseekProvider(SlskdHelper slskdHelper)
@@ -46,37 +68,32 @@ public class SoulseekProvider : IDownloadProvider
     public async Task<DownloadSearchResult?> SearchAndEnqueueAsync(
         ReleaseToDownload release, string[] formatOrder, CancellationToken cancellationToken)
     {
-        // Define search queries: Primary ({Artist} {Title}), then Fallback ({Title}) if empty
-        var queries = new List<string>
-        {
-            CleanSearchQuery($"{release.Artist} {release.Title}"),
-            CleanSearchQuery(release.Title)
-        }.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var queries = GenerateSearchQueries(release);
 
-        foreach (var query in queries)
+        foreach (var queryOption in queries)
         {
-            if (string.IsNullOrWhiteSpace(query)) continue;
+            if (string.IsNullOrWhiteSpace(queryOption.Query)) continue;
 
-            Console.WriteLine($"[Soulseek] Initiating search query: '{query}'");
+            Console.WriteLine($"[Soulseek] Initiating search query (ContainsArtist={queryOption.ContainsArtist}): '{queryOption.Query}'");
 
             // 1. Throttle search requests to protect against Soulseek search bans
             await ThrottleSearchAsync(cancellationToken);
 
             // 2. Start search on Soulseek network
-            var searchId = await _slskdHelper.SearchAsync(query, cancellationToken);
+            var searchId = await _slskdHelper.SearchAsync(queryOption.Query, cancellationToken);
             if (searchId == null) continue;
 
             try
             {
-                // 3. Wait for search responses
-                var searchResult = await _slskdHelper.WaitForSearchResultsAsync(searchId.Value, 20, cancellationToken);
+                // 3. Wait for search responses (Slskd polling)
+                var searchResult = await _slskdHelper.WaitForSearchResultsAsync(searchId.Value, 12, cancellationToken);
                 if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
                 {
-                    Console.WriteLine($"[Soulseek] No search responses for query '{query}', trying fallback...");
+                    Console.WriteLine($"[Soulseek] No search responses for query '{queryOption.Query}', trying next tier...");
                     continue;
                 }
 
-                Console.WriteLine($"[Soulseek] Received {searchResult.Responses.Count} responses for query '{query}'.");
+                Console.WriteLine($"[Soulseek] Received {searchResult.Responses.Count} responses for query '{queryOption.Query}'.");
 
                 // 4. Try format cascade order (FLAC -> WAV -> MP3 -> ANY)
                 foreach (var format in formatOrder)
@@ -84,10 +101,10 @@ public class SoulseekProvider : IDownloadProvider
                     if (!FormatExtensions.TryGetValue(format, out var allowedExtensions))
                         continue;
 
-                    var bestMatch = FindBestUserForFormat(release, searchResult.Responses, allowedExtensions);
+                    var bestMatch = FindBestDirectoryForFormat(release, queryOption.ContainsArtist, searchResult.Responses, allowedExtensions);
                     if (bestMatch != null)
                     {
-                        Console.WriteLine($"[Soulseek] Found {format} match from user '{bestMatch.Value.username}' ({bestMatch.Value.files.Count} valid files). Enqueuing...");
+                        Console.WriteLine($"[Soulseek] Found {format} match from user '{bestMatch.Value.username}' in folder '{bestMatch.Value.directoryPath}' ({bestMatch.Value.files.Count} valid tracks). Enqueuing...");
 
                         var enqueued = await _slskdHelper.EnqueueDirectoryDownloadAsync(
                             bestMatch.Value.username, bestMatch.Value.files, cancellationToken);
@@ -104,7 +121,7 @@ public class SoulseekProvider : IDownloadProvider
                     }
                 }
 
-                Console.WriteLine($"[Soulseek] No format tier matched for query '{query}'.");
+                Console.WriteLine($"[Soulseek] No format tier matched for query '{queryOption.Query}'.");
             }
             finally
             {
@@ -200,91 +217,267 @@ public class SoulseekProvider : IDownloadProvider
         }
     }
 
-    // ─── Two-Pass File & Folder Matching with Size/Lock Validation ───
+    // ─── Multi-Tier Search Queries & Directory Candidate Evaluation ───
 
-    private (string username, List<SlskdFileDownloadRequest> files)? FindBestUserForFormat(
+    private List<SearchQueryOption> GenerateSearchQueries(ReleaseToDownload release)
+    {
+        var queries = new List<SearchQueryOption>();
+
+        var rawArtist = release.Artist;
+        var rawTitle = release.Title;
+
+        var cleanArtist = CleanSearchQuery(rawArtist);
+        var fullTitle = CleanSearchQuery(rawTitle);
+        var coreTitle = GetCoreTitle(rawTitle);
+
+        var normalizedArtist = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(rawArtist));
+        var normalizedFullTitle = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(rawTitle));
+        var normalizedCoreTitle = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(coreTitle));
+
+        // Tier 1: Artist + Full Title (e.g. Kendrick Lamar To Pimp A Butterfly)
+        if (!string.IsNullOrWhiteSpace(cleanArtist) && !string.IsNullOrWhiteSpace(fullTitle))
+            queries.Add(new SearchQueryOption { Query = $"{cleanArtist} {fullTitle}", ContainsArtist = true });
+
+        // Tier 1b: Diacritic/Symbol Normalized Artist + Full Title (e.g. Motley Crue / Bjork)
+        if (!string.IsNullOrWhiteSpace(normalizedArtist) && !string.IsNullOrWhiteSpace(normalizedFullTitle))
+            queries.Add(new SearchQueryOption { Query = $"{normalizedArtist} {normalizedFullTitle}", ContainsArtist = true });
+
+        // Tier 2: Artist + Core Title (strips Deluxe/Remastered/Bonus info)
+        if (!string.IsNullOrWhiteSpace(cleanArtist) && !string.IsNullOrWhiteSpace(coreTitle))
+            queries.Add(new SearchQueryOption { Query = $"{cleanArtist} {coreTitle}", ContainsArtist = true });
+
+        // Tier 2b: Normalized Artist + Core Title
+        if (!string.IsNullOrWhiteSpace(normalizedArtist) && !string.IsNullOrWhiteSpace(normalizedCoreTitle))
+            queries.Add(new SearchQueryOption { Query = $"{normalizedArtist} {normalizedCoreTitle}", ContainsArtist = true });
+
+        // Tier 3: Full Title Only (Omits Artist to find folders like Music/To Pimp A Butterfly/01.flac)
+        if (!string.IsNullOrWhiteSpace(fullTitle))
+            queries.Add(new SearchQueryOption { Query = fullTitle, ContainsArtist = false });
+
+        // Tier 3b: Normalized Full Title Only
+        if (!string.IsNullOrWhiteSpace(normalizedFullTitle))
+            queries.Add(new SearchQueryOption { Query = normalizedFullTitle, ContainsArtist = false });
+
+        // Tier 4: Core Title Only
+        if (!string.IsNullOrWhiteSpace(coreTitle))
+            queries.Add(new SearchQueryOption { Query = coreTitle, ContainsArtist = false });
+
+        // Tier 4b: Normalized Core Title Only
+        if (!string.IsNullOrWhiteSpace(normalizedCoreTitle))
+            queries.Add(new SearchQueryOption { Query = normalizedCoreTitle, ContainsArtist = false });
+
+        // Deduplicate queries
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<SearchQueryOption>();
+        foreach (var q in queries)
+        {
+            if (!string.IsNullOrWhiteSpace(q.Query) && seen.Add(q.Query))
+            {
+                result.Add(q);
+            }
+        }
+        return result;
+    }
+
+    private (string username, string directoryPath, List<SlskdFileDownloadRequest> files)? FindBestDirectoryForFormat(
         ReleaseToDownload release,
+        bool queryContainsArtist,
         List<SlskdSearchResponse> responses,
         HashSet<string> allowedExtensions)
     {
-        var pass1Candidates = new List<(string username, List<SlskdFileDownloadRequest> files, int score, int fileCount, long uploadSpeed)>();
-        var pass2Candidates = new List<(string username, List<SlskdFileDownloadRequest> files, int score, int fileCount, long uploadSpeed)>();
+        var candidates = new List<CandidateDirectory>();
 
-        var normalizedArtist = StringSanitizers.SanitizeTitle(release.Artist).ToLowerInvariant();
-        var normalizedAlbum = StringSanitizers.SanitizeTitle(release.Title).ToLowerInvariant();
+        var normalizedArtist = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(release.Artist)).ToLowerInvariant();
+        var normalizedAlbum = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(release.Title)).ToLowerInvariant();
+        var normalizedCoreAlbum = GetCoreTitle(RemoveDiacriticsAndNormalizeSymbols(release.Title)).ToLowerInvariant();
         bool isTargetVariousArtists = normalizedArtist.Contains("various") || normalizedArtist == "va";
+
+        var artistTokens = Regex.Split(normalizedArtist, @"\W+").Where(t => t.Length >= 3).ToList();
 
         foreach (var response in responses)
         {
             if (response.Username == null || response.Files == null || response.Files.Count == 0)
                 continue;
 
-            // Filter response files: 500KB - 200MB size, not locked, allowed extension
-            var validFiles = response.Files
-                .Where(f => f.Filename != null &&
-                           !f.IsLocked &&
-                           f.Size >= MinAudioFileSizeBytes &&
-                           f.Size <= MaxAudioFileSizeBytes &&
-                           allowedExtensions.Contains(GetExtension(f.Filename)))
-                .Select(f => new SlskdFileDownloadRequest { Filename = f.Filename!, Size = f.Size })
-                .ToList();
+            // Group response files by shared Directory path
+            var dirGroups = response.Files
+                .GroupBy(f => GetDirectoryPath(f.Filename ?? ""))
+                .Where(g => !string.IsNullOrWhiteSpace(g.Key));
 
-            if (validFiles.Count == 0) continue;
-
-            var joinedPaths = string.Join(" ", validFiles.Select(f => f.Filename)).ToLowerInvariant();
-
-            // Exclude compilation folders (VA / Various Artists) if searching for a single artist
-            if (!isTargetVariousArtists && (joinedPaths.Contains(@"\va ") || joinedPaths.Contains("va - ") || joinedPaths.Contains("various artists")))
+            foreach (var group in dirGroups)
             {
-                continue;
-            }
+                var dirPath = group.Key;
 
-            // Check artist match in folder path or filenames (handles abbreviations like JPEG for JPEGMAFIA)
-            int artistScore = Fuzz.PartialRatio(normalizedArtist, joinedPaths);
-            var artistTokens = Regex.Split(normalizedArtist, @"\W+").Where(t => t.Length >= 3).ToList();
-            bool artistTokenInPath = artistTokens.Any(token => joinedPaths.Contains(token));
-            bool artistMatched = artistScore >= 60 || artistTokenInPath;
+                // Filter valid audio files in this specific directory
+                var validAudioFiles = group
+                    .Where(f => f.Filename != null &&
+                               !f.IsLocked &&
+                               f.Size >= MinAudioFileSizeBytes &&
+                               f.Size <= MaxAudioFileSizeBytes &&
+                               allowedExtensions.Contains(GetExtension(f.Filename)))
+                    .Select(f => new SlskdFileDownloadRequest { Filename = f.Filename!, Size = f.Size })
+                    .ToList();
 
-            int albumScore = Fuzz.PartialRatio(normalizedAlbum, joinedPaths);
-            if (albumScore < 50) continue;
+                if (validAudioFiles.Count == 0) continue;
 
-            int combinedScore = (int)(artistScore * 0.4 + albumScore * 0.6);
+                var fullPathSearchString = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(dirPath + " " + string.Join(" ", validAudioFiles.Select(f => f.Filename)))).ToLowerInvariant();
 
-            if (artistMatched && albumScore >= 55)
-            {
-                // Pass 1 Candidate: Strict Artist Match in Folder/Filenames
-                pass1Candidates.Add((response.Username, validFiles, Math.Max(combinedScore, 75), validFiles.Count, response.UploadSpeed));
-            }
-            else if (albumScore >= 75)
-            {
-                // Pass 2 Candidate: Fallback if no artist-specific folder exists
-                pass2Candidates.Add((response.Username, validFiles, albumScore, validFiles.Count, response.UploadSpeed));
+                // Exclude compilation folders (VA / Various Artists) if searching for a specific artist
+                if (!isTargetVariousArtists && (fullPathSearchString.Contains(@"\va ") || fullPathSearchString.Contains("va - ") || fullPathSearchString.Contains("various artists")))
+                {
+                    continue;
+                }
+
+                // Calculate Artist Matching Score
+                int artistScore = Fuzz.PartialRatio(normalizedArtist, fullPathSearchString);
+                bool artistTokenInPath = artistTokens.Count > 0 && artistTokens.Any(token => fullPathSearchString.Contains(token));
+                bool artistMatched = artistScore >= 60 || artistTokenInPath;
+
+                // Calculate Album Matching Score
+                int albumScore = Fuzz.PartialRatio(normalizedAlbum, fullPathSearchString);
+                int coreAlbumScore = !string.IsNullOrWhiteSpace(normalizedCoreAlbum)
+                    ? Fuzz.PartialRatio(normalizedCoreAlbum, fullPathSearchString)
+                    : 0;
+                int maxAlbumScore = Math.Max(albumScore, coreAlbumScore);
+
+                if (maxAlbumScore < 45) continue;
+
+                // Strict Artist Verification for Title-Only search queries
+                if (!queryContainsArtist && !isTargetVariousArtists)
+                {
+                    if (!artistMatched && artistScore < 50)
+                    {
+                        // Skip candidate if artist cannot be verified in path/filenames for title-only queries
+                        continue;
+                    }
+                }
+
+                int combinedScore = (int)(artistScore * 0.35 + maxAlbumScore * 0.65);
+                if (artistMatched) combinedScore += 15;
+
+                // Audio Quality & Bitrate Scoring across files in directory
+                int avgQualityScore = (int)group.Average(f => CalculateAudioQualityScore(f, GetExtension(f.Filename ?? "")));
+                combinedScore += avgQualityScore;
+
+                // Peer Free Upload Slots & Speed Weighting
+                if (response.FreeUploadSlots > 0)
+                {
+                    combinedScore += 30; // Immediate download start bonus!
+                }
+                else
+                {
+                    combinedScore -= 20; // Queued download penalty
+                }
+
+                if (response.UploadSpeed > 1024 * 1024) // > 1 MB/s speed
+                {
+                    combinedScore += 10;
+                }
+
+                // Track completeness bonus for multi-track album directories
+                if (validAudioFiles.Count >= 4) combinedScore += 15;
+                else if (validAudioFiles.Count >= 2) combinedScore += 5;
+
+                // Bonus for directories containing cover art or logs
+                bool hasMetadataFiles = group.Any(f => f.Filename != null &&
+                    (f.Filename.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                     f.Filename.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                     f.Filename.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+                     f.Filename.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ||
+                     f.Filename.EndsWith(".log", StringComparison.OrdinalIgnoreCase)));
+                if (hasMetadataFiles) combinedScore += 5;
+
+                candidates.Add(new CandidateDirectory
+                {
+                    Username = response.Username,
+                    DirectoryPath = dirPath,
+                    Files = validAudioFiles,
+                    Score = combinedScore,
+                    UploadSpeed = response.UploadSpeed,
+                    HasFreeSlots = response.FreeUploadSlots > 0
+                });
             }
         }
 
-        // 1. Prefer Pass 1 candidates (Artist in folder path or filenames)
-        if (pass1Candidates.Count > 0)
-        {
-            var bestPass1 = pass1Candidates
-                .OrderByDescending(c => c.score)
-                .ThenByDescending(c => c.fileCount)
-                .ThenByDescending(c => c.uploadSpeed)
-                .First();
-            return (bestPass1.username, bestPass1.files);
-        }
+        if (candidates.Count == 0) return null;
 
-        // 2. Fall back to Pass 2 candidates (Album title fallback) only if zero artist-specific folders exist
-        if (pass2Candidates.Count > 0)
+        var bestCandidate = candidates
+            .Where(c => c.Score >= 50)
+            .OrderByDescending(c => c.Score)
+            .ThenByDescending(c => c.HasFreeSlots)
+            .ThenByDescending(c => c.FileCount)
+            .ThenByDescending(c => c.UploadSpeed)
+            .FirstOrDefault();
+
+        if (bestCandidate != null)
         {
-            var bestPass2 = pass2Candidates
-                .OrderByDescending(c => c.score)
-                .ThenByDescending(c => c.fileCount)
-                .ThenByDescending(c => c.uploadSpeed)
-                .First();
-            return (bestPass2.username, bestPass2.files);
+            return (bestCandidate.Username, bestCandidate.DirectoryPath, bestCandidate.Files);
         }
 
         return null;
+    }
+
+    private static int CalculateAudioQualityScore(SlskdFile file, string extension)
+    {
+        int score = 0;
+        var extLower = extension.ToLowerInvariant();
+
+        bool isLossless = extLower == ".flac" || extLower == ".wav" || extLower == ".alac";
+
+        if (isLossless)
+        {
+            // Fake FLAC check: If a FLAC file is under 5MB, it's likely a short/corrupt file or fake transcode
+            if (file.Size < 5 * 1024 * 1024)
+            {
+                score -= 15;
+            }
+            else
+            {
+                score += 15;
+            }
+
+            // Hi-Res Audiophile Detection
+            if (file.BitDepth >= 24 || file.SampleRate >= 88200)
+            {
+                score += 10; // Hi-Res bonus
+            }
+        }
+        else if (extLower == ".mp3" || extLower == ".m4a" || extLower == ".aac" || extLower == ".ogg" || extLower == ".opus")
+        {
+            if (file.BitRate.HasValue)
+            {
+                if (file.BitRate >= 315) score += 20;       // 320 kbps MP3
+                else if (file.BitRate >= 250) score += 10;  // V0 / 256 kbps MP3
+                else if (file.BitRate < 190) score -= 20;   // Low quality < 192 kbps
+            }
+        }
+
+        return score;
+    }
+
+    private static string RemoveDiacriticsAndNormalizeSymbols(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+
+        // Replace common symbol representations
+        text = text.Replace("&", " and ")
+                   .Replace("+", " and ")
+                   .Replace("$", "s");
+
+        // Remove diacritics / accents
+        var normalizedString = text.Normalize(NormalizationForm.FormD);
+        var stringBuilder = new StringBuilder(capacity: normalizedString.Length);
+
+        foreach (var c in normalizedString)
+        {
+            var unicodeCategory = CharUnicodeInfo.GetUnicodeCategory(c);
+            if (unicodeCategory != UnicodeCategory.NonSpacingMark)
+            {
+                stringBuilder.Append(c);
+            }
+        }
+
+        return stringBuilder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static string CleanSearchQuery(string query)
@@ -294,6 +487,22 @@ public class SoulseekProvider : IDownloadProvider
         cleaned = Regex.Replace(cleaned, @"[-_'\.]", " ");
         cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
         return cleaned;
+    }
+
+    private static string GetCoreTitle(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return "";
+        var cleaned = Regex.Replace(title, @"[\(\[\{](?:deluxe|remaster|reissue|anniversary|edition|bonus|explicit|expanded|version|vol\.?\s*\d+|feat\.?|ft\.?).*?[\)\]\}]", "", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"\b(?:deluxe|remastered|anniversary edition|expanded edition|special edition)\b", "", RegexOptions.IgnoreCase);
+        return CleanSearchQuery(cleaned);
+    }
+
+    private static string GetDirectoryPath(string filename)
+    {
+        if (string.IsNullOrWhiteSpace(filename)) return "";
+        var lastSlash = Math.Max(filename.LastIndexOf('/'), filename.LastIndexOf('\\'));
+        if (lastSlash < 0) return filename;
+        return filename.Substring(0, lastSlash);
     }
 
     private static string GetExtension(string filename)

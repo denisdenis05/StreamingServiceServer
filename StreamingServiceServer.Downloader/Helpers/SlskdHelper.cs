@@ -187,26 +187,37 @@ public class SlskdHelper
     /// Wait for search results to complete (poll with retries).
     /// </summary>
     public async Task<SlskdSearchResult?> WaitForSearchResultsAsync(
-        Guid searchId, int maxWaitSeconds = 20, CancellationToken cancellationToken = default)
+        Guid searchId, int maxWaitSeconds = 12, CancellationToken cancellationToken = default)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(maxWaitSeconds);
+        var startTime = DateTime.UtcNow;
+        var deadline = startTime.AddSeconds(maxWaitSeconds);
+        const int minWaitSeconds = 6;
 
         while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
         {
-            await Task.Delay(2500, cancellationToken);
+            await Task.Delay(1500, cancellationToken);
 
             var result = await GetSearchResultsAsync(searchId, cancellationToken);
             if (result == null) continue;
 
-            // The search state can be "InProgress", "Completed", etc.
-            if (result.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true
-                || result.Responses?.Count > 0)
+            var elapsedSeconds = (DateTime.UtcNow - startTime).TotalSeconds;
+
+            if (result.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return result;
+            }
+
+            if (result.Responses?.Count >= 15 && elapsedSeconds >= 4)
+            {
+                return result;
+            }
+
+            if (result.Responses?.Count > 0 && elapsedSeconds >= minWaitSeconds)
             {
                 return result;
             }
         }
 
-        // Return whatever we have even if incomplete
         return await GetSearchResultsAsync(searchId, cancellationToken);
     }
 

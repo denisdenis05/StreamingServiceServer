@@ -119,6 +119,32 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.AlbumAnalysisResult", b =>
+                {
+                    b.Property<Guid>("AlbumId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("LastAnalyzedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MissingRecordingIdsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("MissingTracks")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PresentTracks")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TotalTracks")
+                        .HasColumnType("integer");
+
+                    b.HasKey("AlbumId");
+
+                    b.ToTable("AlbumAnalysisResults");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Artist", b =>
                 {
                     b.Property<Guid>("Id")
@@ -646,6 +672,17 @@ namespace StreamingServiceServer.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.AlbumAnalysisResult", b =>
+                {
+                    b.HasOne("StreamingServiceServer.Data.Models.Release", "Album")
+                        .WithMany()
+                        .HasForeignKey("AlbumId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Album");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.ArtistAlias", b =>

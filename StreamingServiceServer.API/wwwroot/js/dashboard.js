@@ -584,13 +584,19 @@ function renderAlbumDetail(album) {
     recordingsHtml = `
       <h3 style="margin-top: 2rem; margin-bottom: 1rem;">track listing (${album.recordings.length})</h3>
       <ul class="track-list">
-        ${album.recordings.map((track, i) => `
-          <li class="track-item">
+        ${album.recordings.map((track, i) => {
+          const isMissing = track.fileExists === false;
+          return `
+          <li class="track-item" style="${isMissing ? 'background-color: rgba(198, 40, 40, 0.06); border-left: 3px solid #c62828; padding-left: 0.8rem;' : ''}">
             <span class="track-number">${track.position || i + 1}</span>
-            <span class="track-name">${track.title}</span>
+            <span class="track-name" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              ${escapeHtml(track.title)}
+              ${isMissing ? `<span class="badge badge-terracotta" style="font-size: 0.75rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;" title="Audio file missing on filesystem">⚠️ missing file</span>` : ''}
+            </span>
             <span style="font-size: 0.85rem; color: var(--text-muted);">${track.length ? Math.floor(track.length / 60) + ':' + String(track.length % 60).padStart(2, '0') : ''}</span>
           </li>
-        `).join('')}
+        `;
+        }).join('')}
       </ul>
     `;
   } else {
@@ -1334,25 +1340,86 @@ async function triggerAnalysisScan() {
   }
 }
 
+async function triggerRequeueFullyMissingAlbums() {
+  const btn = document.getElementById('btn-analysis-requeue');
+  const notice = document.getElementById('analysis-status-notice');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+  }
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">⏳ Requeuing 100% missing albums for download...</div>`;
+
+  try {
+    const res = await authFetch('/api/dashboard/analysis/requeue-fully-missing', { method: 'POST' });
+    const data = await parseJsonResponse(res);
+    if (data.success) {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">✓ ${escapeHtml(data.message || '100% missing albums requeued for download.')}</div>`;
+      await fetchAnalysisData();
+    } else {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Requeue error: ${escapeHtml(data.message)}</div>`;
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Requeue error: ${escapeHtml(err.message)}</div>`;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+  }
+}
+window.triggerRequeueFullyMissingAlbums = triggerRequeueFullyMissingAlbums;
+
+async function pollSoulseekStatus(notice, onComplete) {
+  const maxWaitMs = 10 * 60 * 1000; // 10 minutes max
+  const pollInterval = 3000;
+  const start = Date.now();
+
+  while (Date.now() - start < maxWaitMs) {
+    await new Promise(r => setTimeout(r, pollInterval));
+    try {
+      const res = await authFetch('/api/dashboard/analysis/scan-soulseek/status', { method: 'GET' });
+      const status = await parseJsonResponse(res);
+      const elapsed = Math.round((Date.now() - start) / 1000);
+
+      if (status.state === 'running') {
+        if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">⏳ Scan running... ${elapsed}s elapsed</div>`;
+      } else if (status.state === 'complete') {
+        if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">✓ Soulseek scan complete! Imported <strong>${status.importedCount ?? 0}</strong> tracks.</div>`;
+        if (onComplete) await onComplete(status);
+        return;
+      } else if (status.state === 'error') {
+        if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Scan error: ${escapeHtml(status.error || 'Unknown error')}</div>`;
+        return;
+      }
+    } catch (e) {
+      // ignore transient polling errors
+    }
+  }
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; color: #f57f17;">Scan is taking longer than expected. Check server logs.</div>`;
+}
+
 async function triggerSoulseekImportAll() {
   const btn = document.getElementById('btn-analysis-soulseek');
   const notice = document.getElementById('analysis-status-notice');
   if (btn) btn.disabled = true;
-  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Scanning /nas/slskd-data/downloads/ for missing album tracks and importing...</div>`;
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Starting Soulseek scan...</div>`;
 
   try {
     const res = await authFetch('/api/dashboard/analysis/scan-soulseek', { method: 'POST' });
     const data = await parseJsonResponse(res);
-    if (data.success) {
-      const summary = data.summary || (data.data && data.data.summary) || {};
-      const items = data.items || (data.data && data.data.items) || [];
-      analysisState.summary = summary;
-      analysisState.items = items;
-      renderAnalysisUI();
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">Soulseek import complete! Imported ${data.importedCount || 0} audio tracks into your library.</div>`;
-    } else {
+    if (!data.success) {
       if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${escapeHtml(data.message)}</div>`;
+      return;
     }
+
+    if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">⏳ Scan running in background...</div>`;
+
+    await pollSoulseekStatus(notice, async (status) => {
+      await fetchAnalysisData();
+      renderAnalysisUI();
+    });
   } catch (err) {
     if (err.message !== 'Authentication/Authorization required') {
       if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${escapeHtml(err.message)}</div>`;
@@ -1364,23 +1431,28 @@ async function triggerSoulseekImportAll() {
 
 async function triggerSoulseekImportSingle(albumId) {
   const notice = document.getElementById('analysis-status-notice');
-  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Scanning Soulseek folder for album files...</div>`;
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">Starting Soulseek scan for album...</div>`;
 
   try {
     const res = await authFetch(`/api/dashboard/analysis/album/${albumId}/scan-soulseek`, { method: 'POST' });
     const data = await parseJsonResponse(res);
-    if (data.success) {
-      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">${escapeHtml(data.message || 'Import completed.')}</div>`;
-      await fetchAnalysisData();
-    } else {
+    if (!data.success) {
       if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import error: ${escapeHtml(data.message)}</div>`;
+      return;
     }
+
+    if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">⏳ Scan running in background...</div>`;
+
+    await pollSoulseekStatus(notice, async () => {
+      await fetchAnalysisData();
+    });
   } catch (err) {
     if (err.message !== 'Authentication/Authorization required') {
       if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Import failed: ${escapeHtml(err.message)}</div>`;
     }
   }
 }
+
 
 function filterAnalysisList() {
   const input = document.getElementById('analysis-search-input');

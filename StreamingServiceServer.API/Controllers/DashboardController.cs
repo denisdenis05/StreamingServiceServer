@@ -1076,24 +1076,17 @@ public class DashboardController : ControllerBase
             ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma"
         };
 
-        var allDownloadFiles = new List<(string fileName, string fullPath)>();
+        List<string> downloadDirs;
         try
         {
-            foreach (var filePath in Directory.EnumerateFiles(slskdDownloadDir, "*.*", SearchOption.AllDirectories))
-            {
-                if (allowedExtensions.Contains(Path.GetExtension(filePath)))
-                {
-                    allDownloadFiles.Add((Path.GetFileName(filePath), filePath));
-                }
-            }
+            downloadDirs = Directory.GetDirectories(slskdDownloadDir, "*", SearchOption.AllDirectories).ToList();
+            downloadDirs.Add(slskdDownloadDir);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error listing files in slskd downloads folder");
+            _logger.LogError(ex, "Error listing directories in slskd downloads folder");
             return 0;
         }
-
-        if (allDownloadFiles.Count == 0) return 0;
 
         var query = _dbContext.Releases
             .Include(r => r.Artist)
@@ -1110,10 +1103,13 @@ public class DashboardController : ControllerBase
 
         foreach (var release in releases)
         {
+            var artistName = release.Artist?.Name ?? "";
+            var releaseTitle = release.Title ?? "";
+
             var relativePath = StreamingServiceServer.Business.Helpers.MusicLocationHelper.GetRelativeFolderPathForRecording(new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
             {
-                ArtistName = release.Artist?.Name ?? "",
-                ReleaseTitle = release.Title ?? ""
+                ArtistName = artistName,
+                ReleaseTitle = releaseTitle
             });
 
             var destinationDir = Path.Combine(baseMusicPath, relativePath);
@@ -1131,6 +1127,57 @@ public class DashboardController : ControllerBase
 
             if (missingRecordings.Count == 0) continue;
 
+            // 1. Fuzzy match download directories against Album Title and Artist + Album Title
+            string sanitizedAlbum = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(releaseTitle).ToLowerInvariant();
+            string sanitizedArtistAlbum = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle($"{artistName} {releaseTitle}").ToLowerInvariant();
+
+            var candidateDirs = new List<(string dirPath, int score)>();
+
+            foreach (var dir in downloadDirs)
+            {
+                var dirName = Path.GetFileName(dir);
+                string sanitizedDir = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(dirName).ToLowerInvariant();
+
+                int albumScore = FuzzySharp.Fuzz.PartialRatio(sanitizedAlbum, sanitizedDir);
+                int artistAlbumScore = FuzzySharp.Fuzz.PartialRatio(sanitizedArtistAlbum, sanitizedDir);
+                int bestDirScore = Math.Max(albumScore, artistAlbumScore);
+
+                if (bestDirScore >= 60)
+                {
+                    candidateDirs.Add((dir, bestDirScore));
+                }
+            }
+
+            var searchDirs = candidateDirs.Count > 0 
+                ? candidateDirs.OrderByDescending(cd => cd.score).Select(cd => cd.dirPath).ToList()
+                : downloadDirs;
+
+            // 2. Gather audio files from candidate directories
+            var candidateFiles = new List<(string fileName, string fullPath)>();
+            foreach (var dir in searchDirs)
+            {
+                try
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        foreach (var filePath in Directory.GetFiles(dir))
+                        {
+                            if (allowedExtensions.Contains(Path.GetExtension(filePath)))
+                            {
+                                candidateFiles.Add((Path.GetFileName(filePath), filePath));
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Ignore inaccessible folders
+                }
+            }
+
+            if (candidateFiles.Count == 0) continue;
+
+            // 3. Match missing recordings to candidate files & move matched files
             foreach (var recording in missingRecordings)
             {
                 string targetTitle = recording.Title ?? "";
@@ -1139,7 +1186,7 @@ public class DashboardController : ControllerBase
                 (string fileName, string fullPath)? bestMatch = null;
                 int bestScore = 0;
 
-                foreach (var file in allDownloadFiles)
+                foreach (var file in candidateFiles)
                 {
                     string fileNameClean = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(Path.GetFileNameWithoutExtension(file.fileName)).ToLowerInvariant();
                     int score = FuzzySharp.Fuzz.PartialRatio(sanitizedTarget, fileNameClean);
@@ -1153,7 +1200,7 @@ public class DashboardController : ControllerBase
                         }
                     }
 
-                    if (score > bestScore && score >= 70)
+                    if (score > bestScore && score >= 65)
                     {
                         bestScore = score;
                         bestMatch = file;
@@ -1166,12 +1213,27 @@ public class DashboardController : ControllerBase
                     var destPath = Path.Combine(destinationDir, recording.Id.ToString() + ext);
                     try
                     {
-                        System.IO.File.Copy(bestMatch.Value.fullPath, destPath, overwrite: true);
+                        if (System.IO.File.Exists(destPath))
+                        {
+                            System.IO.File.Delete(destPath);
+                        }
+
+                        try
+                        {
+                            System.IO.File.Move(bestMatch.Value.fullPath, destPath, overwrite: true);
+                        }
+                        catch (IOException)
+                        {
+                            System.IO.File.Copy(bestMatch.Value.fullPath, destPath, overwrite: true);
+                            System.IO.File.Delete(bestMatch.Value.fullPath);
+                        }
+
                         importedCount++;
+                        candidateFiles.RemoveAll(f => f.fullPath == bestMatch.Value.fullPath);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to copy audio file from {Source} to {Dest}", bestMatch.Value.fullPath, destPath);
+                        _logger.LogError(ex, "Failed to move audio file from {Source} to {Dest}", bestMatch.Value.fullPath, destPath);
                     }
                 }
             }

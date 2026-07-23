@@ -956,62 +956,61 @@ public class DashboardController : ControllerBase
     }
 
     [Authorize(Roles = "Admin")]
-    [HttpPost("analysis/scan-soulseek")]
-    public async Task<IActionResult> ScanSoulseekFolder(CancellationToken cancellationToken)
+    [HttpGet("analysis/scan-soulseek/status")]
+    public IActionResult GetSoulseekScanStatus()
     {
-        try
+        return Ok(SoulseekScanStatus.Current);
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("analysis/scan-soulseek")]
+    public IActionResult ScanSoulseekFolder()
+    {
+        if (SoulseekScanStatus.IsRunning)
+            return Ok(new { success = true, message = "Scan already in progress.", status = SoulseekScanStatus.Current });
+
+        // Fire and forget — runs on the thread pool so the HTTP response is immediate
+        _ = Task.Run(async () =>
         {
-            int imported = await ScanAndImportFromSoulseekAsync(null, cancellationToken);
-            var results = await _dbContext.AlbumAnalysisResults
-                .Include(a => a.Album)
-                .ThenInclude(r => r!.Artist)
-                .OrderByDescending(a => a.MissingTracks)
-                .ThenBy(a => a.Album != null ? a.Album.Title : "")
-                .ToListAsync(cancellationToken);
-
-            var mappedList = results.Select(r => new
+            SoulseekScanStatus.Start();
+            try
             {
-                albumId = r.AlbumId,
-                title = r.Album?.Title ?? "Unknown",
-                artistName = r.Album?.Artist?.Name ?? "Unknown Artist",
-                cover = !string.IsNullOrWhiteSpace(r.Album?.LocalSmallCover) ? r.Album.LocalSmallCover : (!string.IsNullOrWhiteSpace(r.Album?.SmallCover) ? r.Album.SmallCover : r.Album?.Cover ?? ""),
-                totalTracks = r.TotalTracks,
-                presentTracks = r.PresentTracks,
-                missingTracks = r.MissingTracks,
-                lastAnalyzedAt = r.LastAnalyzedAt
-            }).ToList();
-
-            var summary = new
+                int imported = await ScanAndImportFromSoulseekAsync(null, CancellationToken.None);
+                SoulseekScanStatus.Complete(imported);
+            }
+            catch (Exception ex)
             {
-                totalAlbums = mappedList.Count,
-                completeAlbums = mappedList.Count(a => a.missingTracks == 0),
-                missingAlbums = mappedList.Count(a => a.missingTracks > 0),
-                totalMissingTracks = mappedList.Sum(a => a.missingTracks)
-            };
+                _logger.LogError(ex, "[Soulseek Scan] Background scan failed");
+                SoulseekScanStatus.Fail(ex.Message);
+            }
+        });
 
-            return Ok(new { success = true, importedCount = imported, summary, items = mappedList });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to scan soulseek downloads folder");
-            return StatusCode(500, new { success = false, message = ex.Message });
-        }
+        return Accepted(new { success = true, message = "Soulseek scan started in background. Poll /api/dashboard/analysis/scan-soulseek/status for results.", status = SoulseekScanStatus.Current });
     }
 
     [Authorize(Roles = "Admin")]
     [HttpPost("analysis/album/{id}/scan-soulseek")]
-    public async Task<IActionResult> ScanSingleAlbumSoulseek(Guid id, CancellationToken cancellationToken)
+    public IActionResult ScanSingleAlbumSoulseek(Guid id)
     {
-        try
+        if (SoulseekScanStatus.IsRunning)
+            return Ok(new { success = true, message = "Scan already in progress.", status = SoulseekScanStatus.Current });
+
+        _ = Task.Run(async () =>
         {
-            int imported = await ScanAndImportFromSoulseekAsync(id, cancellationToken);
-            return Ok(new { success = true, importedCount = imported, message = $"Imported {imported} tracks from Soulseek downloads." });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to scan soulseek folder for album {Id}", id);
-            return StatusCode(500, new { success = false, message = ex.Message });
-        }
+            SoulseekScanStatus.Start();
+            try
+            {
+                int imported = await ScanAndImportFromSoulseekAsync(id, CancellationToken.None);
+                SoulseekScanStatus.Complete(imported);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Soulseek Scan] Background scan failed for album {Id}", id);
+                SoulseekScanStatus.Fail(ex.Message);
+            }
+        });
+
+        return Accepted(new { success = true, message = $"Soulseek scan started for album {id}. Poll /api/dashboard/analysis/scan-soulseek/status for results.", status = SoulseekScanStatus.Current });
     }
 
     private async Task PerformFullAnalysisScanAsync(CancellationToken cancellationToken)
@@ -1392,4 +1391,53 @@ public class TestProviderRequest
     public string? Username { get; set; }
     public string? Password { get; set; }
     public string? ApiKey { get; set; }
+}
+
+/// <summary>Thread-safe singleton status for the background Soulseek scan.</summary>
+public static class SoulseekScanStatus
+{
+    private static volatile bool _isRunning;
+    private static volatile string _state = "idle";
+    private static volatile string? _error;
+    private static int _importedCount;
+    private static DateTime? _startedAt;
+    private static DateTime? _completedAt;
+
+    public static bool IsRunning => _isRunning;
+
+    public static object Current => new
+    {
+        state = _state,
+        isRunning = _isRunning,
+        importedCount = _importedCount,
+        error = _error,
+        startedAt = _startedAt,
+        completedAt = _completedAt
+    };
+
+    public static void Start()
+    {
+        _isRunning = true;
+        _state = "running";
+        _error = null;
+        _importedCount = 0;
+        _startedAt = DateTime.UtcNow;
+        _completedAt = null;
+    }
+
+    public static void Complete(int imported)
+    {
+        _importedCount = imported;
+        _state = "complete";
+        _completedAt = DateTime.UtcNow;
+        _isRunning = false;
+    }
+
+    public static void Fail(string error)
+    {
+        _error = error;
+        _state = "error";
+        _completedAt = DateTime.UtcNow;
+        _isRunning = false;
+    }
 }

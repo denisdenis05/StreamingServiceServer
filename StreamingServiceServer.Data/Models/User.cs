@@ -18,7 +18,7 @@ public class User
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     public virtual ICollection<Playlist> Playlists { get; set; } = new List<Playlist>();
     public string ProviderId { get; set; }
-    
+
     public string? LastFmUsername { get; set; }
     public string? LastFmSessionKey { get; set; }
     public DateTime? LastFmConnectedAt { get; set; }

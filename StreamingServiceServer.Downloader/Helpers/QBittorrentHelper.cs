@@ -20,13 +20,13 @@ public class QBittorrentHelper: ITorrentHelper
     private readonly string _username;
     private readonly string _password;
     private bool _isLoggedIn;
-    
+
 
     public QBittorrentHelper(IConfiguration configuration, HttpClient httpClient)
     {
         _httpClient = httpClient;
         _configuration = configuration;
-        
+
         _baseUrl = (_configuration["Music:DownloadSource:Torrent:Url"] ?? "http://localhost:8080").TrimEnd('/');
         _username = _configuration["Music:DownloadSource:Torrent:User"] ?? "admin";
         _password = _configuration["Music:DownloadSource:Torrent:Password"] ?? "adminadmin";
@@ -35,7 +35,7 @@ public class QBittorrentHelper: ITorrentHelper
     public async Task LoginAsync()
     {
         Console.WriteLine("Logging in...");
-        
+
         var loginData = new FormUrlEncodedContent(new[]
         {
             new KeyValuePair<string, string>("username", _username),
@@ -75,7 +75,7 @@ public class QBittorrentHelper: ITorrentHelper
 
         var response = await _httpClient.PostAsync($"{_baseUrl}/api/v2/torrents/add", content);
         response.EnsureSuccessStatusCode();
-        
+
         Console.WriteLine("Added");
     }
 
@@ -102,7 +102,7 @@ public class QBittorrentHelper: ITorrentHelper
             t.Hash.Equals(searchTerm, StringComparison.OrdinalIgnoreCase) ||
             t.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
     }
-    
+
     public async Task RemoveTorrentAsync(string torrentName, bool deleteFiles = true)
     {
         if (!_isLoggedIn)
@@ -123,7 +123,7 @@ public class QBittorrentHelper: ITorrentHelper
         var response = await _httpClient.PostAsync($"{_baseUrl}/api/v2/torrents/delete", content);
         response.EnsureSuccessStatusCode();
     }
-    
+
     public async Task<int> GetActiveDownloadCountAsync()
     {
         if (!_isLoggedIn)

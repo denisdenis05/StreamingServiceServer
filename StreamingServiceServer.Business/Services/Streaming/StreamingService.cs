@@ -7,7 +7,7 @@ public class StreamingService : IStreamingService
 {
     private readonly IMetadataService _metadataService;
     private readonly IConfiguration _configuration;
-    
+
     public StreamingService(IMetadataService metadataService, IConfiguration configuration)
     {
         _metadataService = metadataService;
@@ -43,7 +43,7 @@ public class StreamingService : IStreamingService
 
         return Path.Combine(folderPath, record.Id + extension);
     }
-    
+
     public async Task<string> GetStreamingPath(Guid songId)
     {
         var record = await _metadataService.GetRecordingById(songId, Guid.Empty);
@@ -56,7 +56,7 @@ public class StreamingService : IStreamingService
         }
 
         var relativeFolderPath = MusicLocationHelper.GetRelativeFolderPathForRecording(record);
-        
+
         var folderPath = Path.Combine(
             _configuration["Music:Path"],
             relativeFolderPath
@@ -85,7 +85,7 @@ public class StreamingService : IStreamingService
         var tempPath = Path.Combine(_configuration["Music:Path"], "TEMP");
         var matchingFile = Directory.GetFiles(tempPath, songId.ToString() + ".*")
             .FirstOrDefault();    
-        
+
         if (matchingFile != null)
         {
             return Path.Combine("TEMP", Path.GetFileName(matchingFile));

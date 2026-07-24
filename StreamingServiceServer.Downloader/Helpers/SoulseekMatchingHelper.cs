@@ -6,16 +6,11 @@ using StreamingServiceServer.Business.Services.MusicSearch;
 
 namespace StreamingServiceDownloader.Helpers;
 
-/// <summary>
-/// Shared helper for matching audio files from a folder to album recordings.
-/// Extracted from PendingDownloadChecker so DashboardController can also use it.
-/// </summary>
+
 public static class SoulseekMatchingHelper
 {
-    /// <summary>
-    /// Matches a flat list of audio files against album recordings using audio tag metadata
-    /// (preferred) or filename fuzzy matching as fallback. Returns matches keyed by RecordingResponse.Id.
-    /// </summary>
+
+
     public static async Task<ICollection<MusicFileMatch>> MatchSongsWithMetadataAsync(
         Guid albumId,
         List<(string fileName, string fullPath)> files,
@@ -27,10 +22,7 @@ public static class SoulseekMatchingHelper
         return MatchSongsWithRecordings(simpleRecordings, files);
     }
 
-    /// <summary>
-    /// Synchronous matching against pre-loaded DB recordings (RecordingResponse list),
-    /// producing MusicFileMatch items keyed directly by Recording.Id.
-    /// </summary>
+
     public static ICollection<MusicFileMatch> MatchSongsWithRecordings(
         IEnumerable<RecordingResponse> recordings,
         List<(string fileName, string fullPath)> files)
@@ -54,14 +46,14 @@ public static class SoulseekMatchingHelper
 
                 int combinedScore = 0;
 
-                // 1. Prefer full audio tag metadata match
+
                 if (AudioMetadataHelper.IsMetadataMatch(metadata, recording.ReleaseTitle ?? "", targetTitle))
                 {
                     combinedScore = 100;
                 }
                 else if (metadata != null && !string.IsNullOrWhiteSpace(metadata.Title))
                 {
-                    // 2. Fuzzy match against ID3 Title tag
+
                     string metaTitleClean = StringSanitizers.SanitizeTitle(metadata.Title).ToLowerInvariant();
                     int titleScore = Fuzz.TokenSetRatio(metaTitleClean, sanitizedTargetTitle);
                     int posTitleScore = Fuzz.TokenSetRatio(metaTitleClean, sanitizedTargetPosTitle);
@@ -69,7 +61,7 @@ public static class SoulseekMatchingHelper
                 }
                 else
                 {
-                    // 3. Fallback: filename matching + track number bonus
+
                     var (fileTrackNum, fileTitle) = ExtractTrackInfo(fileName);
                     bool trackNumMatches = fileTrackNum.HasValue && fileTrackNum == recording.PositionInAlbum;
 
@@ -88,7 +80,7 @@ public static class SoulseekMatchingHelper
                 }
             }
 
-            // Fallback 1: Match by extracted track number in filename (e.g. "01.mp3", "Track 01.flac")
+
             if (bestFile == null)
             {
                 foreach (var (fileName, fullPath) in unmatchedFiles)
@@ -97,17 +89,17 @@ public static class SoulseekMatchingHelper
                     if (fileTrackNum.HasValue && fileTrackNum.Value == recording.PositionInAlbum)
                     {
                         bestFile = (fileName, fullPath);
-                        bestScore = 70; // High confidence position match
+                        bestScore = 70; 
                         break;
                     }
                 }
             }
 
-            // Fallback 2: Sequential fallback if unmatched files remain
+
             if (bestFile == null && unmatchedFiles.Count > 0)
             {
                 var sortedFiles = unmatchedFiles.OrderBy(f => f.fileName, StringComparer.OrdinalIgnoreCase).ToList();
-                // Find file at position index or first remaining
+
                 var candidate = sortedFiles.FirstOrDefault(f =>
                 {
                     var (fileTrackNum, _) = ExtractTrackInfo(f.fileName);
@@ -147,11 +139,7 @@ public static class SoulseekMatchingHelper
         return matches;
     }
 
-    /// <summary>
-    /// Matches audio files by evaluating filename combinations (excluding extension)
-    /// after stripping noise like [], (), -, _, and testing multiple pattern combinations:
-    /// (Artist + Title, Title + Artist, Title, Position + Title, Position + Artist + Title).
-    /// </summary>
+
     public static ICollection<MusicFileMatch> MatchSongsByFilenameCombinations(
         IEnumerable<RecordingResponse> recordings,
         List<(string fileName, string fullPath)> files)
@@ -180,7 +168,7 @@ public static class SoulseekMatchingHelper
                 var fnWithoutExt = Path.GetFileNameWithoutExtension(file.fileName);
                 var (fileTrackNum, _) = ExtractTrackInfo(file.fileName);
 
-                // Check if the song title naturally contains this track number (e.g., song title is "48" or "Rule 3")
+
                 bool isTrackNumInTitle = false;
                 if (fileTrackNum.HasValue && !string.IsNullOrWhiteSpace(recording.Title))
                 {
@@ -190,7 +178,7 @@ public static class SoulseekMatchingHelper
                         recording.Title, $@"\b({numStr}|{numPadded})\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 }
 
-                // If track number is in filename but NOT in song title, strip leading track number from filename text
+
                 string fnClean;
                 if (fileTrackNum.HasValue && !isTrackNumInTitle)
                 {
@@ -214,7 +202,7 @@ public static class SoulseekMatchingHelper
                     int partialScore = Fuzz.PartialRatio(pattern, fnClean);
                     int score = Math.Max(tokenScore, partialScore);
 
-                    // Add bonus if track position matches number in filename
+
                     if (trackNumMatches)
                     {
                         score += 20;
@@ -263,32 +251,33 @@ public static class SoulseekMatchingHelper
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
 
-        // Remove brackets [...] and parentheses (...)
+
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\[[^\]]*\]", "");
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\([^\)]*\)", "");
-        // Replace hyphens, underscores, dots with spaces
+
         text = System.Text.RegularExpressions.Regex.Replace(text, @"[-_.]", " ");
-        // Remove non-word non-space characters
+
         text = System.Text.RegularExpressions.Regex.Replace(text, @"[^\w\s]", "");
-        // Collapse whitespace
+
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
         return text.ToLowerInvariant();
     }
 
-    /// <summary>
-    /// Strips brackets/parentheses content from a folder name before fuzzy comparison.
-    /// e.g. "[2013] The Lost Tapes" → "The Lost Tapes"
-    /// </summary>
+
     public static string SanitizeFolderName(string folderName)
     {
         if (string.IsNullOrWhiteSpace(folderName)) return string.Empty;
-        // Trim trailing slashes first
+
         folderName = folderName.TrimEnd('/', '\\');
-        // Remove anything in square brackets (e.g. [2013], [FLAC])
+
         folderName = System.Text.RegularExpressions.Regex.Replace(folderName, @"\[[^\]]*\]", "");
-        // Remove anything in parentheses (e.g. (2013), (Vinyl))
         folderName = System.Text.RegularExpressions.Regex.Replace(folderName, @"\([^)]*\)", "");
-        // Collapse whitespace
+        folderName = System.Text.RegularExpressions.Regex.Replace(folderName, @"\{[^}]*\}", "");
+
+        folderName = System.Text.RegularExpressions.Regex.Replace(folderName, @"[-_./\\]", " ");
+
+        folderName = System.Text.RegularExpressions.Regex.Replace(folderName, @"[^\w\s]", "");
+
         folderName = System.Text.RegularExpressions.Regex.Replace(folderName, @"\s+", " ").Trim();
         return folderName;
     }

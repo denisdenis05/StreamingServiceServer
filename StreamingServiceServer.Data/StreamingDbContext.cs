@@ -18,30 +18,30 @@ public class StreamingDbContext : DbContext
     public DbSet<ArtistTag> ArtistTags { get; set; }
     public DbSet<RecordingArtistCredit> RecordingArtistCredits { get; set; }
     public DbSet<Release> Releases { get; set; }
-    
+
     public DbSet<ReleaseToDownload> ReleasesToDownload { get; set; }
     public DbSet<FailedDownload> FailedDownloads { get; set; }
     public DbSet<PendingDownload> PendingDownloads { get; set; }
     public DbSet<DownloadProviderConfig> DownloadProviderConfigs { get; set; }
-    
+
     public virtual DbSet<User> Users { get; set; }
     public virtual DbSet<RefreshToken> RefreshTokens { get; set; }
     public virtual DbSet<Playlist> Playlists { get; set; }
     public virtual DbSet<PlaylistRecording> PlaylistRecordings { get; set; }
-    
+
     public virtual DbSet<Listen> Listens { get; set; }
     public DbSet<AlbumAnalysisResult> AlbumAnalysisResults { get; set; }
-    
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ApplyConfigurationsFromAssembly(modelBuilder);
         base.OnModelCreating(modelBuilder);
     }
-    
+
     private void ApplyConfigurationsFromAssembly(ModelBuilder modelBuilder)
     {
         var assembly = Assembly.GetExecutingAssembly();
-        
+
         var entityTypeConfigurations = assembly.GetTypes()
             .Where(t => t.IsClass && !t.IsAbstract)
             .Where(t => t.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEntityTypeConfiguration<>)))

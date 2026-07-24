@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using StreamingServiceServer.Business.Models;
 using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.MusicSearch;

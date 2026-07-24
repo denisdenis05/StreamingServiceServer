@@ -22,7 +22,7 @@ public class LibraryController : ControllerBase
     public async Task<IActionResult> CreatePlaylist([FromBody] CreatePlaylistRequest request, CancellationToken cancellationToken)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- 
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized("Invalid or missing user ID in token.");
@@ -32,7 +32,7 @@ public class LibraryController : ControllerBase
 
         return Ok();
     }
-    
+
     [HttpGet("playlists")]
     public async Task<IActionResult> GetUserPlaylists(CancellationToken cancellationToken)
     {

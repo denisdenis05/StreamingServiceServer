@@ -18,14 +18,14 @@ public class AuthenticationService : IAuthenticationService
     StreamingDbContext _dbContext;
     private IPasswordHasher<User> _hasher;
     private IConfiguration _configuration;
-    
+
     public AuthenticationService(StreamingDbContext dbContext, IPasswordHasher<User> hasher, IConfiguration configuration)
     {
         _dbContext = dbContext;
         _hasher = hasher;
         _configuration = configuration;
     }
-    
+
     public async Task<LoginResponse> LoginLocalUserAsync(LocalLoginRequest request)
     {
         var user = await _dbContext.Users
@@ -52,7 +52,7 @@ public class AuthenticationService : IAuthenticationService
             Token = GenerateJwtToken(user)
         };
     }
-    
+
     public async Task<LoginResponse> RegisterLocalUser(LocalRegisterRequest request)
     {
         if(await IsUserAlreadyExistent(request.Email, request.Username))
@@ -73,16 +73,16 @@ public class AuthenticationService : IAuthenticationService
             Provider = LoginProvider.Local,
             ProviderId = String.Empty,
         };
-        
+
         var isFirstUser = !await _dbContext.Users.AnyAsync();
         userToAdd.RoleStatus = isFirstUser ? RoleStatus.Admin : RoleStatus.Admin;
 
         userToAdd.PasswordHash = _hasher.HashPassword(userToAdd, request.Password);
-        
+
         await _dbContext.Users
             .AddAsync(userToAdd);
         await _dbContext.SaveChangesAsync();
-        
+
         return new LoginResponse
         {
             Id = userToAdd.Id,
@@ -91,21 +91,21 @@ public class AuthenticationService : IAuthenticationService
             Token = GenerateJwtToken(userToAdd)
         };
     }
-    
+
     public string GenerateAndSaveRefreshToken(Guid userId, int size = 32)
     {
         var randomNumber = new byte[size];
-        
+
         using (var randomNumberGenerator = RandomNumberGenerator.Create())
         {
             randomNumberGenerator.GetBytes(randomNumber);
         }
-        
+
         var refreshToken = Convert.ToBase64String(randomNumber)
             .Replace("+", "-")
             .Replace("/", "_")
             .Replace("=", "");
-            
+
         var refreshTokenEntity = new RefreshToken
         {
             Token = refreshToken,
@@ -123,10 +123,10 @@ public class AuthenticationService : IAuthenticationService
     {
         var validRefreshToken = await _dbContext.RefreshTokens
             .FirstOrDefaultAsync(rt => rt.Token == refreshToken && !rt.IsRevoked && rt.Expires > DateTime.UtcNow);
-        
+
         if(validRefreshToken == null)
             throw new InvalidOperationException();
-        
+
         validRefreshToken.IsRevoked = true;
         var user = await _dbContext.Users
             .FirstOrDefaultAsync(user => user.Id == validRefreshToken.UserId);
@@ -137,7 +137,7 @@ public class AuthenticationService : IAuthenticationService
             RefreshToken = GenerateAndSaveRefreshToken(user.Id)
         };
     }
-    
+
     private async Task<bool> IsUserAlreadyExistent(string email, string username)
     {
         return await _dbContext
@@ -151,7 +151,7 @@ public class AuthenticationService : IAuthenticationService
         var idExists = await _dbContext
             .Users
             .AnyAsync(user => user.Id == uniqueId);
-        
+
         while (idExists)
         {
             uniqueId = Guid.NewGuid();
@@ -159,10 +159,10 @@ public class AuthenticationService : IAuthenticationService
                 .Users
                 .AnyAsync(user => user.Id == uniqueId);
         }
-        
+
         return uniqueId;
     }
-    
+
     private string GenerateJwtToken(User user)
     {
         var claims = new[]

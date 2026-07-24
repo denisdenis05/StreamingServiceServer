@@ -5,10 +5,7 @@ using StreamingServiceServer.Data.Models;
 
 namespace StreamingServiceDownloader.Helpers;
 
-/// <summary>
-/// Service that reads provider configs from DB (source of truth) and 
-/// seeds from appsettings.json on first boot.
-/// </summary>
+
 public class DownloadProviderConfigService
 {
     private readonly StreamingDbContext _dbContext;
@@ -28,15 +25,13 @@ public class DownloadProviderConfigService
         _soulseekProvider = soulseekProvider;
     }
 
-    /// <summary>
-    /// On first boot, if no provider configs exist in DB, seed from appsettings.json.
-    /// </summary>
+
     public async Task SeedFromAppSettingsIfEmptyAsync()
     {
         if (await _dbContext.DownloadProviderConfigs.AnyAsync())
             return;
 
-        // Seed Torrent provider from existing appsettings
+
         var torrentConfig = new DownloadProviderConfig
         {
             Id = Guid.NewGuid(),
@@ -58,7 +53,7 @@ public class DownloadProviderConfigService
             LastUpdated = DateTime.UtcNow
         };
 
-        // Seed Soulseek provider with defaults (disabled until configured)
+
         var soulseekConfig = new DownloadProviderConfig
         {
             Id = Guid.NewGuid(),
@@ -81,9 +76,7 @@ public class DownloadProviderConfigService
         Console.WriteLine("[ProviderConfig] Seeded default provider configs from appsettings.json.");
     }
 
-    /// <summary>
-    /// Get active providers ordered by priority. Applies DB config to each provider instance.
-    /// </summary>
+
     public async Task<List<(IDownloadProvider provider, DownloadProviderConfig config)>> GetActiveProvidersOrderedAsync()
     {
         await SeedFromAppSettingsIfEmptyAsync();
@@ -106,9 +99,9 @@ public class DownloadProviderConfigService
 
             if (provider == null) continue;
 
-            // Apply DB credentials to provider
+
             if (provider is TorrentProvider tp) tp.ApplyConfig(config);
-            if (provider is SoulseekProvider sp) sp.ApplyConfig(config);
+            if (provider is SoulseekProvider soulseekProvider) soulseekProvider.ApplyConfig(config);
 
             result.Add((provider, config));
         }
@@ -116,9 +109,7 @@ public class DownloadProviderConfigService
         return result;
     }
 
-    /// <summary>
-    /// Get all provider configs (for dashboard display).
-    /// </summary>
+
     public async Task<List<DownloadProviderConfig>> GetAllConfigsAsync()
     {
         await SeedFromAppSettingsIfEmptyAsync();
@@ -127,9 +118,7 @@ public class DownloadProviderConfigService
             .ToListAsync();
     }
 
-    /// <summary>
-    /// Update a provider config from dashboard input.
-    /// </summary>
+
     public async Task UpdateConfigAsync(DownloadProviderConfig updatedConfig)
     {
         var existing = await _dbContext.DownloadProviderConfigs

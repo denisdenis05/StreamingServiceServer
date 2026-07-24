@@ -26,7 +26,7 @@ public class PlaylistConfiguration : IEntityTypeConfiguration<Playlist>
             .OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(p => p.Name);
-        
+
         builder.Property(p => p.CreatedAt)
             .HasDefaultValueSql("CURRENT_TIMESTAMP");
 

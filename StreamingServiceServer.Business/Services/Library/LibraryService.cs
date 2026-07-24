@@ -74,13 +74,13 @@ public class LibraryService : ILibraryService
                 AddedById = ownerId
             });
         }
-        
+
         _dbContext.Playlists.Add(playlist);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return playlist;
     }
-    
+
     public async Task<List<PlaylistResponse>> GetUserPlaylistsAsync(Guid userId, CancellationToken cancellationToken)
     {
         return await _dbContext.Playlists
@@ -90,7 +90,7 @@ public class LibraryService : ILibraryService
             .Select(playlist => playlist.ToResponse())
             .ToListAsync(cancellationToken);
     }
-    
+
     public async Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, Guid userId, int page, int pageSize, CancellationToken cancellationToken)
     {
         var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, cancellationToken);
@@ -266,7 +266,7 @@ public class LibraryService : ILibraryService
                 Cover = string.Empty
             };
             _dbContext.Playlists.Add(likedPlaylist);
-            // Save to ensure ID exists for recordings
+
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
@@ -451,9 +451,8 @@ public class LibraryService : ILibraryService
     private string StripFeatureInfo(string title)
     {
         if (string.IsNullOrEmpty(title)) return title;
-        
-        // Regex to match (feat. ...) or [feat. ...] or (ft. ...) or [ft. ...] case insensitive
-        // We want to remove the whole bracket group
+
+
         var pattern = @"\s*[\[\(]\s*(feat|ft)\.?\s+.*?[\]\)]";
         return System.Text.RegularExpressions.Regex.Replace(title, pattern, "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
     }

@@ -2,31 +2,24 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using FuzzySharp;
+using StreamingServiceDownloader.Models;
+using StreamingServiceDownloader.Models.Slskd;
+using StreamingServiceDownloader.Models.Soulseek;
 using StreamingServiceServer.Business.Helpers;
 using StreamingServiceServer.Data.Models;
 
 namespace StreamingServiceDownloader.Helpers;
 
-/// <summary>
-/// Soulseek download provider using Slskd daemon.
-/// Implements format-cascading search (FLAC → WAV → MP3 → Any audio),
-/// multi-tier search queries (Artist+Title, Artist+CoreTitle, Title-Only, CoreTitle-Only with diacritics/symbol normalization),
-/// peer free-slot & transfer speed prioritization,
-/// audio bitrate/quality scoring and fake FLAC detection,
-/// directory-based candidate grouping with track completeness scoring,
-/// strict artist verification for title-only queries,
-/// search rate limiting (min 6s delay), and file size/lock validation (500KB - 200MB).
-/// </summary>
 public class SoulseekProvider : IDownloadProvider
 {
     private readonly SlskdHelper _slskdHelper;
-    
+
     private static readonly SemaphoreSlim SearchRateLimiter = new(1, 1);
     private static DateTime _lastSearchTime = DateTime.MinValue;
     private static readonly TimeSpan MinInterSearchDelay = TimeSpan.FromSeconds(6);
 
-    private const long MinAudioFileSizeBytes = 500 * 1024;        // 500 KB min to avoid 0B/corrupt files
-    private const long MaxAudioFileSizeBytes = 200 * 1024 * 1024; // 200 MB max per single audio track
+    private const long MinAudioFileSizeBytes = 500 * 1024;        
+    private const long MaxAudioFileSizeBytes = 200 * 1024 * 1024; 
 
     private static readonly Dictionary<string, HashSet<string>> FormatExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -35,23 +28,6 @@ public class SoulseekProvider : IDownloadProvider
         ["MP3"]  = new(StringComparer.OrdinalIgnoreCase) { ".mp3" },
         ["ANY"]  = new(StringComparer.OrdinalIgnoreCase) { ".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".alac", ".wma", ".opus" }
     };
-
-    private struct SearchQueryOption
-    {
-        public string Query { get; set; }
-        public bool ContainsArtist { get; set; }
-    }
-
-    private class CandidateDirectory
-    {
-        public string Username { get; set; } = string.Empty;
-        public string DirectoryPath { get; set; } = string.Empty;
-        public List<SlskdFileDownloadRequest> Files { get; set; } = new();
-        public int Score { get; set; }
-        public int FileCount => Files.Count;
-        public long UploadSpeed { get; set; }
-        public bool HasFreeSlots { get; set; }
-    }
 
     public string ProviderName => "Soulseek";
 
@@ -76,16 +52,16 @@ public class SoulseekProvider : IDownloadProvider
 
             Console.WriteLine($"[Soulseek] Initiating search query (ContainsArtist={queryOption.ContainsArtist}): '{queryOption.Query}'");
 
-            // 1. Throttle search requests to protect against Soulseek search bans
+
             await ThrottleSearchAsync(cancellationToken);
 
-            // 2. Start search on Soulseek network
+
             var searchId = await _slskdHelper.SearchAsync(queryOption.Query, cancellationToken);
             if (searchId == null) continue;
 
             try
             {
-                // 3. Wait for search responses (Slskd polling)
+
                 var searchResult = await _slskdHelper.WaitForSearchResultsAsync(searchId.Value, 12, cancellationToken);
                 if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
                 {
@@ -95,7 +71,7 @@ public class SoulseekProvider : IDownloadProvider
 
                 Console.WriteLine($"[Soulseek] Received {searchResult.Responses.Count} responses for query '{queryOption.Query}'.");
 
-                // 4. Try format cascade order (FLAC -> WAV -> MP3 -> ANY)
+
                 foreach (var format in formatOrder)
                 {
                     if (!FormatExtensions.TryGetValue(format, out var allowedExtensions))
@@ -145,7 +121,7 @@ public class SoulseekProvider : IDownloadProvider
 
         var userTransfers = downloads.FirstOrDefault(d => 
             d.Username?.Equals(username, StringComparison.OrdinalIgnoreCase) == true);
-        
+
         if (userTransfers?.Directories == null || userTransfers.Directories.Count == 0)
         {
             return new DownloadProgressInfo
@@ -195,7 +171,6 @@ public class SoulseekProvider : IDownloadProvider
         await _slskdHelper.RemoveCompletedTransfersAsync(username);
     }
 
-    // ─── Rate limiting & Search throttling ───
 
     private static async Task ThrottleSearchAsync(CancellationToken cancellationToken)
     {
@@ -217,7 +192,6 @@ public class SoulseekProvider : IDownloadProvider
         }
     }
 
-    // ─── Multi-Tier Search Queries & Directory Candidate Evaluation ───
 
     private List<SearchQueryOption> GenerateSearchQueries(ReleaseToDownload release)
     {
@@ -234,39 +208,39 @@ public class SoulseekProvider : IDownloadProvider
         var normalizedFullTitle = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(rawTitle));
         var normalizedCoreTitle = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(coreTitle));
 
-        // Tier 1: Artist + Full Title (e.g. Kendrick Lamar To Pimp A Butterfly)
+
         if (!string.IsNullOrWhiteSpace(cleanArtist) && !string.IsNullOrWhiteSpace(fullTitle))
             queries.Add(new SearchQueryOption { Query = $"{cleanArtist} {fullTitle}", ContainsArtist = true });
 
-        // Tier 1b: Diacritic/Symbol Normalized Artist + Full Title (e.g. Motley Crue / Bjork)
+
         if (!string.IsNullOrWhiteSpace(normalizedArtist) && !string.IsNullOrWhiteSpace(normalizedFullTitle))
             queries.Add(new SearchQueryOption { Query = $"{normalizedArtist} {normalizedFullTitle}", ContainsArtist = true });
 
-        // Tier 2: Artist + Core Title (strips Deluxe/Remastered/Bonus info)
+
         if (!string.IsNullOrWhiteSpace(cleanArtist) && !string.IsNullOrWhiteSpace(coreTitle))
             queries.Add(new SearchQueryOption { Query = $"{cleanArtist} {coreTitle}", ContainsArtist = true });
 
-        // Tier 2b: Normalized Artist + Core Title
+
         if (!string.IsNullOrWhiteSpace(normalizedArtist) && !string.IsNullOrWhiteSpace(normalizedCoreTitle))
             queries.Add(new SearchQueryOption { Query = $"{normalizedArtist} {normalizedCoreTitle}", ContainsArtist = true });
 
-        // Tier 3: Full Title Only (Omits Artist to find folders like Music/To Pimp A Butterfly/01.flac)
+
         if (!string.IsNullOrWhiteSpace(fullTitle))
             queries.Add(new SearchQueryOption { Query = fullTitle, ContainsArtist = false });
 
-        // Tier 3b: Normalized Full Title Only
+
         if (!string.IsNullOrWhiteSpace(normalizedFullTitle))
             queries.Add(new SearchQueryOption { Query = normalizedFullTitle, ContainsArtist = false });
 
-        // Tier 4: Core Title Only
+
         if (!string.IsNullOrWhiteSpace(coreTitle))
             queries.Add(new SearchQueryOption { Query = coreTitle, ContainsArtist = false });
 
-        // Tier 4b: Normalized Core Title Only
+
         if (!string.IsNullOrWhiteSpace(normalizedCoreTitle))
             queries.Add(new SearchQueryOption { Query = normalizedCoreTitle, ContainsArtist = false });
 
-        // Deduplicate queries
+
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<SearchQueryOption>();
         foreach (var q in queries)
@@ -299,7 +273,7 @@ public class SoulseekProvider : IDownloadProvider
             if (response.Username == null || response.Files == null || response.Files.Count == 0)
                 continue;
 
-            // Group response files by shared Directory path
+
             var dirGroups = response.Files
                 .GroupBy(f => GetDirectoryPath(f.Filename ?? ""))
                 .Where(g => !string.IsNullOrWhiteSpace(g.Key));
@@ -308,7 +282,7 @@ public class SoulseekProvider : IDownloadProvider
             {
                 var dirPath = group.Key;
 
-                // Filter valid audio files in this specific directory
+
                 var validAudioFiles = group
                     .Where(f => f.Filename != null &&
                                !f.IsLocked &&
@@ -322,18 +296,18 @@ public class SoulseekProvider : IDownloadProvider
 
                 var fullPathSearchString = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(dirPath + " " + string.Join(" ", validAudioFiles.Select(f => f.Filename)))).ToLowerInvariant();
 
-                // Exclude compilation folders (VA / Various Artists) if searching for a specific artist
+
                 if (!isTargetVariousArtists && (fullPathSearchString.Contains(@"\va ") || fullPathSearchString.Contains("va - ") || fullPathSearchString.Contains("various artists")))
                 {
                     continue;
                 }
 
-                // Calculate Artist Matching Score
+
                 int artistScore = Fuzz.PartialRatio(normalizedArtist, fullPathSearchString);
                 bool artistTokenInPath = artistTokens.Count > 0 && artistTokens.Any(token => fullPathSearchString.Contains(token));
                 bool artistMatched = artistScore >= 60 || artistTokenInPath;
 
-                // Calculate Album Matching Score
+
                 int albumScore = Fuzz.PartialRatio(normalizedAlbum, fullPathSearchString);
                 int coreAlbumScore = !string.IsNullOrWhiteSpace(normalizedCoreAlbum)
                     ? Fuzz.PartialRatio(normalizedCoreAlbum, fullPathSearchString)
@@ -342,12 +316,12 @@ public class SoulseekProvider : IDownloadProvider
 
                 if (maxAlbumScore < 45) continue;
 
-                // Strict Artist Verification for Title-Only search queries
+
                 if (!queryContainsArtist && !isTargetVariousArtists)
                 {
                     if (!artistMatched && artistScore < 50)
                     {
-                        // Skip candidate if artist cannot be verified in path/filenames for title-only queries
+
                         continue;
                     }
                 }
@@ -355,30 +329,30 @@ public class SoulseekProvider : IDownloadProvider
                 int combinedScore = (int)(artistScore * 0.35 + maxAlbumScore * 0.65);
                 if (artistMatched) combinedScore += 15;
 
-                // Audio Quality & Bitrate Scoring across files in directory
+
                 int avgQualityScore = (int)group.Average(f => CalculateAudioQualityScore(f, GetExtension(f.Filename ?? "")));
                 combinedScore += avgQualityScore;
 
-                // Peer Free Upload Slots & Speed Weighting
+
                 if (response.FreeUploadSlots > 0)
                 {
-                    combinedScore += 30; // Immediate download start bonus!
+                    combinedScore += 30; 
                 }
                 else
                 {
-                    combinedScore -= 20; // Queued download penalty
+                    combinedScore -= 20; 
                 }
 
-                if (response.UploadSpeed > 1024 * 1024) // > 1 MB/s speed
+                if (response.UploadSpeed > 1024 * 1024) 
                 {
                     combinedScore += 10;
                 }
 
-                // Track completeness bonus for multi-track album directories
+
                 if (validAudioFiles.Count >= 4) combinedScore += 15;
                 else if (validAudioFiles.Count >= 2) combinedScore += 5;
 
-                // Bonus for directories containing cover art or logs
+
                 bool hasMetadataFiles = group.Any(f => f.Filename != null &&
                     (f.Filename.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
                      f.Filename.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
@@ -426,7 +400,7 @@ public class SoulseekProvider : IDownloadProvider
 
         if (isLossless)
         {
-            // Fake FLAC check: If a FLAC file is under 5MB, it's likely a short/corrupt file or fake transcode
+
             if (file.Size < 5 * 1024 * 1024)
             {
                 score -= 15;
@@ -436,19 +410,19 @@ public class SoulseekProvider : IDownloadProvider
                 score += 15;
             }
 
-            // Hi-Res Audiophile Detection
+
             if (file.BitDepth >= 24 || file.SampleRate >= 88200)
             {
-                score += 10; // Hi-Res bonus
+                score += 10; 
             }
         }
         else if (extLower == ".mp3" || extLower == ".m4a" || extLower == ".aac" || extLower == ".ogg" || extLower == ".opus")
         {
             if (file.BitRate.HasValue)
             {
-                if (file.BitRate >= 315) score += 20;       // 320 kbps MP3
-                else if (file.BitRate >= 250) score += 10;  // V0 / 256 kbps MP3
-                else if (file.BitRate < 190) score -= 20;   // Low quality < 192 kbps
+                if (file.BitRate >= 315) score += 20;       
+                else if (file.BitRate >= 250) score += 10;  
+                else if (file.BitRate < 190) score -= 20;   
             }
         }
 
@@ -459,12 +433,12 @@ public class SoulseekProvider : IDownloadProvider
     {
         if (string.IsNullOrWhiteSpace(text)) return "";
 
-        // Replace common symbol representations
+
         text = text.Replace("&", " and ")
                    .Replace("+", " and ")
                    .Replace("$", "s");
 
-        // Remove diacritics / accents
+
         var normalizedString = text.Normalize(NormalizationForm.FormD);
         var stringBuilder = new StringBuilder(capacity: normalizedString.Length);
 

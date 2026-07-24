@@ -16,7 +16,7 @@ public class AuthenticationController : ControllerBase
     { 
         _authenticationService = authenticationService;   
     }
-    
+
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LocalLoginRequest request)
     {
@@ -24,7 +24,7 @@ public class AuthenticationController : ControllerBase
         {
             var response = await _authenticationService.LoginLocalUserAsync(request);
             var refreshToken = _authenticationService.GenerateAndSaveRefreshToken(response.Id);
-            
+
             var cookieOptions = new CookieOptions
             {
                 HttpOnly = true,
@@ -35,9 +35,9 @@ public class AuthenticationController : ControllerBase
             {
                 cookieOptions.Expires = DateTime.UtcNow.AddDays(30);
             }
-            
+
             Response.Cookies.Append("refreshToken", refreshToken, cookieOptions);
-            
+
             return Ok(response);
         }
         catch
@@ -45,14 +45,14 @@ public class AuthenticationController : ControllerBase
             return Unauthorized();
         }
     }
-    
+
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] LocalRegisterRequest request)
     {
         try
         {
             var response = await _authenticationService.RegisterLocalUser(request);
-            
+
             return Ok(response);
         }
         catch
@@ -60,7 +60,7 @@ public class AuthenticationController : ControllerBase
             return BadRequest();
         }
     }
-    
+
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken()
     {
@@ -77,7 +77,7 @@ public class AuthenticationController : ControllerBase
             Expires = DateTime.UtcNow.AddDays(30)
         };
         Response.Cookies.Append("refreshToken", response.RefreshToken, cookieOptions);
-        
+
         return Ok(new { token = response.Token });
     }
 }

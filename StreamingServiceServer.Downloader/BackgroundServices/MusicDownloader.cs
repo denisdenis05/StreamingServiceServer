@@ -21,9 +21,9 @@ public class MusicDownloader : BackgroundService
             {
                 await DownloadAlbumsAsync(stoppingToken);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                Console.WriteLine($"[MusicDownloader] Error: {ex.Message}");
+                Console.WriteLine($"[MusicDownloader] Error: {exception.Message}");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
@@ -46,7 +46,7 @@ public class MusicDownloader : BackgroundService
         if (!albumsToDownload.Any())
             return;
 
-        // Get active providers in priority order (DB is source of truth)
+
         var providers = await configService.GetActiveProvidersOrderedAsync();
         if (providers.Count == 0)
         {
@@ -88,9 +88,9 @@ public class MusicDownloader : BackgroundService
 
                     Console.WriteLine($"[MusicDownloader] {provider.ProviderName} did not find a match.");
                 }
-                catch (Exception ex)
+                catch (Exception exception)
                 {
-                    Console.WriteLine($"[MusicDownloader] {provider.ProviderName} failed: {ex.Message}");
+                    Console.WriteLine($"[MusicDownloader] {provider.ProviderName} failed: {exception.Message}");
                 }
             }
 

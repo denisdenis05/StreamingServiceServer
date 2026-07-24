@@ -7,10 +7,10 @@ public class ReleaseGroup
 {
     [JsonPropertyName("id")]
     public Guid Id { get; set; }
-    
+
     [JsonPropertyName("releases")]
     public ICollection<ReleaseDto> Releases { get; set; } =  new List<ReleaseDto>();
-    
+
     [JsonPropertyName("artist-credit")]
     public ICollection<ArtistCreditDto> ArtistCredits { get; set; } =  new List<ArtistCreditDto>();
 }

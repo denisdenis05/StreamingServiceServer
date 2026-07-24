@@ -1,3 +1,4 @@
+using StreamingServiceServer.Business.Models;
 using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Data.Models;
 
@@ -9,8 +10,3 @@ public interface IRecommendationService
     Task<List<ReleaseResponse>> GetSection(string sectionId, Guid userId);
 }
 
-public class RecommendationSection
-{
-    public string Id { get; set; }
-    public string Title { get; set; }
-}

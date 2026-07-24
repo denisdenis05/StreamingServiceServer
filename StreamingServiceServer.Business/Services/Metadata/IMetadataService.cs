@@ -6,14 +6,14 @@ namespace StreamingServiceServer.Business.Services.MusicSearch;
 public interface IMetadataService
 {
     Task<RecordingResponse> SearchRecordingByIdAsync(Guid id);
-    
+
     Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId);
-    
+
     Task SearchAndSaveRecordingAsync(string query);
     Task SearchAndSaveArtistAsync(string query);
     Task SearchAndSaveAlbumRecordingsAsync(string query);
     Task SearchAndSaveAlbumRecordingsByIdAsync(Guid albumId);
-    
+
     Task<List<string>> GetAllArtistNames();
     Task<List<RecordingResponse>> GetAllRecordings();
     Task<List<ReleaseResponse>> GetAllAlbums();
@@ -23,6 +23,6 @@ public interface IMetadataService
     Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums);
     Task QueueToDownloadByQuery(string albumQuery, string? artistQuery = null);
     Task QueueToDownloadById(Guid id);
-    
+
     Task RefreshAllAlbumCovers();
 }

@@ -94,7 +94,7 @@ public class MetadataService : IMetadataService
 
         return recording.ToResponse(_imageService, likedRecordingIds.Contains(recording.Id));
     }
-    
+
     public async Task BulkQueueToDownloadByQuery(IEnumerable<AlbumArtistDto> albums)
     {
         foreach (var album in albums)
@@ -142,7 +142,7 @@ public class MetadataService : IMetadataService
 
         if (await IsAlreadyQueuedToDownload(id))
             return;
-        
+
         var release = await _externalMusicSearchService.GetAlbumDetails(id);
 
         await _dbContext.ReleasesToDownload.AddAsync(
@@ -154,31 +154,31 @@ public class MetadataService : IMetadataService
             });
         await _dbContext.SaveChangesAsync();
     }
-    
+
     public async Task<RecordingResponse> SearchRecordingByIdAsync(Guid id)
     {
         var recording = await _externalMusicSearchService.SearchRecordingByIdAsync(id);
-        
+
         return recording.ToResponse(_imageService);
     }
-    
+
     public async Task<List<RecordingResponse>> SearchAlbumRecordingsByIdAsync(Guid albumId)
     {
-        // TODO get Albums from local database and also add relevant external Albums 
+
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
-        // TODO check if recordings are not duplicate with the already saved ones
-        
+
+
         if (!recordings.Any())
             return new List<RecordingResponse>();
 
         return recordings.Select(recording => recording.ToResponse(_imageService)).ToList();
     }
-    
+
     public async Task SearchAndSaveRecordingAsync(string query)
     {
         var recordings = await _externalMusicSearchService.SearchRecordingsAsync(query);
         var recordingToSave = recordings.First();
-        
+
         await _dbContext.Recordings.AddAsync(recordingToSave.ToEntity(_imageService));
         await _dbContext.SaveChangesAsync();
     }
@@ -194,7 +194,7 @@ public class MetadataService : IMetadataService
     public async Task SearchAndSaveAlbumRecordingsAsync(string query)
     {
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsAsync(query);
-        
+
         await SaveAlbumRecordings(recordings);
     }
 
@@ -203,7 +203,7 @@ public class MetadataService : IMetadataService
         var recordings = await _externalMusicSearchService.SearchAlbumRecordingsByIdAsync(albumId);
         if (recordings == null || !recordings.Any())
             return;
-        
+
         await SaveAlbumRecordings(recordings);
     }
 
@@ -219,17 +219,17 @@ public class MetadataService : IMetadataService
             await SaveAlbumRecordingsInternal(recordings);
             return; 
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
+        catch (DbUpdateException databaseUpdateException) when (databaseUpdateException.InnerException is PostgresException postgresException && postgresException.SqlState == "23505")
         {
             retryCount++;
-            
+
             _dbContext.ChangeTracker.Clear();
-            
+
             if (retryCount >= maxRetries)
             {
-                throw new InvalidOperationException($"Failed to save album recordings after {maxRetries} attempts due to concurrent modifications.", ex);
+                throw new InvalidOperationException($"Failed to save album recordings after {maxRetries} attempts due to concurrent modifications.", databaseUpdateException);
             }
-            
+
             await Task.Delay(100 * retryCount);
         }
     }
@@ -238,17 +238,17 @@ public class MetadataService : IMetadataService
 private async Task SaveAlbumRecordingsInternal(ICollection<RecordingDto> recordings)
 {
     using var transaction = await _dbContext.Database.BeginTransactionAsync();
-    
+
     try
     {
         await UpsertArtists(recordings);
-        
+
         var release = await UpsertRelease(recordings);
-        
+
         await UpsertRecordings(recordings, release);
-        
+
         RemoveDuplicatesFromChangeTracker();
-        
+
         await _dbContext.SaveChangesAsync();
         await transaction.CommitAsync();
     }
@@ -284,7 +284,7 @@ private async Task UpsertArtists(ICollection<RecordingDto> recordings)
         return;
 
     var artistIds = distinctArtists.Select(a => a.Id).ToList();
-    
+
     var existingArtists = await _dbContext.Artists
         .Where(a => artistIds.Contains(a.Id))
         .ToDictionaryAsync(a => a.Id, a => a);
@@ -292,12 +292,12 @@ private async Task UpsertArtists(ICollection<RecordingDto> recordings)
     foreach (var artist in distinctArtists)
     {
         var trackedArtist = _dbContext.Artists.Local.FirstOrDefault(a => a.Id == artist.Id);
-        
+
         if (trackedArtist != null)
         {
             continue;
         }
-        
+
         if (existingArtists.TryGetValue(artist.Id, out var existingArtist))
         {
             _dbContext.Artists.Attach(existingArtist);
@@ -321,22 +321,22 @@ private async Task<Release> UpsertRelease(ICollection<RecordingDto> recordings)
     }
 
     var existingRelease = await _dbContext.Releases.FirstOrDefaultAsync(r => r.Id == release.Id);
-    
+
     if (existingRelease != null)
     {
         _dbContext.Entry(existingRelease).CurrentValues.SetValues(release);
-        
+
         if (release.Artist != null)
         {
             var artistInContext = _dbContext.Artists.Local.FirstOrDefault(a => a.Id == release.Artist.Id) 
                                 ?? await _dbContext.Artists.FirstOrDefaultAsync(a => a.Id == release.Artist.Id);
-            
+
             if (artistInContext != null)
             {
                 existingRelease.Artist = artistInContext;
             }
         }
-        
+
         return existingRelease;
     }
     else
@@ -349,7 +349,7 @@ private async Task<Release> UpsertRelease(ICollection<RecordingDto> recordings)
                 release.Artist = artistInContext;
             }
         }
-        
+
         _dbContext.Releases.Add(release);
         return release;
     }
@@ -374,7 +374,7 @@ private async Task UpsertRecordings(ICollection<RecordingDto> recordings, Releas
         }
 
         var existingRecording = await _dbContext.Recordings.FirstOrDefaultAsync(r => r.Id == recording.Id);
-        
+
         if (existingRecording != null)
         {
             _dbContext.Entry(existingRecording).CurrentValues.SetValues(recording);
@@ -476,15 +476,15 @@ private void RemoveDuplicatesFromChangeTracker()
     {
         return await _dbContext.Releases.AnyAsync(r => r.Id == id);
     }
-    
-    
+
+
     private async Task<bool> IsAlreadyQueuedToDownload(Guid id)
     {
         var queuedAlbum = await _dbContext.ReleasesToDownload.Where(release => release.Id == id).ToListAsync();
 
         return queuedAlbum.Any();
     }
-    
+
     public async Task RefreshAllAlbumCovers()
     {
         var allReleases = await _dbContext.Releases
@@ -530,7 +530,7 @@ private void RemoveDuplicatesFromChangeTracker()
         }
         await _dbContext.SaveChangesAsync();
     }
-    
+
     public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId)
     {
         var response = new UniversalSearchResponse();

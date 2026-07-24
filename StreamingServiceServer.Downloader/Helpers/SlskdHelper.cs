@@ -1,14 +1,10 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using StreamingServiceDownloader.Models.Slskd;
 
 namespace StreamingServiceDownloader.Helpers;
 
-/// <summary>
-/// Low-level REST API client for the Slskd daemon (Soulseek).
-/// Communicates via the Slskd v0 API endpoints.
-/// </summary>
 public class SlskdHelper
 {
     private readonly HttpClient _httpClient;
@@ -93,7 +89,7 @@ public class SlskdHelper
         var response = await _httpClient.SendAsync(request, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !string.IsNullOrWhiteSpace(_username))
         {
-            // Session token expired or invalid, re-login and retry once
+
             _sessionToken = null;
             if (await LoginAsync(cancellationToken))
             {
@@ -120,10 +116,7 @@ public class SlskdHelper
         return clone;
     }
 
-    /// <summary>
-    /// Start a search on the Soulseek network.
-    /// Returns the search ID (GUID) that can be polled for results.
-    /// </summary>
+
     public async Task<Guid?> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
         var searchId = Guid.NewGuid();
@@ -141,10 +134,7 @@ public class SlskdHelper
         return searchId;
     }
 
-    /// <summary>
-    /// Get the results of a previously initiated search.
-    /// Fetches both search status and search responses.
-    /// </summary>
+
     public async Task<SlskdSearchResult?> GetSearchResultsAsync(Guid searchId, CancellationToken cancellationToken = default)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}");
@@ -183,9 +173,7 @@ public class SlskdHelper
         return result;
     }
 
-    /// <summary>
-    /// Wait for search results to complete (poll with retries).
-    /// </summary>
+
     public async Task<SlskdSearchResult?> WaitForSearchResultsAsync(
         Guid searchId, int maxWaitSeconds = 12, CancellationToken cancellationToken = default)
     {
@@ -221,10 +209,7 @@ public class SlskdHelper
         return await GetSearchResultsAsync(searchId, cancellationToken);
     }
 
-    /// <summary>
-    /// Enqueue a file download from a specific user.
-    /// Includes filename and size in payload to prevent TransferSizeMismatchException.
-    /// </summary>
+
     public async Task<bool> EnqueueDownloadAsync(
         string username, SlskdFileDownloadRequest fileRequest, CancellationToken cancellationToken = default)
     {
@@ -242,9 +227,7 @@ public class SlskdHelper
         return response.IsSuccessStatusCode;
     }
 
-    /// <summary>
-    /// Enqueue an entire directory of files from a specific user with sizes.
-    /// </summary>
+
     public async Task<int> EnqueueDirectoryDownloadAsync(
         string username, List<SlskdFileDownloadRequest> fileRequests, CancellationToken cancellationToken = default)
     {
@@ -261,9 +244,7 @@ public class SlskdHelper
         return enqueued;
     }
 
-    /// <summary>
-    /// Get all current downloads and their statuses.
-    /// </summary>
+
     public async Task<List<SlskdTransferUser>?> GetDownloadsAsync(CancellationToken cancellationToken = default)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/transfers/downloads");
@@ -278,9 +259,7 @@ public class SlskdHelper
         });
     }
 
-    /// <summary>
-    /// Remove completed/errored transfer records from Slskd for a specific user.
-    /// </summary>
+
     public async Task RemoveCompletedTransfersAsync(string username, CancellationToken cancellationToken = default)
     {
         try
@@ -314,14 +293,12 @@ public class SlskdHelper
         catch { }
     }
 
-    /// <summary>
-    /// Test connection to the Slskd instance with detailed status message.
-    /// </summary>
+
     public async Task<(bool success, string message)> TestConnectionDetailedAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            // 1. Try API key auth if provided
+
             if (!string.IsNullOrWhiteSpace(_apiKey))
             {
                 var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/application");
@@ -335,7 +312,7 @@ public class SlskdHelper
 
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
-                    // Check if username/password can be tried
+
                     if (!string.IsNullOrWhiteSpace(_username) && !string.IsNullOrWhiteSpace(_password))
                     {
                         if (await LoginAsync(cancellationToken))
@@ -345,7 +322,7 @@ public class SlskdHelper
                 }
             }
 
-            // 2. Try Username/Password auth if provided
+
             if (!string.IsNullOrWhiteSpace(_username) && !string.IsNullOrWhiteSpace(_password))
             {
                 if (await LoginAsync(cancellationToken))
@@ -355,7 +332,7 @@ public class SlskdHelper
                 return (false, "Slskd reached at " + _baseUrl + ", but Web Credentials were rejected.");
             }
 
-            // 3. Test unauthenticated ping to see if server is up
+
             var pingReq = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/");
             var pingRes = await _httpClient.SendAsync(pingReq, cancellationToken);
             if (pingRes.IsSuccessStatusCode)
@@ -365,13 +342,13 @@ public class SlskdHelper
 
             return (false, $"Slskd server returned HTTP {(int)pingRes.StatusCode}.");
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException exception)
         {
-            return (false, $"Cannot reach Slskd at {_baseUrl}: {ex.Message}");
+            return (false, $"Cannot reach Slskd at {_baseUrl}: {exception.Message}");
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            return (false, $"Connection test failed: {ex.Message}");
+            return (false, $"Connection test failed: {exception.Message}");
         }
     }
 
@@ -381,76 +358,15 @@ public class SlskdHelper
         return success;
     }
 
-    /// <summary>
-    /// Delete/cancel a search to clean up resources.
-    /// </summary>
+
     public async Task DeleteSearchAsync(Guid searchId, CancellationToken cancellationToken = default)
     {
         try
         {
             var request = new HttpRequestMessage(HttpMethod.Delete, $"{_baseUrl}/api/v0/searches/{searchId}");
             AddAuthHeaders(request);
-            await _httpClient.SendAsync(request, cancellationToken);
         }
         catch { }
     }
 }
 
-// ─── Slskd API response models ───
-
-public class SlskdSearchResult
-{
-    public string? Id { get; set; }
-    public string? State { get; set; }
-    public string? SearchText { get; set; }
-    public int FileCount { get; set; }
-    public List<SlskdSearchResponse>? Responses { get; set; }
-}
-
-public class SlskdSearchResponse
-{
-    public string? Username { get; set; }
-    public int FreeUploadSlots { get; set; }
-    public long UploadSpeed { get; set; }
-    public int FileCount { get; set; }
-    public List<SlskdFile>? Files { get; set; }
-}
-
-public class SlskdFile
-{
-    public string? Filename { get; set; }
-    public long Size { get; set; }
-    public int? BitRate { get; set; }
-    public int? SampleRate { get; set; }
-    public int? BitDepth { get; set; }
-    public string? Extension { get; set; }
-    public bool IsLocked { get; set; }
-}
-
-public class SlskdFileDownloadRequest
-{
-    public string Filename { get; set; } = string.Empty;
-    public long Size { get; set; }
-}
-
-public class SlskdTransferUser
-{
-    public string? Username { get; set; }
-    public List<SlskdTransferFile>? Directories { get; set; }
-}
-
-public class SlskdTransferFile
-{
-    public string? Directory { get; set; }
-    public List<SlskdTransferItem>? Files { get; set; }
-}
-
-public class SlskdTransferItem
-{
-    public string? Id { get; set; }
-    public string? Filename { get; set; }
-    public string? State { get; set; }
-    public long Size { get; set; }
-    public long BytesTransferred { get; set; }
-    public double? PercentComplete { get; set; }
-}

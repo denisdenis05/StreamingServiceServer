@@ -38,12 +38,10 @@ public class TorrentProvider : IDownloadProvider
         _retryUrlParameters = _configuration["Music:DownloadSource:RetryParameters"] ?? "";
     }
 
-    /// <summary>
-    /// Reconfigure this provider with DB-stored settings at runtime.
-    /// </summary>
+
     public void ApplyConfig(DownloadProviderConfig config)
     {
-        // ExtraConfig is a JSON blob with TPB-specific settings
+
         if (!string.IsNullOrWhiteSpace(config.ExtraConfig) && config.ExtraConfig != "{}")
         {
             try
@@ -51,7 +49,7 @@ public class TorrentProvider : IDownloadProvider
                 var extra = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(config.ExtraConfig);
                 if (extra != null)
                 {
-                    // These could override _baseUrl, _urlParameters, etc. if present
+
                 }
             }
             catch { }
@@ -71,7 +69,7 @@ public class TorrentProvider : IDownloadProvider
             release.Artist
         };
 
-        // First pass with primary parameters
+
         foreach (var query in queries)
         {
             var sanitizedQuery = SanitizeQuery(query);
@@ -92,7 +90,7 @@ public class TorrentProvider : IDownloadProvider
             }
         }
 
-        // Second pass with retry parameters
+
         foreach (var query in queries)
         {
             var sanitizedQuery = SanitizeQuery(query);
@@ -134,7 +132,6 @@ public class TorrentProvider : IDownloadProvider
         await _torrentHelper.RemoveTorrentAsync(sourceIdentifier, deleteFiles);
     }
 
-    // ─── Private helpers (extracted from original MusicDownloader) ───
 
     private string SanitizeQuery(string query)
     {

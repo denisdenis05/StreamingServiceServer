@@ -19,7 +19,7 @@ public static class MusicBrainzMapper
             GenderId = dto.GenderId,
             Country = dto.Country,
         };
-        
+
 
         if (dto.Aliases != null)
         {
@@ -155,7 +155,7 @@ public static class MusicBrainzMapper
 
         return response;
     }
-    
+
     public static RecordingResponse ToResponse(this RecordingDto recording, IImageService imageService, bool isLiked = false)
     {
         var response = new RecordingResponse

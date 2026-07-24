@@ -18,7 +18,7 @@ public class PreviewDownloaderService : IPreviewDownloaderService
     {
         var downloadPath = _configuration["Music:Path"];
         var tempPath = Path.Combine(downloadPath, "TEMP");
-        
+
         if (!Directory.Exists(tempPath))
         {
             Directory.CreateDirectory(tempPath);
@@ -32,13 +32,13 @@ public class PreviewDownloaderService : IPreviewDownloaderService
         }
 
         var query = $"{recording.Title} {recording.ArtistName} audio";
-        
+
         var toolName = "preview-downloader";
         var toolsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", toolName);
 
         var arguments = _configuration["Music:PreviewDownloader:Arguments"];
         var searchArguments = _configuration["Music:PreviewDownloader:SearchArguments"];
-        
+
         var processStartInfo = new ProcessStartInfo
         {
             FileName = toolsPath,
@@ -51,7 +51,7 @@ public class PreviewDownloaderService : IPreviewDownloaderService
 
         using var process = new Process();
         process.StartInfo = processStartInfo;
-        
+
         process.Start();
         await process.WaitForExitAsync();
 

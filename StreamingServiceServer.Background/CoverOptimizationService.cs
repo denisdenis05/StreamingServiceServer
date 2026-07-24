@@ -37,9 +37,9 @@ public class CoverOptimizationService : BackgroundService
                 await OptimizeReleasesAsync(stoppingToken);
                 await OptimizeRecordingsAsync(stoppingToken);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                _logger.LogError(ex, "Error occurred while optimizing covers.");
+                _logger.LogError(exception, "Error occurred while optimizing covers.");
             }
 
             await Task.Delay(TimeSpan.FromHours(6), stoppingToken);
@@ -70,7 +70,7 @@ public class CoverOptimizationService : BackgroundService
 
                 bool changed = await OptimizeEntityAsync(release, dbContext, stoppingToken);
                 if (changed) batchChanged = true;
-                
+
                 if (!string.IsNullOrEmpty(release.OptimizedCover) || 
                     !string.IsNullOrEmpty(release.OptimizedSmallCover) || 
                     !string.IsNullOrEmpty(release.OptimizedVerySmallCover))
@@ -93,7 +93,7 @@ public class CoverOptimizationService : BackgroundService
                             recording.OptimizedVerySmallCover = release.OptimizedVerySmallCover;
                             recChanged = true;
                         }
-                        
+
                         if (recChanged)
                         {
                             batchChanged = true;
@@ -107,7 +107,7 @@ public class CoverOptimizationService : BackgroundService
             {
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
-            
+
             offset += 10;
             await Task.Delay(1000, stoppingToken);
         }
@@ -142,7 +142,7 @@ public class CoverOptimizationService : BackgroundService
             {
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
-            
+
             offset += 10;
             await Task.Delay(1000, stoppingToken);
         }
@@ -207,7 +207,7 @@ public class CoverOptimizationService : BackgroundService
         try
         {
             var client = _httpClientFactory.CreateClient();
-            
+
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add("User-Agent", _configuration["Music:External:MusicBrainz:User-Agent"]);
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, stoppingToken);
@@ -218,9 +218,9 @@ public class CoverOptimizationService : BackgroundService
                 return (type, finalUrl ?? url);
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to resolve URL: {Url}", url);
+            _logger.LogWarning(exception, "Failed to resolve URL: {Url}", url);
         }
 
         return (type, string.Empty);

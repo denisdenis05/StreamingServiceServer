@@ -43,9 +43,9 @@ public class DownloadCoverOptimizationService : BackgroundService
                 await OptimizeReleasesAsync(stoppingToken);
                 await OptimizeRecordingsAsync(stoppingToken);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                _logger.LogError(ex, "Error occurred while downloading optimized covers.");
+                _logger.LogError(exception, "Error occurred while downloading optimized covers.");
             }
 
             await Task.Delay(TimeSpan.FromHours(6), stoppingToken);
@@ -76,7 +76,7 @@ public class DownloadCoverOptimizationService : BackgroundService
 
                 bool changed = await OptimizeEntityAsync(release, dbContext, stoppingToken);
                 if (changed) batchChanged = true;
-                
+
                 if (!string.IsNullOrEmpty(release.LocalCover) || 
                     !string.IsNullOrEmpty(release.LocalSmallCover) || 
                     !string.IsNullOrEmpty(release.LocalVerySmallCover))
@@ -99,7 +99,7 @@ public class DownloadCoverOptimizationService : BackgroundService
                             recording.LocalVerySmallCover = release.LocalVerySmallCover;
                             recChanged = true;
                         }
-                        
+
                         if (recChanged)
                         {
                             batchChanged = true;
@@ -113,7 +113,7 @@ public class DownloadCoverOptimizationService : BackgroundService
             {
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
-            
+
             offset += 10;
             await Task.Delay(1000, stoppingToken);
         }
@@ -148,7 +148,7 @@ public class DownloadCoverOptimizationService : BackgroundService
             {
                 await dbContext.SaveChangesAsync(stoppingToken);
             }
-            
+
             offset += 10;
             await Task.Delay(1000, stoppingToken);
         }
@@ -214,12 +214,12 @@ public class DownloadCoverOptimizationService : BackgroundService
         {
             var client = _httpClientFactory.CreateClient();
             using var response = await client.GetAsync(url, stoppingToken);
-            
+
             if (response.IsSuccessStatusCode)
             {
                 var fileName = Path.GetFileName(new Uri(url).LocalPath);
                 var localFilePath = Path.Combine(_coverPath, fileName);
-                
+
                 Directory.CreateDirectory(_coverPath);
 
                 if (!File.Exists(localFilePath))
@@ -232,9 +232,9 @@ public class DownloadCoverOptimizationService : BackgroundService
                 return (type, publicUrl);
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to download cover from URL: {Url}", url);
+            _logger.LogWarning(exception, "Failed to download cover from URL: {Url}", url);
         }
 
         return (type, string.Empty);

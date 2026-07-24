@@ -18,7 +18,7 @@ public class StreamController : ControllerBase
     private readonly ILastFmService _lastFmService;
     private readonly StreamingServiceServer.PreviewDownloader.IPreviewDownloaderService _previewDownloaderService;
     private readonly IMetadataService _metadataService;
-    
+
     public StreamController(IStreamingService streamingService, ILastFmService lastFmService, StreamingServiceServer.PreviewDownloader.IPreviewDownloaderService previewDownloaderService, IMetadataService metadataService)
     {
         _streamingService = streamingService;
@@ -26,7 +26,7 @@ public class StreamController : ControllerBase
         _previewDownloaderService = previewDownloaderService;
         _metadataService = metadataService;
     }
-    
+
     [HttpGet]
     public async Task<IActionResult> StreamAudio([FromQuery] Guid id)
     {
@@ -45,13 +45,13 @@ public class StreamController : ControllerBase
 
             trackPath = await _previewDownloaderService.DownloadPreview(recording);
         } 
-        
+
         var encodedSegments = trackPath
             .Split('/')
             .Select(Uri.EscapeDataString);
 
         var encodedPath = string.Join("/", encodedSegments);
-        
+
         var internalPath = $"/protected/{encodedPath}";
 
         Response.Headers["X-Accel-Redirect"] = internalPath;

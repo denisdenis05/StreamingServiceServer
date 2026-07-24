@@ -7,6 +7,7 @@ using StreamingServiceDownloader.Models;
 using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.MusicSearch;
 using StreamingServiceServer.Business.Helpers;
+using StreamingServiceServer.Business.Models.Dashboard;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
 
@@ -69,9 +70,9 @@ public class DashboardController : ControllerBase
             downloadedCount = await _dbContext.Releases.CountAsync(cancellationToken);
             recordingsCount = await _dbContext.Recordings.CountAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to query DB stats, returning empty counts");
+            _logger.LogWarning(exception, "Failed to query DB stats, returning empty counts");
         }
 
         int activeTorrents = 0;
@@ -79,9 +80,9 @@ public class DashboardController : ControllerBase
         {
             activeTorrents = await _torrentHelper.GetActiveDownloadCountAsync();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Could not query qBittorrent active downloads count");
+            _logger.LogWarning(exception, "Could not query qBittorrent active downloads count");
         }
 
         return Ok(new
@@ -136,9 +137,9 @@ public class DashboardController : ControllerBase
                             size = info.Size;
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception exception)
                     {
-                        _logger.LogWarning(ex, "Failed to query torrent info for {SourceName}", sourceName);
+                        _logger.LogWarning(exception, "Failed to query torrent info for {SourceName}", sourceName);
                     }
                 }
 
@@ -155,9 +156,9 @@ public class DashboardController : ControllerBase
                 });
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to fetch queued albums from DB");
+            _logger.LogWarning(exception, "Failed to fetch queued albums from DB");
         }
 
         return Ok(result);
@@ -180,9 +181,9 @@ public class DashboardController : ControllerBase
             });
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to fetch failed albums from DB");
+            _logger.LogWarning(exception, "Failed to fetch failed albums from DB");
             return StatusCode(500, new { message = "Error fetching failed albums" });
         }
     }
@@ -219,9 +220,9 @@ public class DashboardController : ControllerBase
             await _dbContext.SaveChangesAsync(cancellationToken);
             return Ok(new { count, message = $"Successfully requeued {count} failed album(s)." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to requeue all failed downloads");
+            _logger.LogError(exception, "Failed to requeue all failed downloads");
             return StatusCode(500, new { message = "Error requeueing failed downloads" });
         }
     }
@@ -264,9 +265,9 @@ public class DashboardController : ControllerBase
 
             return Ok(new { count = totalCount, message = $"Reset queue. {totalCount} album(s) actively queued for download." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to requeue all queue downloads");
+            _logger.LogError(exception, "Failed to requeue all queue downloads");
             return StatusCode(500, new { message = "Error requeueing active queue downloads" });
         }
     }
@@ -303,9 +304,9 @@ public class DashboardController : ControllerBase
 
             return Ok(releases);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to fetch downloaded releases from DB");
+            _logger.LogWarning(exception, "Failed to fetch downloaded releases from DB");
             return Ok(new List<object>());
         }
     }
@@ -421,7 +422,7 @@ public class DashboardController : ControllerBase
         string cleanTitle = request.Title.Trim();
         string cleanArtist = request.Artist.Trim();
 
-        // 1. Fetch & persist official MusicBrainz metadata as the source of truth
+
         Guid releaseId = Guid.NewGuid();
         try
         {
@@ -437,9 +438,9 @@ public class DashboardController : ControllerBase
                 cleanArtist = mbRelease.Artist?.Name ?? cleanArtist;
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "MusicBrainz lookup failed during AddAlbumToQueue for {Artist} - {Title}", cleanArtist, cleanTitle);
+            _logger.LogWarning(exception, "MusicBrainz lookup failed during AddAlbumToQueue for {Artist} - {Title}", cleanArtist, cleanTitle);
         }
 
         var releaseToDownload = new ReleaseToDownload
@@ -468,7 +469,7 @@ public class DashboardController : ControllerBase
             string title = "Unknown Title";
             string artistName = "Unknown Artist";
 
-            // 1. If album was completed/downloaded, delete files from disk and DB records
+
             var downloadedRelease = await _dbContext.Releases
                 .Include(r => r.Artist)
                 .Include(r => r.Recordings)
@@ -479,7 +480,7 @@ public class DashboardController : ControllerBase
                 title = downloadedRelease.Title ?? title;
                 artistName = downloadedRelease.Artist?.Name ?? artistName;
 
-                // Delete physical audio files from disk
+
                 var baseMusicPath = _configuration["Music:Path"] ?? _configuration["Music:DownloadPath"] ?? "./Music";
                 var artistFolder = StreamingServiceServer.Business.Helpers.MusicLocationHelper.SanitizeFolderName(artistName).ToUpper();
                 var albumFolder = StreamingServiceServer.Business.Helpers.MusicLocationHelper.SanitizeFolderName(title).ToUpper();
@@ -491,13 +492,13 @@ public class DashboardController : ControllerBase
                     {
                         Directory.Delete(destinationDir, recursive: true);
                     }
-                    catch (Exception ex)
+                    catch (Exception exception)
                     {
-                        _logger.LogWarning(ex, "Failed to delete physical audio files for requeued album {Id}", id);
+                        _logger.LogWarning(exception, "Failed to delete physical audio files for requeued album {Id}", id);
                     }
                 }
 
-                // Remove recordings and release from DB
+
                 if (downloadedRelease.Recordings != null && downloadedRelease.Recordings.Any())
                 {
                     _dbContext.Recordings.RemoveRange(downloadedRelease.Recordings);
@@ -505,7 +506,7 @@ public class DashboardController : ControllerBase
                 _dbContext.Releases.Remove(downloadedRelease);
             }
 
-            // 2. Remove from Failed & Pending queues if present
+
             var failed = await _dbContext.FailedDownloads.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
             if (failed != null)
             {
@@ -525,7 +526,7 @@ public class DashboardController : ControllerBase
                 _dbContext.PendingDownloads.Remove(pending);
             }
 
-            // 3. Re-add to ReleasesToDownload for fresh scraping
+
             var existingToDownload = await _dbContext.ReleasesToDownload.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
             if (existingToDownload == null)
             {
@@ -540,17 +541,17 @@ public class DashboardController : ControllerBase
             await _dbContext.SaveChangesAsync(cancellationToken);
             return Ok(new { message = "Album media deleted and re-queued for fresh download." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to requeue album {Id}", id);
-            return StatusCode(500, new { message = $"Failed to requeue album: {ex.Message}" });
+            _logger.LogError(exception, "Failed to requeue album {Id}", id);
+            return StatusCode(500, new { message = $"Failed to requeue album: {exception.Message}" });
         }
     }
 
     [Authorize(Roles = "Admin")]
     [HttpPost("album/{id:guid}/replace-audio")]
     [DisableRequestSizeLimit]
-    [RequestFormLimits(MultipartBodyLengthLimit = 536870912)] // 512 MB
+    [RequestFormLimits(MultipartBodyLengthLimit = 536870912)] 
     public async Task<IActionResult> ReplaceAudio(Guid id, List<IFormFile>? files, CancellationToken cancellationToken)
     {
         var fileList = files ?? Request.Form.Files.ToList();
@@ -563,7 +564,7 @@ public class DashboardController : ControllerBase
         {
             var baseMusicPath = _configuration["Music:Path"] ?? _configuration["Music:DownloadPath"] ?? "./Music";
 
-            // 1. Enforce MusicBrainz as source of truth: fetch & save release metadata first
+
             try
             {
                 await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(id);
@@ -670,7 +671,7 @@ public class DashboardController : ControllerBase
                 updatedCount++;
             }
 
-            // Remove from download queues since audio files were provided manually
+
             var toRemoveQueued = await _dbContext.ReleasesToDownload.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
             if (toRemoveQueued != null) _dbContext.ReleasesToDownload.Remove(toRemoveQueued);
 
@@ -683,10 +684,10 @@ public class DashboardController : ControllerBase
             await _dbContext.SaveChangesAsync(cancellationToken);
             return Ok(new { message = $"Successfully matched {updatedCount} audio file(s) with MusicBrainz track metadata." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Error occurred while uploading audio files for album {Id}", id);
-            return StatusCode(500, new { message = $"Error uploading files: {ex.Message}" });
+            _logger.LogError(exception, "Error occurred while uploading audio files for album {Id}", id);
+            return StatusCode(500, new { message = $"Error uploading files: {exception.Message}" });
         }
     }
 
@@ -706,14 +707,14 @@ public class DashboardController : ControllerBase
         if (failed != null) _dbContext.FailedDownloads.Remove(failed);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        // Fetch & save official metadata (MusicBrainz release info, tracks, and artwork)
+
         try
         {
             await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(id);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Could not fetch metadata by ID {Id}", id);
+            _logger.LogWarning(exception, "Could not fetch metadata by ID {Id}", id);
         }
 
         var existingRelease = await _dbContext.Releases.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
@@ -723,11 +724,11 @@ public class DashboardController : ControllerBase
             {
                 await _metadataService.SearchAndSaveAlbumRecordingsAsync($"{artistName} {title}");
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                _logger.LogWarning(ex, "Could not fetch metadata by search query '{Artist} {Title}'", artistName, title);
+                _logger.LogWarning(exception, "Could not fetch metadata by search query '{Artist} {Title}'", artistName, title);
             }
-            
+
             existingRelease = await _dbContext.Releases.FirstOrDefaultAsync(r => r.Id == id || r.Title.ToLower() == title.ToLower(), cancellationToken);
         }
 
@@ -785,7 +786,7 @@ public class DashboardController : ControllerBase
 
             if (release != null)
             {
-                // Delete physical audio files from disk
+
                 var baseMusicPath = _configuration["Music:Path"] ?? _configuration["Music:DownloadPath"] ?? "./Music";
                 var artistName = release.Artist?.Name ?? "Unknown Artist";
                 var releaseTitle = release.Title ?? "Unknown Release";
@@ -800,13 +801,13 @@ public class DashboardController : ControllerBase
                     {
                         Directory.Delete(destinationDir, recursive: true);
                     }
-                    catch (Exception ex)
+                    catch (Exception exception)
                     {
-                        _logger.LogWarning(ex, "Failed to delete audio directory {Dir}", destinationDir);
+                        _logger.LogWarning(exception, "Failed to delete audio directory {Dir}", destinationDir);
                     }
                 }
 
-                // Delete recordings and release from DB
+
                 if (release.Recordings != null && release.Recordings.Any())
                 {
                     _dbContext.Recordings.RemoveRange(release.Recordings);
@@ -817,10 +818,10 @@ public class DashboardController : ControllerBase
             await _dbContext.SaveChangesAsync(cancellationToken);
             return Ok(new { message = "Album and associated audio files successfully removed." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to delete album {Id}", id);
-            return StatusCode(500, new { message = $"Failed to remove album: {ex.Message}" });
+            _logger.LogError(exception, "Failed to delete album {Id}", id);
+            return StatusCode(500, new { message = $"Failed to remove album: {exception.Message}" });
         }
     }
 
@@ -837,7 +838,6 @@ public class DashboardController : ControllerBase
         return Content(svg, "image/svg+xml");
     }
 
-    // ═══════════════════════ SETTINGS ENDPOINTS ═══════════════════════
 
     [Authorize(Roles = "Admin")]
     [HttpGet("settings/providers")]
@@ -904,7 +904,7 @@ public class DashboardController : ControllerBase
             }
             else if (request.ProviderName.Equals("Torrent", StringComparison.OrdinalIgnoreCase))
             {
-                // Test qBittorrent connection
+
                 await _torrentHelper.LoginAsync();
                 var count = await _torrentHelper.GetActiveDownloadCountAsync();
                 return Ok(new { success = true, message = $"Connected to qBittorrent. {count} active downloads." });
@@ -912,9 +912,9 @@ public class DashboardController : ControllerBase
 
             return BadRequest(new { success = false, message = "Unknown provider." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            return Ok(new { success = false, message = $"Connection failed: {ex.Message}" });
+            return Ok(new { success = false, message = $"Connection failed: {exception.Message}" });
         }
     }
 
@@ -964,10 +964,10 @@ public class DashboardController : ControllerBase
 
             return Ok(new { success = true, summary, items = mappedList });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to get album analysis");
-            return StatusCode(500, new { success = false, message = ex.Message });
+            _logger.LogError(exception, "Failed to get album analysis");
+            return StatusCode(500, new { success = false, message = exception.Message });
         }
     }
 
@@ -980,10 +980,10 @@ public class DashboardController : ControllerBase
             await PerformFullAnalysisScanAsync(_dbContext, _configuration, cancellationToken);
             return await GetAnalysis(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to rescan album analysis");
-            return StatusCode(500, new { success = false, message = ex.Message });
+            _logger.LogError(exception, "Failed to rescan album analysis");
+            return StatusCode(500, new { success = false, message = exception.Message });
         }
     }
 
@@ -1035,10 +1035,10 @@ public class DashboardController : ControllerBase
             _logger.LogInformation("[Analysis] Requeued {Count} fully missing album(s) to download queue", requeuedCount);
             return Ok(new { success = true, count = requeuedCount, message = $"Requeued {requeuedCount} fully missing album(s) for download." });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to requeue fully missing albums");
-            return StatusCode(500, new { success = false, message = ex.Message });
+            _logger.LogError(exception, "Failed to requeue fully missing albums");
+            return StatusCode(500, new { success = false, message = exception.Message });
         }
     }
 
@@ -1060,7 +1060,7 @@ public class DashboardController : ControllerBase
         var config = _configuration;
         var logger = _logger;
 
-        // Fire and forget — create a fresh DI scope so DbContext is not disposed with the request
+
         _ = Task.Run(async () =>
         {
             SoulseekScanStatus.Start();
@@ -1074,10 +1074,10 @@ public class DashboardController : ControllerBase
                 int imported = await ScanAndImportFromSoulseekAsync(null, CancellationToken.None, db, musicSearch, imageService, metadataService, config, logger);
                 SoulseekScanStatus.Complete(imported);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                logger.LogError(ex, "[Soulseek Scan] Background scan failed");
-                SoulseekScanStatus.Fail(ex.Message);
+                logger.LogError(exception, "[Soulseek Scan] Background scan failed");
+                SoulseekScanStatus.Fail(exception.Message);
             }
         });
 
@@ -1108,10 +1108,10 @@ public class DashboardController : ControllerBase
                 int imported = await ScanAndImportFromSoulseekAsync(id, CancellationToken.None, db, musicSearch, imageService, metadataService, config, logger);
                 SoulseekScanStatus.Complete(imported);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                logger.LogError(ex, "[Soulseek Scan] Background scan failed for album {Id}", id);
-                SoulseekScanStatus.Fail(ex.Message);
+                logger.LogError(exception, "[Soulseek Scan] Background scan failed for album {Id}", id);
+                SoulseekScanStatus.Fail(exception.Message);
             }
         });
 
@@ -1210,9 +1210,9 @@ public class DashboardController : ControllerBase
             allDirectories.Insert(0, slskdDownloadDir);
             logger.LogInformation("[Soulseek Scan] Found {Count} directories under {Dir}", allDirectories.Count, slskdDownloadDir);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            logger.LogError(ex, "[Soulseek Scan] Error listing directories");
+            logger.LogError(exception, "[Soulseek Scan] Error listing directories");
             return 0;
         }
 
@@ -1267,7 +1267,7 @@ public class DashboardController : ControllerBase
             logger.LogInformation("[Soulseek Scan] Album keys: clean='{AlbumClean}', sanitized='{SanitizedAlbum}'",
                 albumClean, sanitizedAlbum);
 
-            // 1. Fuzzy & exact search all directory names (> 60%) — strip brackets from folder names before comparing
+
             var candidateDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var dirScores = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -1276,22 +1276,30 @@ public class DashboardController : ControllerBase
                 var rawDirName = Path.GetFileName(dir.TrimEnd('/', '\\'));
                 if (string.IsNullOrWhiteSpace(rawDirName)) continue;
 
+                var relativeDirName = Path.GetRelativePath(slskdDownloadDir, dir);
+
                 string folderClean = SoulseekMatchingHelper.SanitizeFolderName(rawDirName).ToLowerInvariant();
+                string relFolderClean = SoulseekMatchingHelper.SanitizeFolderName(relativeDirName).ToLowerInvariant();
+
                 string sanitizedDir = StringSanitizers.SanitizeTitle(folderClean).ToLowerInvariant();
+                string sanitizedRelDir = StringSanitizers.SanitizeTitle(relFolderClean).ToLowerInvariant();
 
                 int score = 0;
 
-                // Exact/substring match after stripping bracket noise (e.g. "[2013] Wolf - deluxe edition" -> "wolf - deluxe edition")
                 if (folderClean == albumClean || folderClean == artistAlbumClean ||
-                    (!string.IsNullOrWhiteSpace(albumClean) && albumClean.Length >= 4 && folderClean.Contains(albumClean)))
+                    relFolderClean == artistAlbumClean || relFolderClean.EndsWith(artistAlbumClean) || relFolderClean.Contains(artistAlbumClean) ||
+                    (!string.IsNullOrWhiteSpace(albumClean) && albumClean.Length >= 4 && (folderClean.Contains(albumClean) || relFolderClean.Contains(albumClean))))
                 {
                     score = 100;
                 }
                 else
                 {
                     int albumScore = FuzzySharp.Fuzz.TokenSetRatio(sanitizedAlbum, sanitizedDir);
-                    int artistAlbumScore = FuzzySharp.Fuzz.TokenSetRatio(sanitizedArtistAlbum, sanitizedDir);
-                    int partialScore = FuzzySharp.Fuzz.PartialRatio(sanitizedAlbum, sanitizedDir);
+                    int artistAlbumScore = FuzzySharp.Fuzz.TokenSetRatio(sanitizedArtistAlbum, sanitizedRelDir);
+                    int partialScore = Math.Max(
+                        FuzzySharp.Fuzz.PartialRatio(sanitizedAlbum, sanitizedDir),
+                        FuzzySharp.Fuzz.PartialRatio(sanitizedArtistAlbum, sanitizedRelDir)
+                    );
                     score = Math.Max(Math.Max(albumScore, artistAlbumScore), partialScore);
                 }
 
@@ -1299,8 +1307,8 @@ public class DashboardController : ControllerBase
                 {
                     candidateDirs.Add(dir);
                     dirScores[dir] = score;
-                    logger.LogInformation("[Soulseek Scan] Candidate folder: '{Dir}' => score {Score}",
-                        rawDirName, score);
+                    logger.LogInformation("[Soulseek Scan] Candidate folder: '{Dir}' (rel: '{RelDir}') => score {Score}",
+                        rawDirName, relativeDirName, score);
                 }
             }
 
@@ -1319,9 +1327,9 @@ public class DashboardController : ControllerBase
                             folderFiles.Add((Path.GetFileName(f), f));
                     }
                 }
-                catch (Exception ex)
+                catch (Exception exception)
                 {
-                    logger.LogWarning(ex, "[Soulseek Scan] Cannot enumerate files in {Dir}", rootFolder);
+                    logger.LogWarning(exception, "[Soulseek Scan] Cannot enumerate files in {Dir}", rootFolder);
                     return false;
                 }
 
@@ -1381,10 +1389,10 @@ public class DashboardController : ControllerBase
                             System.IO.File.Move(match.FullPath, destPath, overwrite: true);
                             imported = true;
                         }
-                        catch (Exception moveEx)
+                        catch (Exception moveException)
                         {
                             logger.LogWarning("[Soulseek Scan] Move failed for '{Source}' ({Msg}). Fallback to Copy...",
-                                match.FullPath, moveEx.Message);
+                                match.FullPath, moveException.Message);
 
                             System.IO.File.Copy(match.FullPath, destPath, overwrite: true);
                             imported = true;
@@ -1393,9 +1401,9 @@ public class DashboardController : ControllerBase
                             {
                                 System.IO.File.Delete(match.FullPath);
                             }
-                            catch (Exception delEx)
+                            catch (Exception deleteException)
                             {
-                                logger.LogWarning("[Soulseek Scan] Source delete skipped after copy: {Msg}", delEx.Message);
+                                logger.LogWarning("[Soulseek Scan] Source delete skipped after copy: {Msg}", deleteException.Message);
                             }
                         }
 
@@ -1405,9 +1413,9 @@ public class DashboardController : ControllerBase
                             moved++;
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception exception)
                     {
-                        logger.LogError(ex, "[Soulseek Scan] Failed to import '{Source}' => '{Dest}'", match.FullPath, destPath);
+                        logger.LogError(exception, "[Soulseek Scan] Failed to import '{Source}' => '{Dest}'", match.FullPath, destPath);
                     }
                 }
 
@@ -1415,7 +1423,7 @@ public class DashboardController : ControllerBase
                 return moved > 0;
             }
 
-            // Process candidate set directories (sorted by best folder score descending)
+
             var sortedCandidates = candidateDirs.OrderByDescending(d => dirScores.GetValueOrDefault(d, 0)).ToList();
 
             foreach (var candidateDir in sortedCandidates)
@@ -1432,88 +1440,5 @@ public class DashboardController : ControllerBase
         logger.LogInformation("[Soulseek Scan] Done. Total imported: {Count}", importedCount);
         return importedCount;
     }
-
 }
 
-public class AddAlbumRequest
-{
-    public string Title { get; set; } = string.Empty;
-    public string Artist { get; set; } = string.Empty;
-}
-
-public class SetDownloadedRequest
-{
-    public string? Title { get; set; }
-    public string? ArtistName { get; set; }
-}
-
-public class UpdateProviderRequest
-{
-    public Guid Id { get; set; }
-    public int PriorityOrder { get; set; }
-    public bool IsEnabled { get; set; }
-    public string? ApiUrl { get; set; }
-    public string? Username { get; set; }
-    public string? Password { get; set; }
-    public string? ApiKey { get; set; }
-    public string? FormatPreferences { get; set; }
-    public string? ExtraConfig { get; set; }
-}
-
-public class TestProviderRequest
-{
-    public string ProviderName { get; set; } = string.Empty;
-    public string ApiUrl { get; set; } = string.Empty;
-    public string? Username { get; set; }
-    public string? Password { get; set; }
-    public string? ApiKey { get; set; }
-}
-
-/// <summary>Thread-safe singleton status for the background Soulseek scan.</summary>
-public static class SoulseekScanStatus
-{
-    private static volatile bool _isRunning;
-    private static volatile string _state = "idle";
-    private static volatile string? _error;
-    private static int _importedCount;
-    private static DateTime? _startedAt;
-    private static DateTime? _completedAt;
-
-    public static bool IsRunning => _isRunning;
-
-    public static object Current => new
-    {
-        state = _state,
-        isRunning = _isRunning,
-        importedCount = _importedCount,
-        error = _error,
-        startedAt = _startedAt,
-        completedAt = _completedAt
-    };
-
-    public static void Start()
-    {
-        _isRunning = true;
-        _state = "running";
-        _error = null;
-        _importedCount = 0;
-        _startedAt = DateTime.UtcNow;
-        _completedAt = null;
-    }
-
-    public static void Complete(int imported)
-    {
-        _importedCount = imported;
-        _state = "complete";
-        _completedAt = DateTime.UtcNow;
-        _isRunning = false;
-    }
-
-    public static void Fail(string error)
-    {
-        _error = error;
-        _state = "error";
-        _completedAt = DateTime.UtcNow;
-        _isRunning = false;
-    }
-}

@@ -165,9 +165,9 @@ public class LastFmService : ILastFmService
 
             return sessionId;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            throw new Exception($"Error starting playback session for user {userId}: {ex.Message}", ex);
+            throw new Exception($"Error starting playback session for user {userId}: {exception.Message}", exception);
         }
     }
 
@@ -189,7 +189,7 @@ public class LastFmService : ILastFmService
                 listen.PauseSeekEvents = JsonSerializer.Serialize(events);
 
                 await _dbContext.SaveChangesAsync();
-            
+
                 switch (playbackEvent.EventType.ToLower())
                 {
                     case "pause":
@@ -204,9 +204,9 @@ public class LastFmService : ILastFmService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            throw new Exception($"Error recording playback event for session {sessionId}: {ex.Message}", ex);
+            throw new Exception($"Error recording playback event for session {sessionId}: {exception.Message}", exception);
         }
     }
 
@@ -219,7 +219,7 @@ public class LastFmService : ILastFmService
 
             var listen = await db.Listens
                 .FirstOrDefaultAsync(l => l.ListenId == listenId);
-            
+
             var sessionInfo = await GetValidatedSession(listen.UserId);
 
             if (sessionInfo?.IsValid == true)
@@ -240,12 +240,12 @@ public class LastFmService : ILastFmService
 
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error reporting now playing for listen {listenId}: {ex.Message}");
+            Console.WriteLine($"Error reporting now playing for listen {listenId}: {exception.Message}");
         }
     }
-    
+
     public async Task<bool> ClearNowPlaying(string sessionKey)
     {
         var parameters = new Dictionary<string, string>
@@ -267,13 +267,13 @@ public class LastFmService : ILastFmService
             var response = await _httpClient.PostAsync(_baseUrl, content);
             return response.IsSuccessStatusCode;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error clearing now playing: {ex.Message}");
+            Console.WriteLine($"Error clearing now playing: {exception.Message}");
             return false;
         }
     }
-    
+
     private async Task ScrobbleListen(Guid listenId)
     {
         try
@@ -290,7 +290,7 @@ public class LastFmService : ILastFmService
 
             if (sessionInfo?.IsValid == true)
             {
-                
+
                 var timestamp = ((DateTimeOffset)listen.StartTime).ToUnixTimeSeconds();
                 var success = await ScrobbleTrack(
                     sessionInfo.SessionKey,
@@ -308,9 +308,9 @@ public class LastFmService : ILastFmService
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error scrobbling listen {listenId}: {ex.Message}");
+            Console.WriteLine($"Error scrobbling listen {listenId}: {exception.Message}");
         }
     }
 
@@ -320,7 +320,7 @@ public class LastFmService : ILastFmService
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
-            
+
             var user = await db.Users.FindAsync(userId);
 
             if (user == null)
@@ -364,9 +364,9 @@ public class LastFmService : ILastFmService
                 };
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error validating session for user {userId}: {ex.Message}");
+            Console.WriteLine($"Error validating session for user {userId}: {exception.Message}");
             return null;
         }
     }
@@ -389,13 +389,13 @@ public class LastFmService : ILastFmService
                 await Task.Delay(100);
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error processing pending scrobbles: {ex.Message}");
+            Console.WriteLine($"Error processing pending scrobbles: {exception.Message}");
         }
     }
 
-    
+
     public async Task UpdatePlaybackProgressDelta(Guid sessionId, int deltaListenedSeconds, int totalListenedSeconds)
     {
         try
@@ -408,7 +408,7 @@ public class LastFmService : ILastFmService
             var now = DateTime.UtcNow;
 
             var validatedTotalSeconds = ValidateProgressDelta(listen, totalListenedSeconds, now);
-        
+
             if (deltaListenedSeconds < 0)
             {
                 listen.HasAnomalies = true;
@@ -433,9 +433,9 @@ public class LastFmService : ILastFmService
                 await ScrobbleListen(listen.ListenId);
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            throw new Exception($"Error updating playback progress for session {sessionId}: {ex.Message}", ex);
+            throw new Exception($"Error updating playback progress for session {sessionId}: {exception.Message}", exception);
         }
     }
 
@@ -467,9 +467,9 @@ public class LastFmService : ILastFmService
                 await ScrobbleListen(listen.ListenId);
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            throw new Exception($"Error stopping playback session {sessionId}: {ex.Message}", ex);
+            throw new Exception($"Error stopping playback session {sessionId}: {exception.Message}", exception);
         }
     }
 
@@ -478,7 +478,7 @@ public class LastFmService : ILastFmService
         if (totalListenedSeconds < 0) return false;
         if (totalListenedSeconds > trackDurationSeconds + 30) return false; 
         if (totalListenedSeconds > sessionDuration.TotalSeconds + 60) return false; 
-    
+
         return true;
     }
 
@@ -498,7 +498,7 @@ public class LastFmService : ILastFmService
         {
             listen.HasAnomalies = true;
             listen.AnomalyNotes += $"Invalid total listen time {totalListenedSeconds}s for track {trackDuration}s, session {(int)sessionDuration.TotalSeconds}s; ";
-        
+
             var maxPossibleListenTime = Math.Min(trackDuration, (int)sessionDuration.TotalSeconds);
             return Math.Min(totalListenedSeconds, maxPossibleListenTime);
         }
@@ -516,7 +516,7 @@ public class LastFmService : ILastFmService
 
         return totalListenedSeconds;
     }
-    
+
     private bool HasRecentSeekEvent(Listen listen, DateTime now)
     {
         try
@@ -525,7 +525,7 @@ public class LastFmService : ILastFmService
                 return false;
 
             var events = JsonSerializer.Deserialize<List<PlaybackEvent>>(listen.PauseSeekEvents);
-        
+
             return events?.Any(e => e.EventType.ToLower() == "seek" &&
                                     (now - e.Timestamp).TotalSeconds < 15) == true;
         }
@@ -534,7 +534,7 @@ public class LastFmService : ILastFmService
             return false;
         }
     }
-    
+
     private async Task ClearNowPlayingForListen(Guid listenId)
     {
         try
@@ -554,12 +554,12 @@ public class LastFmService : ILastFmService
                 await ClearNowPlaying(sessionInfo.SessionKey);
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error clearing now playing for listen {listenId}: {ex.Message}");
+            Console.WriteLine($"Error clearing now playing for listen {listenId}: {exception.Message}");
         }
     }
-    
+
     private static bool ShouldScrobble(int validatedSeconds, int trackDuration)
     {
         const int fourMinutes = 240;
@@ -625,12 +625,12 @@ public class LastFmService : ILastFmService
 
             return false;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return false;
         }
     }
-    
+
     private async Task<bool> ScrobbleTrack(string sessionKey, string? artist, string? track, string? album, long timestamp, Guid? recordingId = null)
     {
         var parameters = new Dictionary<string, string>
@@ -694,7 +694,7 @@ public class LastFmService : ILastFmService
 
             return response.IsSuccessStatusCode;
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return false;
         }

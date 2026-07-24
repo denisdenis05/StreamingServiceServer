@@ -9,7 +9,7 @@ public class DownloadProviderConfigConfiguration : IEntityTypeConfiguration<Down
     public void Configure(EntityTypeBuilder<DownloadProviderConfig> builder)
     {
         builder.HasKey(e => e.Id);
-        
+
         builder.Property(e => e.ProviderName)
             .IsRequired()
             .HasMaxLength(50);

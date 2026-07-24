@@ -29,7 +29,7 @@ public class PendingDownloadChecker : BackgroundService
         _scopeFactory = scopeFactory;
         _torrentHelper = torrentHelper;
         _configuration = configuration;
-        
+
         _musicLocation = _configuration["Music:Path"] ?? "./Music";
     }
 
@@ -41,9 +41,9 @@ public class PendingDownloadChecker : BackgroundService
             {
                 await CheckPendingDownloadsAsync(stoppingToken);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                Console.WriteLine($"[PendingDownloadChecker] Error: {ex.Message}");
+                Console.WriteLine($"[PendingDownloadChecker] Error: {exception.Message}");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
@@ -63,7 +63,7 @@ public class PendingDownloadChecker : BackgroundService
 
         var pending = dbContext.PendingDownloads.ToList();
 
-        // Get providers so we can route by ProviderName
+
         var providers = await configService.GetActiveProvidersOrderedAsync();
 
         foreach (var item in pending)
@@ -76,7 +76,7 @@ public class PendingDownloadChecker : BackgroundService
 
                 if (providerEntry.provider == null)
                 {
-                    // Fallback to torrent check for backward compatibility
+
                     await CheckTorrentPendingAsync(item, scope.ServiceProvider);
                     continue;
                 }
@@ -92,7 +92,7 @@ public class PendingDownloadChecker : BackgroundService
                         ? progressInfo.SavePath
                         : item.SavePath ?? "";
 
-                    // For torrent: use the torrent info save path
+
                     if (providerName == "Torrent")
                     {
                         var torrentInfo = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
@@ -115,7 +115,7 @@ public class PendingDownloadChecker : BackgroundService
 
                         if (movedCount > 0)
                         {
-                            // Save MusicBrainz metadata
+
                             await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
                             await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
                             await providerEntry.provider.CleanUpAsync(item.SourceName, true);
@@ -127,9 +127,9 @@ public class PendingDownloadChecker : BackgroundService
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                Console.WriteLine($"[PendingDownloadChecker] Error processing {item.Id}: {ex.Message}");
+                Console.WriteLine($"[PendingDownloadChecker] Error processing {item.Id}: {exception.Message}");
             }
         }
     }
@@ -139,24 +139,24 @@ public class PendingDownloadChecker : BackgroundService
         if (string.IsNullOrWhiteSpace(rawSavePath))
             return string.Empty;
 
-        // 1. Direct match if path exists
+
         if (Directory.Exists(rawSavePath))
             return rawSavePath;
 
         var downloadBase = _configuration["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
         const string slskdDefaultDir = "/nas/slskd-data/downloads";
 
-        // 2. Try combining configured DownloadPath with rawSavePath
+
         var combinedConfigured = Path.Combine(downloadBase, rawSavePath.TrimStart('/', '\\'));
         if (Directory.Exists(combinedConfigured))
             return combinedConfigured;
 
-        // 3. Try combining default slskd dir with rawSavePath
+
         var combinedSlskd = Path.Combine(slskdDefaultDir, rawSavePath.TrimStart('/', '\\'));
         if (Directory.Exists(combinedSlskd))
             return combinedSlskd;
 
-        // 4. Handle Docker container internal paths (e.g. /app/downloads/username/folder or /downloads/folder)
+
         var normalized = rawSavePath.Replace('\\', '/');
         if (normalized.Contains("/downloads/"))
         {
@@ -168,7 +168,7 @@ public class PendingDownloadChecker : BackgroundService
             if (Directory.Exists(alt2)) return alt2;
         }
 
-        // 5. Try using just the leaf folder name in download directories
+
         var folderName = Path.GetFileName(rawSavePath.TrimEnd('/', '\\'));
         if (!string.IsNullOrWhiteSpace(folderName))
         {
@@ -182,7 +182,7 @@ public class PendingDownloadChecker : BackgroundService
         return rawSavePath;
     }
 
-    /// <summary>Backward-compatible torrent check for items without ProviderName.</summary>
+
     private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item, IServiceProvider serviceProvider)
     {
         var dbContext = serviceProvider.GetRequiredService<StreamingDbContext>();
@@ -212,7 +212,7 @@ public class PendingDownloadChecker : BackgroundService
             }
         }
     }
-    
+
     private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath)
     {
         var result = new List<(string fileName, string fullPath)>();
@@ -237,13 +237,13 @@ public class PendingDownloadChecker : BackgroundService
                 }
             }
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException exception)
         {
-            Console.WriteLine($"Access denied to some folders: {ex.Message}");
+            Console.WriteLine($"Access denied to some folders: {exception.Message}");
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Console.WriteLine($"Error while searching files: {ex.Message}");
+            Console.WriteLine($"Error while searching files: {exception.Message}");
         }
 
         return result;
@@ -283,9 +283,9 @@ public class PendingDownloadChecker : BackgroundService
                 File.Move(match.FullPath, destinationPath, overwrite: true);
                 movedCount++;
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                Console.WriteLine($"Failed to move {match.FileName}: {ex.Message}");
+                Console.WriteLine($"Failed to move {match.FileName}: {exception.Message}");
             }
         }
 

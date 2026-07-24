@@ -9,7 +9,7 @@ public class MediaDto
 
     [JsonPropertyName("track-count")]
     public int? TrackCount { get; set; }
-    
+
     [JsonPropertyName("tracks")]
     public ICollection<TrackDto> Tracks { get; set; } = new List<TrackDto>();
 }

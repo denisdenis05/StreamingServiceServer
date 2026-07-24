@@ -24,7 +24,7 @@ public class LastFmController : ControllerBase
     public async Task<IActionResult> GetAuthUrl()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- 
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized("Invalid or missing user ID in token.");
@@ -35,7 +35,7 @@ public class LastFmController : ControllerBase
 
             return Ok(new { authUrl, callbackUrl = $"http://localhost:5068/lastfm/callback?userId={userId}" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to generate auth URL");
         }
@@ -54,7 +54,7 @@ public class LastFmController : ControllerBase
 
             return Redirect($"streamingservice://lastfm/callback?token={token}");
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return Redirect($"streamingservice://lastfm/callback?error=server_error");
         }
@@ -64,7 +64,7 @@ public class LastFmController : ControllerBase
     public async Task<IActionResult> ConnectAccount([FromBody] LastFmAuthRequest request)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- 
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized("Invalid or missing user ID in token.");
@@ -87,7 +87,7 @@ public class LastFmController : ControllerBase
 
             return Ok(new { success = true, message = "Last.fm account connected successfully", username });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to connect Last.fm account");
         }
@@ -97,12 +97,12 @@ public class LastFmController : ControllerBase
     public async Task<IActionResult> GetConnectionStatus()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- 
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized("Invalid or missing user ID in token.");
         }
-        
+
         try
         {
             var user = await _dbContext.Users.FindAsync(userId);
@@ -119,7 +119,7 @@ public class LastFmController : ControllerBase
                 connectedAt = user.LastFmConnectedAt
             });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to get connection status");
         }
@@ -129,7 +129,7 @@ public class LastFmController : ControllerBase
     public async Task<IActionResult> DisconnectAccount()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- 
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized("Invalid or missing user ID in token.");
@@ -152,7 +152,7 @@ public class LastFmController : ControllerBase
 
             return Ok(new { success = true, message = "Last.fm account disconnected successfully" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to disconnect Last.fm account");
         }
@@ -161,7 +161,7 @@ public class LastFmController : ControllerBase
     public async Task<IActionResult> StartPlayback([FromBody] StartPlaybackRequest request)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        
+
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Unauthorized("Invalid or missing user ID in token.");
@@ -170,14 +170,14 @@ public class LastFmController : ControllerBase
         try
         {
             var sessionId = await _lastFmService.StartPlaybackSession(userId, request);
-            
+
             return Ok(new { 
                 success = true, 
                 sessionId = sessionId,
                 message = "Playback session started" 
             });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to start playback session");
         }
@@ -189,13 +189,13 @@ public class LastFmController : ControllerBase
         try
         {
             await _lastFmService.StopPlaybackSessionDelta(request.SessionId, request.TotalListenedSeconds);
-        
+
             return Ok(new { 
                 success = true, 
                 message = "Playback session stopped" 
             });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to stop playback session");
         }
@@ -211,7 +211,7 @@ public class LastFmController : ControllerBase
                 request.DeltaListenedSeconds, 
                 request.TotalListenedSeconds
             );
-        
+
             if (request.Events?.Any() == true)
             {
                 foreach (var playbackEvent in request.Events)
@@ -219,10 +219,10 @@ public class LastFmController : ControllerBase
                     await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
                 }
             }
-        
+
             return Ok(new { success = true });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to update playback progress");
         }
@@ -240,7 +240,7 @@ public class LastFmController : ControllerBase
             };
 
             await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
-        
+
             if (request.DeltaListenedSeconds > 0)
             {
                 await _lastFmService.UpdatePlaybackProgressDelta(
@@ -249,10 +249,10 @@ public class LastFmController : ControllerBase
                     request.TotalListenedSeconds
                 );
             }
-        
+
             return Ok(new { success = true, message = "Playback paused" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to pause playback");
         }
@@ -270,10 +270,10 @@ public class LastFmController : ControllerBase
             };
 
             await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
-        
+
             return Ok(new { success = true, message = "Playback resumed" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to resume playback");
         }
@@ -293,10 +293,10 @@ public class LastFmController : ControllerBase
             };
 
             await _lastFmService.RecordPlaybackEvent(request.SessionId, playbackEvent);
-        
+
             return Ok(new { success = true, message = "Seek recorded" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
             return StatusCode(500, "Failed to record seek");
         }

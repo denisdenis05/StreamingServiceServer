@@ -29,7 +29,7 @@ public class ImageService : IImageService
     public AlbumCoversDto GetAllAlbumCovers(Guid releaseGroupId)
     {
         var albumCovers = new AlbumCoversDto();
-        
+
         var frontCoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front";
         albumCovers.Cover = frontCoverUrl;
 
@@ -38,7 +38,7 @@ public class ImageService : IImageService
 
         var front250CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-250";
         albumCovers.VerySmallCover = front250CoverUrl;
-        
+
         return albumCovers;
     }
 }

@@ -7,7 +7,7 @@ public static class StringSanitizers
         if (string.IsNullOrWhiteSpace(title)) return string.Empty;
         title = System.Text.RegularExpressions.Regex.Replace(title, @"\[[^\]]*\]", "");
         title = System.Text.RegularExpressions.Regex.Replace(title, @"\([^\)]*\)", "");
-        
+
         title = System.Text.RegularExpressions.Regex.Replace(title, @"[^\w\s]", "");
         title = System.Text.RegularExpressions.Regex.Replace(title, @"\p{So}+", "");
 

@@ -251,6 +251,7 @@ public static class SoulseekMatchingHelper
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
 
+        text = StringSanitizers.NormalizeSpecialCharacters(text);
 
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\[[^\]]*\]", "");
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\([^\)]*\)", "");
@@ -267,6 +268,8 @@ public static class SoulseekMatchingHelper
     public static string SanitizeFolderName(string folderName)
     {
         if (string.IsNullOrWhiteSpace(folderName)) return string.Empty;
+
+        folderName = StringSanitizers.NormalizeSpecialCharacters(folderName);
 
         folderName = folderName.TrimEnd('/', '\\');
 

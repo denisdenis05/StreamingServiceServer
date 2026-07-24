@@ -284,9 +284,18 @@ public class PendingDownloadChecker : BackgroundService
                 File.Move(match.FullPath, destinationPath, overwrite: true);
                 movedCount++;
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                Console.WriteLine($"Failed to move {match.FileName}: {exception.Message}");
+                try
+                {
+                    File.Copy(match.FullPath, destinationPath, overwrite: true);
+                    try { File.Delete(match.FullPath); } catch { }
+                    movedCount++;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to move {match.FileName}: {ex.Message}");
+                }
             }
         }
 

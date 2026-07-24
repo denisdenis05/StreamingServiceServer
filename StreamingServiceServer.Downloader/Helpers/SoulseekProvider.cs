@@ -91,7 +91,7 @@ public class SoulseekProvider : IDownloadProvider
                             {
                                 Success = true,
                                 SourceIdentifier = $"slskd:{searchId.Value}:{bestMatch.Value.username}",
-                                SavePath = null
+                                SavePath = bestMatch.Value.directoryPath
                             };
                         }
                     }

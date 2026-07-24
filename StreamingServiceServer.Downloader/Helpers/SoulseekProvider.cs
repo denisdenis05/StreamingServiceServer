@@ -303,14 +303,13 @@ public class SoulseekProvider : IDownloadProvider
                 }
 
 
-                int artistScore = Fuzz.PartialRatio(normalizedArtist, fullPathSearchString);
+                int artistScore = Math.Max(Fuzz.TokenSetRatio(normalizedArtist, fullPathSearchString), Fuzz.PartialRatio(normalizedArtist, fullPathSearchString));
                 bool artistTokenInPath = artistTokens.Count > 0 && artistTokens.Any(token => fullPathSearchString.Contains(token));
                 bool artistMatched = artistScore >= 60 || artistTokenInPath;
 
-
-                int albumScore = Fuzz.PartialRatio(normalizedAlbum, fullPathSearchString);
+                int albumScore = Math.Max(Fuzz.TokenSetRatio(normalizedAlbum, fullPathSearchString), Fuzz.PartialRatio(normalizedAlbum, fullPathSearchString));
                 int coreAlbumScore = !string.IsNullOrWhiteSpace(normalizedCoreAlbum)
-                    ? Fuzz.PartialRatio(normalizedCoreAlbum, fullPathSearchString)
+                    ? Math.Max(Fuzz.TokenSetRatio(normalizedCoreAlbum, fullPathSearchString), Fuzz.PartialRatio(normalizedCoreAlbum, fullPathSearchString))
                     : 0;
                 int maxAlbumScore = Math.Max(albumScore, coreAlbumScore);
 
@@ -433,11 +432,11 @@ public class SoulseekProvider : IDownloadProvider
     {
         if (string.IsNullOrWhiteSpace(text)) return "";
 
+        text = StringSanitizers.NormalizeSpecialCharacters(text);
 
         text = text.Replace("&", " and ")
                    .Replace("+", " and ")
                    .Replace("$", "s");
-
 
         var normalizedString = text.Normalize(NormalizationForm.FormD);
         var stringBuilder = new StringBuilder(capacity: normalizedString.Length);
@@ -458,7 +457,7 @@ public class SoulseekProvider : IDownloadProvider
     {
         if (string.IsNullOrWhiteSpace(query)) return "";
         var cleaned = Regex.Replace(query, @"[\[\({].*?[\]\)}]", " ");
-        cleaned = Regex.Replace(cleaned, @"[-_'\.]", " ");
+        cleaned = Regex.Replace(cleaned, @"[-_'/\\.]", " ");
         cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
         return cleaned;
     }

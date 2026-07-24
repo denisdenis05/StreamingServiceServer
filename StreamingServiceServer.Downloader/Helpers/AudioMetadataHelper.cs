@@ -43,6 +43,6 @@ public static class AudioMetadataHelper
 
         int titleScore = FuzzySharp.Fuzz.PartialRatio(sanitizedTrackTarget, tagTitleSanitized);
 
-        return (albumScore > 65 && titleScore > 65) || (string.IsNullOrWhiteSpace(sanitizedAlbumTarget) && titleScore > 75);
+        return (albumScore > 65 && titleScore > 65) || ((string.IsNullOrWhiteSpace(sanitizedAlbumTarget) || string.IsNullOrWhiteSpace(tagAlbumSanitized)) && titleScore > 75);
     }
 }

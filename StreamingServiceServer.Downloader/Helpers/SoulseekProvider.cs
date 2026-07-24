@@ -62,7 +62,7 @@ public class SoulseekProvider : IDownloadProvider
             try
             {
 
-                var searchResult = await _slskdHelper.WaitForSearchResultsAsync(searchId.Value, 12, cancellationToken);
+                var searchResult = await _slskdHelper.WaitForSearchResultsAsync(searchId.Value, 90, cancellationToken);
                 if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
                 {
                     Console.WriteLine($"[Soulseek] No search responses for query '{queryOption.Query}', trying next tier...");
@@ -268,11 +268,18 @@ public class SoulseekProvider : IDownloadProvider
 
         var artistTokens = Regex.Split(normalizedArtist, @"\W+").Where(t => t.Length >= 3).ToList();
 
+        Console.WriteLine($"[Soulseek][Match] Target: artist='{normalizedArtist}' album='{normalizedAlbum}' core='{normalizedCoreAlbum}' artistTokens=[{string.Join(",", artistTokens)}] responses={responses.Count}");
+
+        int totalDirs = 0;
+        int skippedNoAudio = 0;
+        int skippedVa = 0;
+        int skippedAlbumScore = 0;
+        int skippedArtistScore = 0;
+
         foreach (var response in responses)
         {
             if (response.Username == null || response.Files == null || response.Files.Count == 0)
                 continue;
-
 
             var dirGroups = response.Files
                 .GroupBy(f => GetDirectoryPath(f.Filename ?? ""))
@@ -281,9 +288,10 @@ public class SoulseekProvider : IDownloadProvider
             foreach (var group in dirGroups)
             {
                 var dirPath = group.Key;
+                totalDirs++;
 
-
-                var validAudioFiles = group
+                var allFilesInGroup = group.ToList();
+                var validAudioFiles = allFilesInGroup
                     .Where(f => f.Filename != null &&
                                !f.IsLocked &&
                                f.Size >= MinAudioFileSizeBytes &&
@@ -292,16 +300,23 @@ public class SoulseekProvider : IDownloadProvider
                     .Select(f => new SlskdFileDownloadRequest { Filename = f.Filename!, Size = f.Size })
                     .ToList();
 
-                if (validAudioFiles.Count == 0) continue;
-
-                var fullPathSearchString = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(dirPath + " " + string.Join(" ", validAudioFiles.Select(f => f.Filename)))).ToLowerInvariant();
-
-
-                if (!isTargetVariousArtists && (fullPathSearchString.Contains(@"\va ") || fullPathSearchString.Contains("va - ") || fullPathSearchString.Contains("various artists")))
+                if (validAudioFiles.Count == 0)
                 {
+                    var rejectedFiles = allFilesInGroup.Where(f => f.Filename != null).Take(3)
+                        .Select(f => $"{Path.GetFileName(f.Filename ?? "")}(ext={GetExtension(f.Filename ?? "")},size={f.Size},locked={f.IsLocked})");
+                    Console.WriteLine($"[Soulseek][Match] SKIP no-audio: '{dirPath}' totalFiles={allFilesInGroup.Count} sample=[{string.Join(", ", rejectedFiles)}]");
+                    skippedNoAudio++;
                     continue;
                 }
 
+                var fullPathSearchString = CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(dirPath + " " + string.Join(" ", validAudioFiles.Select(f => f.Filename)))).ToLowerInvariant();
+
+                if (!isTargetVariousArtists && (fullPathSearchString.Contains(@"\va ") || fullPathSearchString.Contains("va - ") || fullPathSearchString.Contains("various artists")))
+                {
+                    Console.WriteLine($"[Soulseek][Match] SKIP va-filter: '{dirPath}'");
+                    skippedVa++;
+                    continue;
+                }
 
                 int artistScore = Math.Max(Fuzz.TokenSetRatio(normalizedArtist, fullPathSearchString), Fuzz.PartialRatio(normalizedArtist, fullPathSearchString));
                 bool artistTokenInPath = artistTokens.Count > 0 && artistTokens.Any(token => fullPathSearchString.Contains(token));
@@ -313,14 +328,21 @@ public class SoulseekProvider : IDownloadProvider
                     : 0;
                 int maxAlbumScore = Math.Max(albumScore, coreAlbumScore);
 
-                if (maxAlbumScore < 45) continue;
+                Console.WriteLine($"[Soulseek][Match] DIR '{dirPath}' user='{response.Username}' audioFiles={validAudioFiles.Count} artistScore={artistScore} artistMatched={artistMatched} albumScore={maxAlbumScore} pathString='{fullPathSearchString.Substring(0, Math.Min(120, fullPathSearchString.Length))}'");
 
+                if (maxAlbumScore < 45)
+                {
+                    Console.WriteLine($"[Soulseek][Match] SKIP album-score<45: '{dirPath}' albumScore={maxAlbumScore}");
+                    skippedAlbumScore++;
+                    continue;
+                }
 
                 if (!queryContainsArtist && !isTargetVariousArtists)
                 {
                     if (!artistMatched && artistScore < 50)
                     {
-
+                        Console.WriteLine($"[Soulseek][Match] SKIP artist-score: '{dirPath}' artistScore={artistScore} artistMatched={artistMatched}");
+                        skippedArtistScore++;
                         continue;
                     }
                 }
@@ -328,29 +350,19 @@ public class SoulseekProvider : IDownloadProvider
                 int combinedScore = (int)(artistScore * 0.35 + maxAlbumScore * 0.65);
                 if (artistMatched) combinedScore += 15;
 
-
                 int avgQualityScore = (int)group.Average(f => CalculateAudioQualityScore(f, GetExtension(f.Filename ?? "")));
                 combinedScore += avgQualityScore;
 
-
                 if (response.FreeUploadSlots > 0)
-                {
-                    combinedScore += 30; 
-                }
+                    combinedScore += 30;
                 else
-                {
-                    combinedScore -= 20; 
-                }
+                    combinedScore -= 20;
 
-                if (response.UploadSpeed > 1024 * 1024) 
-                {
+                if (response.UploadSpeed > 1024 * 1024)
                     combinedScore += 10;
-                }
-
 
                 if (validAudioFiles.Count >= 4) combinedScore += 15;
                 else if (validAudioFiles.Count >= 2) combinedScore += 5;
-
 
                 bool hasMetadataFiles = group.Any(f => f.Filename != null &&
                     (f.Filename.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
@@ -359,6 +371,8 @@ public class SoulseekProvider : IDownloadProvider
                      f.Filename.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ||
                      f.Filename.EndsWith(".log", StringComparison.OrdinalIgnoreCase)));
                 if (hasMetadataFiles) combinedScore += 5;
+
+                Console.WriteLine($"[Soulseek][Match] CANDIDATE '{dirPath}' user='{response.Username}' combinedScore={combinedScore} freeSlots={response.FreeUploadSlots > 0}");
 
                 candidates.Add(new CandidateDirectory
                 {
@@ -372,6 +386,8 @@ public class SoulseekProvider : IDownloadProvider
             }
         }
 
+        Console.WriteLine($"[Soulseek][Match] Summary: totalDirs={totalDirs} skippedNoAudio={skippedNoAudio} skippedVa={skippedVa} skippedAlbumScore={skippedAlbumScore} skippedArtistScore={skippedArtistScore} candidates={candidates.Count}");
+
         if (candidates.Count == 0) return null;
 
         var bestCandidate = candidates
@@ -384,9 +400,11 @@ public class SoulseekProvider : IDownloadProvider
 
         if (bestCandidate != null)
         {
+            Console.WriteLine($"[Soulseek][Match] BEST: '{bestCandidate.DirectoryPath}' user='{bestCandidate.Username}' score={bestCandidate.Score}");
             return (bestCandidate.Username, bestCandidate.DirectoryPath, bestCandidate.Files);
         }
 
+        Console.WriteLine($"[Soulseek][Match] No candidate passed score>=50 threshold. Best scores: {string.Join(", ", candidates.OrderByDescending(c => c.Score).Take(5).Select(c => $"'{c.DirectoryPath}'={c.Score}"))}");
         return null;
     }
 

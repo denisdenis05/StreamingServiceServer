@@ -175,38 +175,81 @@ public class SlskdHelper
 
 
     public async Task<SlskdSearchResult?> WaitForSearchResultsAsync(
-        Guid searchId, int maxWaitSeconds = 12, CancellationToken cancellationToken = default)
+        Guid searchId, int maxWaitSeconds = 90, CancellationToken cancellationToken = default)
     {
         var startTime = DateTime.UtcNow;
         var deadline = startTime.AddSeconds(maxWaitSeconds);
-        const int minWaitSeconds = 6;
+
+        SlskdSearchResult? lastResult = null;
 
         while (DateTime.UtcNow < deadline && !cancellationToken.IsCancellationRequested)
         {
-            await Task.Delay(1500, cancellationToken);
+            await Task.Delay(2000, cancellationToken);
 
-            var result = await GetSearchResultsAsync(searchId, cancellationToken);
+            var result = await GetSearchStatusAsync(searchId, cancellationToken);
             if (result == null) continue;
 
+            lastResult = result;
             var elapsedSeconds = (DateTime.UtcNow - startTime).TotalSeconds;
+            var isCompleted = result.State != null && (
+                result.State.Contains("Completed", StringComparison.OrdinalIgnoreCase) ||
+                result.State.Contains("Cancelled", StringComparison.OrdinalIgnoreCase));
 
-            if (result.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true)
+            Console.WriteLine($"[Soulseek][Search] id={searchId} elapsed={elapsedSeconds:F0}s state='{result.State}' responseCount={result.ResponseCount} fileCount={result.FileCount}");
+
+            if (isCompleted)
             {
-                return result;
+                Console.WriteLine($"[Soulseek][Search] Search completed with {result.ResponseCount} responses. Fetching results...");
+                return await FetchCompletedSearchResultsAsync(searchId, result, cancellationToken);
             }
 
-            if (result.Responses?.Count >= 15 && elapsedSeconds >= 4)
+            if (result.ResponseCount >= 250 && elapsedSeconds >= 10)
             {
-                return result;
-            }
-
-            if (result.Responses?.Count > 0 && elapsedSeconds >= minWaitSeconds)
-            {
-                return result;
+                Console.WriteLine($"[Soulseek][Search] Response limit reached early ({result.ResponseCount}). Fetching results...");
+                return await FetchCompletedSearchResultsAsync(searchId, result, cancellationToken);
             }
         }
 
+        Console.WriteLine($"[Soulseek][Search] Timeout after {maxWaitSeconds}s. Last state: '{lastResult?.State}' responseCount={lastResult?.ResponseCount}");
+        if (lastResult != null)
+            return await FetchCompletedSearchResultsAsync(searchId, lastResult, cancellationToken);
         return await GetSearchResultsAsync(searchId, cancellationToken);
+    }
+
+    private async Task<SlskdSearchResult?> FetchCompletedSearchResultsAsync(
+        Guid searchId, SlskdSearchResult statusResult, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var respRequest = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}/responses");
+            var respResponse = await SendAuthenticatedAsync(respRequest, cancellationToken);
+            if (respResponse.IsSuccessStatusCode)
+            {
+                var respJson = await respResponse.Content.ReadAsStringAsync(cancellationToken);
+                var responsesList = JsonSerializer.Deserialize<List<SlskdSearchResponse>>(respJson, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                if (responsesList != null && responsesList.Count > 0)
+                {
+                    statusResult.Responses = responsesList;
+                    Console.WriteLine($"[Soulseek][Search] Loaded {responsesList.Count} responses from /responses endpoint.");
+                    return statusResult;
+                }
+            }
+        }
+        catch { }
+
+        return await GetSearchResultsAsync(searchId, cancellationToken);
+    }
+
+    private async Task<SlskdSearchResult?> GetSearchStatusAsync(Guid searchId, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}");
+        var response = await SendAuthenticatedAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode) return null;
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        return JsonSerializer.Deserialize<SlskdSearchResult>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
 

@@ -6,5 +6,6 @@ public class SlskdSearchResult
     public string? State { get; set; }
     public string? SearchText { get; set; }
     public int FileCount { get; set; }
+    public int ResponseCount { get; set; }
     public List<SlskdSearchResponse>? Responses { get; set; }
 }

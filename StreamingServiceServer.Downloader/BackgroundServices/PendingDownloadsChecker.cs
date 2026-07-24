@@ -139,6 +139,10 @@ public class PendingDownloadChecker : BackgroundService
         if (string.IsNullOrWhiteSpace(rawSavePath))
             return string.Empty;
 
+        var normalizedPath = rawSavePath.Replace('\\', '/');
+
+        if (Directory.Exists(normalizedPath))
+            return normalizedPath;
 
         if (Directory.Exists(rawSavePath))
             return rawSavePath;
@@ -146,21 +150,19 @@ public class PendingDownloadChecker : BackgroundService
         var downloadBase = _configuration["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
         const string slskdDefaultDir = "/nas/slskd-data/downloads";
 
+        var cleanRelPath = normalizedPath.TrimStart('/');
 
-        var combinedConfigured = Path.Combine(downloadBase, rawSavePath.TrimStart('/', '\\'));
+        var combinedConfigured = Path.Combine(downloadBase, cleanRelPath);
         if (Directory.Exists(combinedConfigured))
             return combinedConfigured;
 
-
-        var combinedSlskd = Path.Combine(slskdDefaultDir, rawSavePath.TrimStart('/', '\\'));
+        var combinedSlskd = Path.Combine(slskdDefaultDir, cleanRelPath);
         if (Directory.Exists(combinedSlskd))
             return combinedSlskd;
 
-
-        var normalized = rawSavePath.Replace('\\', '/');
-        if (normalized.Contains("/downloads/"))
+        if (normalizedPath.Contains("/downloads/"))
         {
-            var relativePart = normalized.Substring(normalized.IndexOf("/downloads/") + "/downloads/".Length);
+            var relativePart = normalizedPath.Substring(normalizedPath.IndexOf("/downloads/") + "/downloads/".Length);
             var alt1 = Path.Combine(downloadBase, relativePart);
             if (Directory.Exists(alt1)) return alt1;
 
@@ -168,8 +170,7 @@ public class PendingDownloadChecker : BackgroundService
             if (Directory.Exists(alt2)) return alt2;
         }
 
-
-        var folderName = Path.GetFileName(rawSavePath.TrimEnd('/', '\\'));
+        var folderName = Path.GetFileName(normalizedPath.TrimEnd('/'));
         if (!string.IsNullOrWhiteSpace(folderName))
         {
             var alt3 = Path.Combine(downloadBase, folderName);

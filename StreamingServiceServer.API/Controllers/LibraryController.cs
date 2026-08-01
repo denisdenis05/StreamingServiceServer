@@ -142,4 +142,66 @@ public class LibraryController : ControllerBase
         await _libraryService.AddRecordingsToPlaylistFuzzyAsync(userId, playlistId, requests, cancellationToken);
         return Ok();
     }
+
+    /// <summary>
+    /// Import a playlist from a JSON array of track objects (Spotify-like).
+    /// Each item: { "name": "...", "artistName": "...", "releaseName": "..." }
+    /// Returns per-track match results so the client can show matched vs unavailable.
+    /// </summary>
+    [HttpPost("playlists/{playlistId}/import-json")]
+    public async Task<IActionResult> ImportPlaylistFromJson(Guid playlistId, [FromBody] List<AddRecordingToPlaylistFuzzyRequest> tracks, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Invalid or missing user ID in token.");
+
+        if (tracks == null || tracks.Count == 0)
+            return BadRequest("Track list is empty.");
+
+        var results = await _libraryService.ImportPlaylistFromJsonAsync(userId, playlistId, tracks, cancellationToken);
+        return Ok(results);
+    }
+
+    /// <summary>
+    /// Replace a single recording in a playlist (swap an unavailable / wrong match with a correct one).
+    /// Body: { "id": "recording-guid", "title": "...", "artist": "...", "album": "...", "cover": "..." }
+    /// </summary>
+    [HttpPut("playlists/{playlistId}/recordings/{recordingId}/replace")]
+    public async Task<IActionResult> ReplacePlaylistRecording(Guid playlistId, Guid recordingId, [FromBody] AddSongToPlaylistRequest newSong, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Invalid or missing user ID in token.");
+
+        await _libraryService.ReplacePlaylistRecordingAsync(userId, playlistId, recordingId, newSong, cancellationToken);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Create an empty playlist (to receive an import). Returns the playlist ID.
+    /// </summary>
+    [HttpPost("playlists/create-for-import")]
+    public async Task<IActionResult> CreatePlaylistForImport([FromBody] CreatePlaylistRequest request, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Invalid or missing user ID in token.");
+
+        var playlist = await _libraryService.CreatePlaylistAsync(userId, request, cancellationToken);
+        return Ok(new { id = playlist.Id, name = playlist.Name });
+    }
+
+    /// <summary>
+    /// Delete a playlist and all its recordings entries.
+    /// </summary>
+    [HttpDelete("playlists/{playlistId}")]
+    public async Task<IActionResult> DeletePlaylist(Guid playlistId, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Invalid or missing user ID in token.");
+
+        await _libraryService.DeletePlaylistAsync(userId, playlistId, cancellationToken);
+        return Ok();
+    }
 }

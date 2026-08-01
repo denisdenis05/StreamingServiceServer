@@ -34,6 +34,7 @@ public class StreamingDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasPostgresExtension("pg_trgm");
         ApplyConfigurationsFromAssembly(modelBuilder);
         base.OnModelCreating(modelBuilder);
     }

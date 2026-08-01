@@ -16,6 +16,7 @@
       <a href="#queue" class="nav-link">queue</a>
       <a href="#failed" class="nav-link">failed</a>
       <a href="#downloaded" class="nav-link">library</a>
+      <a href="#playlists" class="nav-link">playlists</a>
       <a href="#analysis" class="nav-link">analysis</a>
       <a href="#settings" class="nav-link">settings</a>
       <a href="#how-it-works" class="nav-link">flow</a>
@@ -350,6 +351,50 @@
       </div>
     </section>
 
+    <!-- ==================== PLAYLISTS VIEW ==================== -->
+    <section id="view-playlists" class="page-view">
+      <div style="padding: var(--spacing-md) 0 1rem; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h1>playlist <i>manager</i></h1>
+          <p style="color: var(--text-muted); margin-top: 0.5rem;">import playlists from Spotify or any JSON source, inspect per-track matching, and swap unavailable songs directly from the dashboard.</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <button class="btn-cta" id="btn-open-import-modal" onclick="openImportModal()">+ import playlist</button>
+        </div>
+      </div>
+
+      <!-- Playlist list -->
+      <div id="playlists-list-container" style="margin-top: 1rem;">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Per-playlist track table (shown when a playlist is expanded) -->
+      <div id="playlist-detail-container" style="display:none; margin-top: 2rem;">
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem;">
+          <button onclick="closePLaylistDetail()" class="btn-secondary" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">← back to playlists</button>
+          <h2 id="playlist-detail-title" style="font-size: 1.4rem; margin:0;"></h2>
+        </div>
+        <div id="playlist-track-search-bar" style="margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center;">
+          <input type="text" id="playlist-track-filter" class="form-input" placeholder="filter tracks..." oninput="filterPlaylistTracks()" style="max-width: 320px;" />
+          <span id="playlist-track-count" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+        </div>
+        <table class="table-view" id="playlist-track-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>original (source)</th>
+              <th>matched recording</th>
+              <th>status</th>
+              <th>actions</th>
+            </tr>
+          </thead>
+          <tbody id="playlist-track-body">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ==================== LOGIN VIEW ==================== -->
     <section id="view-login" class="page-view">
       <div style="max-width: 440px; margin: 3rem auto; padding: 2.5rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.03);">
@@ -419,6 +464,103 @@
           <button type="submit" id="btn-modal-auth-submit" class="btn-cta">sign in</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Import Playlist Modal -->
+  <div id="import-playlist-modal" class="modal-backdrop" style="display:none; align-items:flex-start; padding-top: 3rem; overflow-y: auto;">
+    <div class="modal-content" style="max-width: 720px; width: 100%; margin: 0 auto;">
+      <h2 style="margin-bottom: 0.4rem;">import <i>playlist</i></h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+        paste a JSON array of tracks. each item needs <code>name</code>, <code>artistName</code>, and <code>releaseName</code>.
+        spotify exports look like: <code>[{"name":"HUMBLE.","artistName":"Kendrick Lamar","releaseName":"DAMN."}]</code>
+      </p>
+
+      <!-- Step 1: Name + JSON -->
+      <div id="import-step-1">
+        <div class="form-group">
+          <label class="form-label">playlist name</label>
+          <input type="text" id="import-playlist-name" class="form-input" placeholder="e.g. My Spotify Favourites" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">track JSON array</label>
+          <textarea id="import-json-input" class="form-input" rows="10"
+            placeholder='[{"name": "HUMBLE.", "artistName": "Kendrick Lamar", "releaseName": "DAMN."}]'
+            style="font-family: monospace; font-size: 0.82rem; resize: vertical;"></textarea>
+        </div>
+        <div id="import-parse-error" style="color:#c62828; font-size:0.85rem; margin-bottom:0.8rem; display:none;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+          <button type="button" class="btn-secondary" onclick="closeImportModal()">cancel</button>
+          <button type="button" class="btn-cta" onclick="previewImport()">preview matches →</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Preview results -->
+      <div id="import-step-2" style="display:none;">
+        <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+          <div id="import-summary" style="font-size: 0.9rem; color: var(--text-muted);"></div>
+          <div id="import-progress-bar-wrapper" style="flex:1; min-width: 200px; height: 6px; background: var(--border-light); border-radius: 4px; overflow: hidden; display:none;">
+            <div id="import-progress-bar" style="height:100%; width:0%; background: var(--accent-olive); transition: width 0.3s;"></div>
+          </div>
+        </div>
+        <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 8px;">
+          <table class="table-view" style="margin:0;">
+            <thead><tr><th>#</th><th>source track</th><th>matched in library</th><th>status</th></tr></thead>
+            <tbody id="import-preview-body"></tbody>
+          </table>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
+          <button type="button" class="btn-secondary" onclick="showImportStep1()">← back</button>
+          <button type="button" class="btn-cta" id="btn-confirm-import" onclick="confirmImport()">✓ create playlist</button>
+        </div>
+        <div id="import-confirm-status" style="margin-top: 0.8rem; font-size: 0.85rem; text-align: right;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Replace Song Modal -->
+  <div id="replace-song-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-content" style="max-width: 560px;">
+      <h2 style="margin-bottom: 0.4rem;">replace <i>song</i></h2>
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.2rem;">
+        search your local library and select the correct recording to replace this entry.
+      </p>
+      <div id="replace-song-context" style="background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.2rem; font-size: 0.85rem;"></div>
+      <div class="form-group">
+        <input type="text" id="replace-song-search-input" class="form-input" placeholder="search recordings..." oninput="debouncedReplaceSearch()" />
+      </div>
+      <div id="replace-song-results" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 6px;">
+        <!-- Populated by search -->
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.2rem;">
+        <button type="button" class="btn-secondary" onclick="closeReplaceSongModal()">cancel</button>
+        <button type="button" class="btn-cta" id="btn-confirm-replace" onclick="confirmReplaceRecording()" disabled>✓ confirm replacement</button>
+      </div>
+      <div id="replace-song-status" style="margin-top: 0.6rem; font-size: 0.85rem; text-align: right;"></div>
+    </div>
+  </div>
+
+  <!-- Queue Album Modal (from playlist unavailable track) -->
+  <div id="queue-album-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-content" style="max-width: 480px;">
+      <h2 style="margin-bottom: 0.4rem;">queue <i>album</i> for download</h2>
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+        this will add the album to the Soulseek / torrent download queue. once downloaded, you can replace the unavailable track.
+      </p>
+      <div id="queue-album-track-label" style="background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; padding: 0.7rem 1rem; margin-bottom: 1.2rem; font-size: 0.83rem; color: var(--text-muted);"></div>
+      <div class="form-group">
+        <label class="form-label">album title</label>
+        <input type="text" id="queue-album-title-input" class="form-input" placeholder="e.g. Slime Season 3" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">artist name</label>
+        <input type="text" id="queue-album-artist-input" class="form-input" placeholder="e.g. Young Thug" />
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
+        <button type="button" class="btn-secondary" onclick="closeQueueAlbumModal()">cancel</button>
+        <button type="button" class="btn-cta" id="btn-confirm-queue-album" onclick="confirmQueueAlbum()">⬇ queue album</button>
+      </div>
+      <div id="queue-album-status" style="margin-top: 0.6rem; font-size: 0.85rem; text-align: right;"></div>
     </div>
   </div>
 

@@ -213,6 +213,7 @@ function getCurrentView() {
   if (hash.startsWith('#queue')) return 'queue';
   if (hash.startsWith('#failed')) return 'failed';
   if (hash.startsWith('#downloaded')) return 'downloaded';
+  if (hash.startsWith('#playlists')) return 'playlists';
   if (hash.startsWith('#analysis')) return 'analysis';
   if (hash.startsWith('#settings')) return 'settings';
   if (hash.startsWith('#login')) return 'login';
@@ -244,6 +245,10 @@ function handleRoute() {
     document.getElementById('view-failed').classList.add('active');
     document.querySelector('.nav-link[href="#failed"]')?.classList.add('active');
     renderFailedTable();
+  } else if (hash === '#playlists') {
+    document.getElementById('view-playlists').classList.add('active');
+    document.querySelector('.nav-link[href="#playlists"]')?.classList.add('active');
+    renderPlaylistsView();
   } else if (hash === '#analysis') {
     document.getElementById('view-analysis').classList.add('active');
     document.querySelector('.nav-link[href="#analysis"]')?.classList.add('active');
@@ -1533,4 +1538,535 @@ function renderAnalysisUI(updateStats = true) {
 
   html += `</div>`;
   container.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PLAYLIST MANAGER
+// ═══════════════════════════════════════════════════════════════
+
+const LIBRARY_API = '/Library';
+
+// ── State for this section ──
+let pm = {
+  playlists: [],
+  currentPlaylistId: null,
+  currentPlaylistName: '',
+  currentTracks: [],
+  parsedImportTracks: [],
+  importResults: [],
+  replaceTargetPlaylistId: null,
+  replaceTargetOldRecordingId: null,
+  replaceTargetRowIndex: null,
+  replaceSelectedRecording: null,
+  replaceSearchTimer: null,
+};
+
+// ── Routing entry point ──
+async function renderPlaylistsView() {
+  if (!isAuthenticated()) {
+    document.getElementById('playlists-list-container').innerHTML =
+      renderAdminOnlyNotice('sign in to manage your playlists.');
+    return;
+  }
+  closePLaylistDetail();
+  await fetchAndRenderPlaylists();
+}
+
+async function fetchAndRenderPlaylists() {
+  const container = document.getElementById('playlists-list-container');
+  container.innerHTML = '<p style="color:var(--text-muted); padding: 1rem 0;">loading playlists…</p>';
+  try {
+    const res = await authFetch(`${LIBRARY_API}/playlists`);
+    const data = await res.json();
+    pm.playlists = data || [];
+    renderPlaylistCards();
+  } catch (err) {
+    container.innerHTML = `<p style="color:#c62828;">failed to load playlists: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderPlaylistCards() {
+  const container = document.getElementById('playlists-list-container');
+  if (!pm.playlists.length) {
+    container.innerHTML = `
+      <div style="text-align:center; padding: 3rem 1rem; color: var(--text-muted);">
+        <div style="font-size:2.5rem; margin-bottom:0.8rem;">🎵</div>
+        <p>no playlists yet. import one using the button above!</p>
+      </div>`;
+    return;
+  }
+  let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 2rem;">';
+  pm.playlists.forEach(pl => {
+    const id   = escapeHtml(pl.id);
+    const name = escapeHtml(pl.name || 'Untitled');
+    html += `
+      <div style="background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 10px;
+                  padding: 1.2rem; position: relative; transition: box-shadow 0.18s, border-color 0.18s;"
+           onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.09)'; this.style.borderColor='var(--accent-olive)';"
+           onmouseleave="this.style.boxShadow=''; this.style.borderColor='var(--border-light)';">
+        <div style="cursor:pointer;" onclick="openPlaylistDetail('${id}', '${name}')">
+          <div style="font-size:1.05rem; font-weight:600; margin-bottom:0.3rem;">${name}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.9rem;">${pl.count !== undefined ? pl.count + ' tracks' : ''}</div>
+        </div>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.7rem; flex:1;"
+              onclick="openPlaylistDetail('${id}', '${name}')">
+            open
+          </button>
+          <button id="del-btn-${id}" class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.7rem; color:#c62828; border-color:#c62828;"
+              onclick="startDeletePlaylist('${id}', '${name}', this)">
+            delete
+          </button>
+        </div>
+        <div id="del-confirm-${id}" style="display:none; margin-top:0.7rem; padding:0.6rem 0.8rem;
+            background:#fff0f0; border:1px solid #f5c2c2; border-radius:6px; font-size:0.82rem;">
+          <div style="margin-bottom:0.5rem; color:#7f1d1d;">delete <strong>${name}</strong>? this cannot be undone.</div>
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn-secondary" style="font-size:0.75rem; flex:1;"
+                onclick="cancelDeletePlaylist('${id}')">cancel</button>
+            <button class="btn-cta" style="font-size:0.75rem; flex:1; background:#c62828; border-color:#c62828;"
+                onclick="confirmDeletePlaylist('${id}', this)">yes, delete</button>
+          </div>
+        </div>
+      </div>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ── Playlist detail (track list) ──
+async function openPlaylistDetail(playlistId, playlistName) {
+  pm.currentPlaylistId = playlistId;
+  pm.currentPlaylistName = playlistName;
+  document.getElementById('playlists-list-container').style.display = 'none';
+  const importBtn = document.getElementById('btn-open-import-modal');
+  if (importBtn) importBtn.style.display = 'none';
+  const detail = document.getElementById('playlist-detail-container');
+  detail.style.display = 'block';
+  document.getElementById('playlist-detail-title').textContent = playlistName;
+  document.getElementById('playlist-track-body').innerHTML =
+    '<tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-muted);">loading…</td></tr>';
+  document.getElementById('playlist-track-filter').value = '';
+
+  try {
+    let page = 1, pageSize = 50, all = [], hasMore = true;
+    while (hasMore) {
+      const res = await authFetch(`${LIBRARY_API}/playlists/${playlistId}/recordings?page=${page}&pageSize=${pageSize}`);
+      const tracks = await res.json();
+      all = all.concat(tracks);
+      hasMore = tracks.length === pageSize;
+      page++;
+    }
+    pm.currentTracks = all;
+    renderPlaylistTrackTable(all);
+    document.getElementById('playlist-track-count').textContent = `${all.length} tracks`;
+  } catch (err) {
+    document.getElementById('playlist-track-body').innerHTML =
+      `<tr><td colspan="5" style="color:#c62828; padding:1rem;">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderPlaylistTrackTable(tracks) {
+  const tbody = document.getElementById('playlist-track-body');
+  if (!tracks.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-muted);">no tracks</td></tr>';
+    return;
+  }
+  const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
+  tbody.innerHTML = tracks.map((t, i) => {
+    const isUnavailable = !t.id || t.id === EMPTY_GUID;
+    const statusBadge = isUnavailable
+      ? `<span style="background:#c62828; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">unavailable</span>`
+      : `<span style="background:#2e7d32; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">available</span>`;
+
+    const safeTitle  = (t.title  || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const safeArtist = (t.artistName || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const safeAlbum  = (t.releaseTitle || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const safeCover  = (t.cover || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const safeId     = (t.id || EMPTY_GUID).replace(/'/g, "\\'");
+
+    const replaceBtn = `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem;"
+        onclick="openReplaceSongModal('${escapeHtml(pm.currentPlaylistId)}','${safeId}',${i},'${safeTitle}','${safeArtist}','${safeAlbum}','${safeCover}')">
+        ⇄ replace
+      </button>`;
+
+    const queueBtn = isUnavailable
+      ? `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem; margin-left:0.4rem; background:var(--accent-olive); color:#fff; border-color:var(--accent-olive);"
+          onclick="openQueueAlbumModal('${safeTitle}','${safeArtist}','${safeAlbum}')">
+          ⬇ queue album
+        </button>`
+      : '';
+
+    return `<tr data-title="${escapeHtml((t.title||'').toLowerCase())}" data-artist="${escapeHtml((t.artistName||'').toLowerCase())}">
+      <td style="color:var(--text-muted); font-size:0.8rem;">${i + 1}</td>
+      <td>
+        <div style="font-weight:500; font-size:0.88rem;">${escapeHtml(t.title || '(untitled)')}</div>
+        <div style="font-size:0.78rem; color:var(--text-muted);">${escapeHtml(t.artistName || '')} — ${escapeHtml(t.releaseTitle || '')}</div>
+      </td>
+      <td>
+        ${isUnavailable
+          ? '<span style="color:var(--text-muted); font-size:0.82rem;">—</span>'
+          : `<div style="font-size:0.85rem;">${escapeHtml(t.title || '')}</div>`}
+      </td>
+      <td>${statusBadge}</td>
+      <td style="white-space:nowrap;">${replaceBtn}${queueBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterPlaylistTracks() {
+  const q = document.getElementById('playlist-track-filter').value.toLowerCase();
+  const rows = document.querySelectorAll('#playlist-track-body tr[data-title]');
+  let shown = 0;
+  rows.forEach(row => {
+    const match = !q || row.dataset.title.includes(q) || row.dataset.artist.includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  document.getElementById('playlist-track-count').textContent = `${shown} / ${pm.currentTracks.length} tracks`;
+}
+
+function closePLaylistDetail() {
+  document.getElementById('playlist-detail-container').style.display = 'none';
+  document.getElementById('playlists-list-container').style.display = '';
+  const importBtn = document.getElementById('btn-open-import-modal');
+  if (importBtn) importBtn.style.display = '';
+  pm.currentPlaylistId = null;
+  pm.currentTracks = [];
+}
+
+// ── Import Modal ──
+function openImportModal() {
+  if (!isAuthenticated()) { openAuthModal(); return; }
+  showImportStep1();
+  document.getElementById('import-json-input').value = '';
+  document.getElementById('import-playlist-name').value = '';
+  document.getElementById('import-parse-error').style.display = 'none';
+  document.getElementById('import-playlist-modal').style.display = 'flex';
+}
+
+function closeImportModal() {
+  document.getElementById('import-playlist-modal').style.display = 'none';
+}
+
+function showImportStep1() {
+  document.getElementById('import-step-1').style.display = 'block';
+  document.getElementById('import-step-2').style.display = 'none';
+  document.getElementById('import-confirm-status').textContent = '';
+}
+
+async function previewImport() {
+  const errEl = document.getElementById('import-parse-error');
+  errEl.style.display = 'none';
+  const raw = document.getElementById('import-json-input').value.trim();
+  if (!raw) { errEl.textContent = 'Please paste a JSON array of tracks.'; errEl.style.display = 'block'; return; }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Expected a JSON array at the root level.');
+  } catch (e) {
+    errEl.textContent = `JSON parse error: ${e.message}`;
+    errEl.style.display = 'block';
+    return;
+  }
+
+  // Normalise Spotify-like exports → {name, artistName, releaseName}
+  pm.parsedImportTracks = parsed.map(item => ({
+    name:        item.name        ?? item.track   ?? item.title   ?? '',
+    artistName:  item.artistName  ?? (Array.isArray(item.artists) ? item.artists[0]?.name : item.artist) ?? '',
+    releaseName: item.releaseName ?? item.album?.name ?? item.album ?? '',
+  })).filter(t => t.name);
+
+  if (!pm.parsedImportTracks.length) {
+    errEl.textContent = 'No valid tracks found. Each item needs at least a "name" field.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  document.getElementById('import-step-1').style.display = 'none';
+  document.getElementById('import-step-2').style.display = 'block';
+
+  const previewBody = document.getElementById('import-preview-body');
+  previewBody.innerHTML = pm.parsedImportTracks.map((t, i) => `
+    <tr>
+      <td style="color:var(--text-muted); font-size:0.8rem;">${i + 1}</td>
+      <td>
+        <div style="font-weight:500; font-size:0.85rem;">${escapeHtml(t.name)}</div>
+        <div style="font-size:0.78rem; color:var(--text-muted);">${escapeHtml(t.artistName)} — ${escapeHtml(t.releaseName)}</div>
+      </td>
+      <td id="import-match-${i}" style="color:var(--text-muted); font-size:0.82rem;">—</td>
+      <td id="import-status-${i}"><span style="font-size:0.75rem; color:var(--text-muted);">pending…</span></td>
+    </tr>`).join('');
+
+  document.getElementById('import-summary').textContent = `${pm.parsedImportTracks.length} tracks — matching against local library…`;
+  document.getElementById('btn-confirm-import').disabled = true;
+  await runPreviewMatching();
+}
+
+async function runPreviewMatching() {
+  const tracks = pm.parsedImportTracks;
+  pm.importResults = new Array(tracks.length).fill(null);
+  const progressWrapper = document.getElementById('import-progress-bar-wrapper');
+  const progressBar     = document.getElementById('import-progress-bar');
+  progressWrapper.style.display = 'block';
+
+  for (let i = 0; i < tracks.length; i++) {
+    try {
+      const q = encodeURIComponent(tracks[i].name + ' ' + tracks[i].artistName);
+      const res  = await authFetch(`/Metadata/search/db?query=${q}&page=1&pageSize=3`);
+      const data = await res.json();
+      const best = [...(data.tracks || []), ...(data.fuzzyTracks || [])][0] || null;
+      pm.importResults[i] = best;
+
+      const matchCell  = document.getElementById(`import-match-${i}`);
+      const statusCell = document.getElementById(`import-status-${i}`);
+      if (best) {
+        matchCell.innerHTML  = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(best.title||'')}</div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(best.artistName||'')} — ${escapeHtml(best.releaseTitle||'')}</div>`;
+        statusCell.innerHTML = `<span style="background:#2e7d32; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">matched</span>`;
+      } else {
+        matchCell.innerHTML  = `<span style="color:var(--text-muted); font-size:0.8rem;">not found</span>`;
+        statusCell.innerHTML = `<span style="background:#c62828; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">unavailable</span>`;
+      }
+    } catch (_) { pm.importResults[i] = null; }
+    progressBar.style.width = Math.round(((i + 1) / tracks.length) * 100) + '%';
+  }
+
+  const matched = pm.importResults.filter(r => r !== null).length;
+  document.getElementById('import-summary').textContent =
+    `${matched} / ${tracks.length} tracks matched. ${tracks.length - matched} will be marked unavailable.`;
+  document.getElementById('btn-confirm-import').disabled = false;
+  progressWrapper.style.display = 'none';
+}
+
+async function confirmImport() {
+  const name     = (document.getElementById('import-playlist-name').value.trim()) || 'Imported Playlist';
+  const statusEl = document.getElementById('import-confirm-status');
+  const btn      = document.getElementById('btn-confirm-import');
+  btn.disabled   = true;
+  statusEl.style.color = '';
+  statusEl.textContent = 'creating playlist…';
+
+  try {
+    // 1. Create empty playlist
+    const createRes = await authFetch(`${LIBRARY_API}/playlists/create-for-import`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, recordingIds: [] }),
+    });
+    if (!createRes.ok) throw new Error(`create failed: HTTP ${createRes.status}`);
+    const { id: playlistId } = await createRes.json();
+
+    statusEl.textContent = 'matching & importing tracks…';
+
+    // 2. Server-side fuzzy import (DB-only, no MusicBrainz)
+    const importRes = await authFetch(`${LIBRARY_API}/playlists/${playlistId}/import-json`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(pm.parsedImportTracks),
+    });
+    if (!importRes.ok) throw new Error(`import failed: HTTP ${importRes.status}`);
+    const results = await importRes.json();
+
+    const matchedCount = results.filter(r => r.isAvailable).length;
+    statusEl.textContent = `✓ "${name}" created! ${matchedCount} / ${results.length} tracks matched.`;
+    statusEl.style.color = 'var(--accent-olive)';
+
+    setTimeout(async () => {
+      closeImportModal();
+      await fetchAndRenderPlaylists();
+    }, 1800);
+  } catch (err) {
+    statusEl.textContent = `error: ${err.message}`;
+    statusEl.style.color = '#c62828';
+    btn.disabled = false;
+  }
+}
+
+// ── Replace Song Modal ──
+function openReplaceSongModal(playlistId, oldRecordingId, rowIndex, title, artist, album, cover) {
+  pm.replaceTargetPlaylistId    = playlistId;
+  pm.replaceTargetOldRecordingId = oldRecordingId;
+  pm.replaceTargetRowIndex      = rowIndex;
+  pm.replaceSelectedRecording   = null;
+
+  document.getElementById('replace-song-context').innerHTML =
+    `<strong>replacing:</strong> ${escapeHtml(title)} <span style="color:var(--text-muted);">by ${escapeHtml(artist)}</span>`;
+  document.getElementById('replace-song-search-input').value = title;
+  document.getElementById('replace-song-results').innerHTML  = '';
+  document.getElementById('btn-confirm-replace').disabled    = true;
+  document.getElementById('replace-song-status').textContent = '';
+  document.getElementById('replace-song-modal').style.display = 'flex';
+  performReplaceSearch(title);
+}
+
+function closeReplaceSongModal() {
+  document.getElementById('replace-song-modal').style.display = 'none';
+  pm.replaceSelectedRecording = null;
+}
+
+function debouncedReplaceSearch() {
+  clearTimeout(pm.replaceSearchTimer);
+  const q = document.getElementById('replace-song-search-input').value.trim();
+  pm.replaceSearchTimer = setTimeout(() => performReplaceSearch(q), 280);
+}
+
+async function performReplaceSearch(query) {
+  const container = document.getElementById('replace-song-results');
+  if (!query || query.length < 2) { container.innerHTML = ''; return; }
+  container.innerHTML = '<div style="padding:0.8rem; color:var(--text-muted); font-size:0.85rem;">searching…</div>';
+  try {
+    const res  = await authFetch(`/Metadata/search/db?query=${encodeURIComponent(query)}&page=1&pageSize=12`);
+    const data = await res.json();
+    const tracks = [...(data.tracks || []), ...(data.fuzzyTracks || [])];
+    if (!tracks.length) {
+      container.innerHTML = '<div style="padding:0.8rem; color:var(--text-muted); font-size:0.85rem;">no results</div>';
+      return;
+    }
+    container.innerHTML = tracks.map(t => {
+      const id    = escapeHtml(t.id||'');
+      const title = escapeHtml(t.title||'');
+      const art   = escapeHtml(t.artistName||'');
+      const alb   = escapeHtml(t.releaseTitle||'');
+      const cov   = escapeHtml(t.cover||'');
+      return `<div class="replace-result-row"
+           style="padding: 0.7rem 1rem; cursor:pointer; border-bottom: 1px solid var(--border-light); transition: background 0.12s;"
+           onmouseenter="this.style.background='var(--secondaryBackground)'"
+           onmouseleave="this.style.background=''"
+           onclick="selectReplaceRecording(this,'${id}','${title}','${art}','${alb}','${cov}')">
+        <div style="font-weight:500; font-size:0.88rem;">${title}</div>
+        <div style="font-size:0.78rem; color:var(--text-muted);">${art} — ${alb}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = `<div style="padding:0.8rem; color:#c62828; font-size:0.82rem;">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function selectReplaceRecording(el, id, title, artist, album, cover) {
+  document.querySelectorAll('.replace-result-row').forEach(r => r.style.outline = '');
+  el.style.outline = '2px solid var(--accent-olive)';
+  pm.replaceSelectedRecording = { id, title, artist, album, cover };
+  document.getElementById('btn-confirm-replace').disabled = false;
+}
+
+async function confirmReplaceRecording() {
+  if (!pm.replaceSelectedRecording) return;
+  const statusEl = document.getElementById('replace-song-status');
+  const btn      = document.getElementById('btn-confirm-replace');
+  btn.disabled   = true;
+  statusEl.textContent = 'replacing…';
+
+  const { replaceTargetPlaylistId: pid, replaceTargetOldRecordingId: oldId, replaceTargetRowIndex: rowIdx } = pm;
+  const { id, title, artist, album, cover } = pm.replaceSelectedRecording;
+
+  try {
+    const res = await authFetch(`${LIBRARY_API}/playlists/${encodeURIComponent(pid)}/recordings/${encodeURIComponent(oldId)}/replace`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id, title, artist, album, cover }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    statusEl.textContent = '✓ replaced!';
+    statusEl.style.color = 'var(--accent-olive)';
+
+    // Update local state
+    const track = pm.currentTracks[rowIdx];
+    if (track) { track.id = id; track.title = title; track.artistName = artist; track.releaseTitle = album; track.cover = cover; }
+    renderPlaylistTrackTable(pm.currentTracks);
+
+    setTimeout(closeReplaceSongModal, 900);
+  } catch (err) {
+    statusEl.textContent = `error: ${err.message}`;
+    statusEl.style.color = '#c62828';
+    btn.disabled = false;
+  }
+}
+// ── Queue Album from Playlist ──
+function openQueueAlbumModal(trackTitle, artistName, albumName) {
+  if (!isAuthenticated()) { openAuthModal(); return; }
+
+  // Pre-fill: album name + artist from the playlist entry
+  document.getElementById('queue-album-track-label').textContent =
+    `Track: "${trackTitle}" by ${artistName}`;
+  document.getElementById('queue-album-title-input').value  = albumName || '';
+  document.getElementById('queue-album-artist-input').value = artistName || '';
+  document.getElementById('queue-album-status').textContent = '';
+  document.getElementById('btn-confirm-queue-album').disabled = false;
+  document.getElementById('queue-album-modal').style.display = 'flex';
+}
+
+function closeQueueAlbumModal() {
+  document.getElementById('queue-album-modal').style.display = 'none';
+}
+
+async function confirmQueueAlbum() {
+  const title    = document.getElementById('queue-album-title-input').value.trim();
+  const artist   = document.getElementById('queue-album-artist-input').value.trim();
+  const statusEl = document.getElementById('queue-album-status');
+  const btn      = document.getElementById('btn-confirm-queue-album');
+
+  if (!title) { statusEl.textContent = 'Album title is required.'; statusEl.style.color = '#c62828'; return; }
+
+  btn.disabled = true;
+  statusEl.style.color = '';
+  statusEl.textContent = 'queueing…';
+
+  try {
+    const res = await authFetch(`${API_BASE}/album/add`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ title, artist }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    statusEl.textContent = `✓ "${title}" queued for download!`;
+    statusEl.style.color = 'var(--accent-olive)';
+    setTimeout(closeQueueAlbumModal, 1500);
+  } catch (err) {
+    statusEl.textContent = `error: ${err.message}`;
+    statusEl.style.color = '#c62828';
+    btn.disabled = false;
+  }
+}
+
+// ── Delete Playlist ──
+function startDeletePlaylist(playlistId, playlistName, btn) {
+  // Hide confirm panel on all cards first
+  document.querySelectorAll('[id^="del-confirm-"]').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('[id^="del-btn-"]').forEach(el => el.textContent = 'delete');
+  // Show confirm panel for this card
+  const confirmPanel = document.getElementById(`del-confirm-${playlistId}`);
+  if (confirmPanel) confirmPanel.style.display = 'block';
+  btn.textContent = 'deleting…';
+}
+
+function cancelDeletePlaylist(playlistId) {
+  const confirmPanel = document.getElementById(`del-confirm-${playlistId}`);
+  if (confirmPanel) confirmPanel.style.display = 'none';
+  const delBtn = document.getElementById(`del-btn-${playlistId}`);
+  if (delBtn) delBtn.textContent = 'delete';
+}
+
+async function confirmDeletePlaylist(playlistId, btn) {
+  btn.disabled = true;
+  btn.textContent = 'deleting…';
+  try {
+    const res = await authFetch(`${LIBRARY_API}/playlists/${playlistId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Remove from local state and re-render cards
+    pm.playlists = pm.playlists.filter(p => p.id !== playlistId);
+    renderPlaylistCards();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'yes, delete';
+    const panel = document.getElementById(`del-confirm-${playlistId}`);
+    if (panel) {
+      const errEl = document.createElement('div');
+      errEl.style.cssText = 'color:#c62828; font-size:0.78rem; margin-top:0.4rem;';
+      errEl.textContent = `error: ${err.message}`;
+      panel.appendChild(errEl);
+    }
+  }
 }

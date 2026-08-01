@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StreamingServiceServer.Business.Models.MusicSearch;
@@ -20,15 +21,30 @@ public class MetadataController : ControllerBase
     [HttpGet("search")]
     public async Task<IActionResult> GeneralSearch([FromQuery] string query, [FromQuery] int limit = 10)
     {
-        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
-        {
             return Unauthorized("Invalid or missing user ID in token.");
-        }
 
         var response = await _metadataService.GeneralSearch(query, limit, userId);
+        return Ok(response);
+    }
 
+    [HttpGet("search/db")]
+    public async Task<IActionResult> DbSearch(
+        [FromQuery] string query,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Invalid or missing user ID in token.");
+
+        if (string.IsNullOrWhiteSpace(query))
+            return BadRequest("Query is required.");
+
+        var response = await _metadataService.DbSearch(query, page, pageSize, userId);
         return Ok(response);
     }
 

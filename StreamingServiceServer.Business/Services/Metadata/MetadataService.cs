@@ -531,6 +531,117 @@ private void RemoveDuplicatesFromChangeTracker()
         await _dbContext.SaveChangesAsync();
     }
 
+    private const double FuzzySimilarityThreshold = 0.25;
+    private const int FuzzyLimit = 10;
+
+    public async Task<DbSearchResponse> DbSearch(string query, int page, int pageSize, Guid userId)
+    {
+        var lower = query.ToLower();
+        var likedIds = await _libraryService.GetLikedRecordingIdsAsync(userId, CancellationToken.None);
+
+        // ── Tier 1: substring match ─────────────────────────────────────────
+        var rawTier1 = await _dbContext.Recordings
+            .Include(r => r.Release).ThenInclude(r => r.Artist)
+            .Where(r =>
+                r.Title.ToLower().Contains(lower) ||
+                r.Release.Artist.Name.ToLower().Contains(lower))
+            .OrderBy(r => r.Title.ToLower() == lower ? 0 : r.Title.ToLower().StartsWith(lower) ? 1 : 2)
+            .ThenBy(r => r.Title)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize + 1)
+            .ToListAsync();
+
+        var hasMore = rawTier1.Count > pageSize;
+        var tier1Tracks = rawTier1.Take(pageSize).ToList();
+        var tier1TrackIds = tier1Tracks.Select(r => r.Id).ToHashSet();
+
+        var albums = new List<ReleaseResponse>();
+        var artists = new List<ArtistResponse>();
+        var fuzzyTracks = new List<RecordingResponse>();
+        var fuzzyAlbums = new List<ReleaseResponse>();
+        var fuzzyArtists = new List<ArtistResponse>();
+
+        if (page == 1)
+        {
+            var rawAlbums = await _dbContext.Releases
+                .Include(r => r.Artist)
+                .Where(r =>
+                    r.Title != null && (r.Title.ToLower().Contains(lower) ||
+                    r.Artist.Name.ToLower().Contains(lower)))
+                .OrderBy(r => r.Title!.ToLower() == lower ? 0 : r.Title!.ToLower().StartsWith(lower) ? 1 : 2)
+                .ThenBy(r => r.Title)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var rawArtists = await _dbContext.Artists
+                .Where(a => a.Name.ToLower().Contains(lower))
+                .OrderBy(a => a.Name.ToLower() == lower ? 0 : a.Name.ToLower().StartsWith(lower) ? 1 : 2)
+                .ThenBy(a => a.Name)
+                .Take(pageSize)
+                .ToListAsync();
+
+            albums = rawAlbums.Select(r => r.ToResponse(_imageService)).ToList();
+            artists = rawArtists.Select(a => a.ToResponse()).ToList();
+
+            var tier1AlbumIds = rawAlbums.Select(r => r.Id).ToHashSet();
+            var tier1ArtistIds = rawArtists.Select(a => a.Id).ToHashSet();
+
+            // ── Tier 2: trigram similarity for anything not caught by substring ──
+            // Order by similarity of the combined "title artist" string so the
+            // best-matching result sorts first regardless of which field matched.
+
+            var rawFuzzyTracks = await _dbContext.Recordings
+                .Include(r => r.Release).ThenInclude(r => r.Artist)
+                .Where(r => !tier1TrackIds.Contains(r.Id))
+                .Where(r =>
+                    EF.Functions.TrigramsSimilarity(r.Title, query) > FuzzySimilarityThreshold ||
+                    EF.Functions.TrigramsSimilarity(r.Release.Artist.Name, query) > FuzzySimilarityThreshold)
+                .OrderByDescending(r =>
+                    EF.Functions.TrigramsSimilarity(r.Title + " " + r.Release.Artist.Name, query))
+                .Take(FuzzyLimit)
+                .ToListAsync();
+
+            fuzzyTracks = rawFuzzyTracks
+                .Select(r => r.ToResponse(_imageService, likedIds.Contains(r.Id)))
+                .ToList();
+
+            var rawFuzzyAlbums = await _dbContext.Releases
+                .Include(r => r.Artist)
+                .Where(r => !tier1AlbumIds.Contains(r.Id) && r.Title != null)
+                .Where(r =>
+                    EF.Functions.TrigramsSimilarity(r.Title!, query) > FuzzySimilarityThreshold ||
+                    EF.Functions.TrigramsSimilarity(r.Artist.Name, query) > FuzzySimilarityThreshold)
+                .OrderByDescending(r =>
+                    EF.Functions.TrigramsSimilarity(r.Title! + " " + r.Artist.Name, query))
+                .Take(FuzzyLimit)
+                .ToListAsync();
+
+            fuzzyAlbums = rawFuzzyAlbums.Select(r => r.ToResponse(_imageService)).ToList();
+
+            var rawFuzzyArtists = await _dbContext.Artists
+                .Where(a => !tier1ArtistIds.Contains(a.Id))
+                .Where(a => EF.Functions.TrigramsSimilarity(a.Name, query) > FuzzySimilarityThreshold)
+                .OrderByDescending(a => EF.Functions.TrigramsSimilarity(a.Name, query))
+                .Take(FuzzyLimit)
+                .ToListAsync();
+
+            fuzzyArtists = rawFuzzyArtists.Select(a => a.ToResponse()).ToList();
+        }
+
+        return new DbSearchResponse
+        {
+            Page = page,
+            PageSize = pageSize,
+            HasMoreTracks = hasMore,
+            Tracks = tier1Tracks.Select(r => r.ToResponse(_imageService, likedIds.Contains(r.Id))).ToList(),
+            Albums = albums,
+            Artists = artists,
+            FuzzyTracks = fuzzyTracks,
+            FuzzyAlbums = fuzzyAlbums,
+            FuzzyArtists = fuzzyArtists,
+        };
+    }
+
     public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId)
     {
         var response = new UniversalSearchResponse();

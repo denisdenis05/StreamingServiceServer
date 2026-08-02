@@ -500,13 +500,14 @@ public class LibraryService : ILibraryService
         var reqArtist = request.ArtistName?.Trim() ?? string.Empty;
         var reqRelease = request.ReleaseName?.Trim() ?? string.Empty;
 
-        var cleanReqTitle = CleanTitle(reqTitle);
+        var stripped = StripFeatureInfo(reqTitle);
+        var useStripped = !string.Equals(reqTitle, stripped, StringComparison.OrdinalIgnoreCase);
 
         var query = _dbContext.Recordings
             .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
             .Include(r => r.Release).ThenInclude(rel => rel.Artist)
             .Where(r => r.Title.ToLower().Contains(reqTitle.ToLower()) ||
-                        (!string.IsNullOrEmpty(cleanReqTitle) && r.Title.ToLower().Contains(cleanReqTitle.ToLower())) ||
+                        (useStripped && r.Title.ToLower().Contains(stripped.ToLower())) ||
                         (!string.IsNullOrEmpty(reqArtist) && r.ArtistCredit.Any(ac => (ac.Name ?? ac.Artist.Name).ToLower().Contains(reqArtist.ToLower()))) ||
                         (!string.IsNullOrEmpty(reqArtist) && r.Release != null && r.Release.Artist != null && r.Release.Artist.Name.ToLower().Contains(reqArtist.ToLower())));
 
@@ -519,20 +520,16 @@ public class LibraryService : ILibraryService
                 .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
                 .Include(r => r.Release).ThenInclude(rel => rel.Artist)
                 .Where(r => EF.Functions.TrigramsSimilarity(r.Title, reqTitle) > SimilarityThreshold ||
-                            (!string.IsNullOrEmpty(cleanReqTitle) && EF.Functions.TrigramsSimilarity(r.Title, cleanReqTitle) > SimilarityThreshold))
+                            (useStripped && EF.Functions.TrigramsSimilarity(r.Title, stripped) > SimilarityThreshold))
                 .Take(20)
                 .ToListAsync(cancellationToken);
         }
 
         var scored = candidates.Select(r =>
         {
-            var cleanRTitle = CleanTitle(r.Title);
-
             var titleScore = Math.Max(
                 FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), reqTitle.ToLower()),
-                (!string.IsNullOrEmpty(cleanRTitle) && !string.IsNullOrEmpty(cleanReqTitle))
-                    ? FuzzySharp.Fuzz.Ratio(cleanRTitle.ToLower(), cleanReqTitle.ToLower())
-                    : 0
+                useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), stripped.ToLower()) : 0
             );
 
             var artistName = r.ArtistCredit.FirstOrDefault()?.Name
@@ -549,8 +546,8 @@ public class LibraryService : ILibraryService
                 : 100;
 
             bool isTitleExact = string.Equals(r.Title.Trim(), reqTitle, StringComparison.OrdinalIgnoreCase) ||
-                                (!string.IsNullOrEmpty(cleanRTitle) && string.Equals(cleanRTitle, cleanReqTitle, StringComparison.OrdinalIgnoreCase)) ||
-                                titleScore >= 90;
+                                (useStripped && string.Equals(r.Title.Trim(), stripped, StringComparison.OrdinalIgnoreCase)) ||
+                                titleScore >= 95;
 
             bool isArtistExact = string.IsNullOrEmpty(reqArtist) ||
                                  string.Equals(artistName.Trim(), reqArtist, StringComparison.OrdinalIgnoreCase) ||
@@ -622,13 +619,10 @@ public class LibraryService : ILibraryService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static string CleanTitle(string title)
+    private string StripFeatureInfo(string title)
     {
-        if (string.IsNullOrWhiteSpace(title)) return string.Empty;
-        var s = title;
-        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*[\[\(]\s*(feat|ft)\.?\s+.*?[\]\)]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*[-–—]\s*(.*?)(remaster|remastered|version|edit|edition|deluxe|live|mono|stereo).*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*[\[\(]\s*(.*?)(remaster|remastered|version|edit|edition|deluxe|live|mono|stereo).*?[\]\)]", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        return s.Trim();
+        if (string.IsNullOrEmpty(title)) return title;
+        var pattern = @"\s*[\[\(]\s*(feat|ft)\.?\s+.*?[\]\)]";
+        return System.Text.RegularExpressions.Regex.Replace(title, pattern, "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
     }
 }

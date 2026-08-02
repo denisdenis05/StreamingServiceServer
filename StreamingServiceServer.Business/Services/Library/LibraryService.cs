@@ -488,8 +488,6 @@ public class LibraryService : ILibraryService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    // ── Shared DB-only fuzzy-match helper ────────────────────────────────────────
-    // Returns (found, recordingId, title, artist, album, cover, score, isExactMatch).
     private async Task<(bool Found, Guid RecordingId, string Title, string Artist, string Album, string Cover, double Score, bool IsExactMatch)>
         FuzzyMatchInDbAsync(AddRecordingToPlaylistFuzzyRequest request, CancellationToken cancellationToken)
     {
@@ -503,24 +501,46 @@ public class LibraryService : ILibraryService
         var stripped = StripFeatureInfo(reqTitle);
         var useStripped = !string.Equals(reqTitle, stripped, StringComparison.OrdinalIgnoreCase);
 
-        // Filter candidates by title match using AsNoTracking() for speed
-        var candidates = await _dbContext.Recordings.AsNoTracking()
+        IQueryable<Recording> baseQuery = _dbContext.Recordings.AsNoTracking()
             .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
-            .Include(r => r.Release).ThenInclude(rel => rel.Artist)
+            .Include(r => r.Release).ThenInclude(rel => rel.Artist);
+
+        if (!string.IsNullOrEmpty(reqArtist))
+        {
+            var artistLower = reqArtist.ToLower();
+            baseQuery = baseQuery.Where(r =>
+                r.ArtistCredit.Any(ac => (ac.Name ?? ac.Artist.Name).ToLower().Contains(artistLower)) ||
+                (r.Release != null && r.Release.Artist != null &&
+                 r.Release.Artist.Name.ToLower().Contains(artistLower)));
+        }
+
+        var candidates = await baseQuery
             .Where(r => r.Title.ToLower().Contains(reqTitle.ToLower()) ||
-                        (useStripped && r.Title.ToLower().Contains(stripped.ToLower())))
-            .Take(30)
+                        (useStripped && r.Title.ToLower().Contains(stripped.ToLower())) ||
+                        EF.Functions.TrigramsSimilarity(r.Title, reqTitle) > 0.20 ||
+                        (useStripped && EF.Functions.TrigramsSimilarity(r.Title, stripped) > 0.20))
+            .Take(50)
             .ToListAsync(cancellationToken);
 
         if (!candidates.Any())
         {
-            const double SimilarityThreshold = 0.35;
-            candidates = await _dbContext.Recordings.AsNoTracking()
+            IQueryable<Recording> fallbackQuery = _dbContext.Recordings.AsNoTracking()
                 .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
-                .Include(r => r.Release).ThenInclude(rel => rel.Artist)
-                .Where(r => EF.Functions.TrigramsSimilarity(r.Title, reqTitle) > SimilarityThreshold ||
-                            (useStripped && EF.Functions.TrigramsSimilarity(r.Title, stripped) > SimilarityThreshold))
-                .Take(20)
+                .Include(r => r.Release).ThenInclude(rel => rel.Artist);
+
+            if (!string.IsNullOrEmpty(reqArtist))
+            {
+                var artistLower = reqArtist.ToLower();
+                fallbackQuery = fallbackQuery.Where(r =>
+                    r.ArtistCredit.Any(ac => (ac.Name ?? ac.Artist.Name).ToLower().Contains(artistLower)) ||
+                    (r.Release != null && r.Release.Artist != null &&
+                     r.Release.Artist.Name.ToLower().Contains(artistLower)));
+            }
+
+            candidates = await fallbackQuery
+                .Where(r => EF.Functions.TrigramsSimilarity(r.Title, reqTitle) > 0.15 ||
+                            (useStripped && EF.Functions.TrigramsSimilarity(r.Title, stripped) > 0.15))
+                .Take(30)
                 .ToListAsync(cancellationToken);
         }
 
@@ -529,37 +549,49 @@ public class LibraryService : ILibraryService
 
         var scored = candidates.Select(r =>
         {
-            var titleScore = Math.Max(
-                FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), reqTitle.ToLower()),
-                useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), stripped.ToLower()) : 0
-            );
-
             var artistName = r.ArtistCredit.FirstOrDefault()?.Name
                           ?? r.ArtistCredit.FirstOrDefault()?.Artist?.Name
                           ?? r.Release?.Artist?.Name
                           ?? string.Empty;
 
-            var artistScore = r.ArtistCredit.Any()
-                ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? string.Empty).ToLower(), reqArtist.ToLower()))
-                : (!string.IsNullOrEmpty(r.Release?.Artist?.Name) ? FuzzySharp.Fuzz.Ratio(r.Release.Artist.Name.ToLower(), reqArtist.ToLower()) : 0);
-
-            var releaseScore = (!string.IsNullOrEmpty(r.Release?.Title) && !string.IsNullOrEmpty(reqRelease))
-                ? FuzzySharp.Fuzz.Ratio(r.Release.Title.ToLower(), reqRelease.ToLower())
+            int artistScore = !string.IsNullOrEmpty(reqArtist)
+                ? (r.ArtistCredit.Any()
+                    ? r.ArtistCredit.Max(ac =>
+                        FuzzySharp.Fuzz.Ratio(
+                            (ac.Name ?? ac.Artist?.Name ?? string.Empty).ToLower(),
+                            reqArtist.ToLower()))
+                    : (!string.IsNullOrEmpty(r.Release?.Artist?.Name)
+                        ? FuzzySharp.Fuzz.Ratio(r.Release.Artist.Name.ToLower(), reqArtist.ToLower())
+                        : 0))
                 : 100;
+
+            int titleRatio = FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), reqTitle.ToLower());
+            int titleTokenSort = FuzzySharp.Fuzz.TokenSortRatio(r.Title.ToLower(), reqTitle.ToLower());
+            int strippedRatio = useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), stripped.ToLower()) : 0;
+            int strippedToken = useStripped ? FuzzySharp.Fuzz.TokenSortRatio(r.Title.ToLower(), stripped.ToLower()) : 0;
+            double titleScore = Math.Max(Math.Max(titleRatio, titleTokenSort),
+                Math.Max(strippedRatio, strippedToken));
+
+            double releaseScore = (!string.IsNullOrEmpty(r.Release?.Title) && !string.IsNullOrEmpty(reqRelease))
+                ? (double)FuzzySharp.Fuzz.TokenSortRatio(r.Release.Title.ToLower(), reqRelease.ToLower())
+                : 50.0;
+
+            bool passesArtist = string.IsNullOrEmpty(reqArtist) || artistScore >= 65;
+            bool passesTitle = titleScore > 65.0;
+
+            double totalScore = (titleScore * 0.40) + (artistScore * 0.30) + (releaseScore * 0.30);
 
             bool isTitleExact = string.Equals(r.Title.Trim(), reqTitle, StringComparison.OrdinalIgnoreCase) ||
                                 (useStripped && string.Equals(r.Title.Trim(), stripped, StringComparison.OrdinalIgnoreCase)) ||
-                                titleScore >= 95;
+                                titleScore >= 85.0;
 
             bool isArtistExact = string.IsNullOrEmpty(reqArtist) ||
                                  string.Equals(artistName.Trim(), reqArtist, StringComparison.OrdinalIgnoreCase) ||
-                                 artistScore >= 90;
+                                 artistScore >= 85;
 
-            bool isAlbumPartial = string.IsNullOrEmpty(reqRelease) || releaseScore >= 50;
+            bool isAlbumGood = string.IsNullOrEmpty(reqRelease) || releaseScore >= 60.0;
 
-            bool isExactMatch = isTitleExact && isArtistExact && isAlbumPartial;
-
-            double totalScore = (titleScore * 0.5) + (artistScore * 0.35) + (releaseScore * 0.15);
+            bool isExactMatch = isTitleExact && isArtistExact && isAlbumGood;
 
             return new
             {
@@ -567,10 +599,12 @@ public class LibraryService : ILibraryService
                 TitleScore = titleScore,
                 ArtistScore = artistScore,
                 ReleaseScore = releaseScore,
+                PassesArtist = passesArtist,
+                PassesTitle = passesTitle,
                 IsExactMatch = isExactMatch,
                 TotalScore = totalScore
             };
-        }).ToList();
+        }).Where(x => x.PassesArtist && x.PassesTitle).ToList();
 
         var bestExact = scored
             .Where(x => x.IsExactMatch)
@@ -584,7 +618,6 @@ public class LibraryService : ILibraryService
         }
 
         var bestPartial = scored
-            .Where(x => x.TitleScore >= 70 && (string.IsNullOrEmpty(reqArtist) || x.ArtistScore >= 50))
             .OrderByDescending(x => x.TotalScore)
             .FirstOrDefault();
 

@@ -14,4 +14,5 @@ public class PlaylistRecording
     public int Order { get; set; } 
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;
     public Guid AddedById { get; set; }
+    public Guid? SuggestedRecordingId { get; set; }
 }

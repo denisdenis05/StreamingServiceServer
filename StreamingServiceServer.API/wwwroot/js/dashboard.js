@@ -1675,9 +1675,16 @@ function renderPlaylistTrackTable(tracks) {
   const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
   tbody.innerHTML = tracks.map((t, i) => {
     const isUnavailable = !t.releaseId || !t.id || t.id === EMPTY_GUID;
-    const statusBadge = isUnavailable
-      ? `<span style="background:#c62828; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">unavailable</span>`
-      : `<span style="background:#2e7d32; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">available</span>`;
+    const hasSuggestion = isUnavailable && t.suggestedRecordingId;
+    
+    let statusBadge = '';
+    if (hasSuggestion) {
+      statusBadge = `<span style="background:#ed6c02; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">suggestion</span>`;
+    } else if (isUnavailable) {
+      statusBadge = `<span style="background:#c62828; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">unavailable</span>`;
+    } else {
+      statusBadge = `<span style="background:#2e7d32; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">available</span>`;
+    }
 
     const safeTitle  = (t.title  || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const safeArtist = (t.artistName || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
@@ -1685,17 +1692,41 @@ function renderPlaylistTrackTable(tracks) {
     const safeCover  = (t.cover || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const safeId     = (t.id || EMPTY_GUID).replace(/'/g, "\\'");
 
-    const replaceBtn = `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem;"
-        onclick="openReplaceSongModal('${escapeHtml(pm.currentPlaylistId)}','${safeId}',${i},'${safeTitle}','${safeArtist}','${safeAlbum}','${safeCover}')">
-        ⇄ replace
-      </button>`;
+    let matchedColumnHtml = '';
+    let actionsHtml = '';
+    
+    if (hasSuggestion) {
+      const sTitle = (t.suggestedTitle || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      const sArtist = (t.suggestedArtist || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      const sAlbum = (t.suggestedAlbum || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      
+      matchedColumnHtml = `
+        <div style="font-weight:500; font-size:0.85rem;">${escapeHtml(t.suggestedTitle || '')}</div>
+        <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(t.suggestedArtist || '')} — ${escapeHtml(t.suggestedAlbum || '')}</div>
+      `;
+      actionsHtml = `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem; background:var(--accent-olive); color:#fff; border-color:var(--accent-olive);"
+          onclick="acceptSuggestionInline('${escapeHtml(pm.currentPlaylistId)}', '${safeId}', '${t.suggestedRecordingId}', '${sTitle}', '${sArtist}', '${sAlbum}')">
+          ✓ accept
+        </button>`;
+    } else {
+      matchedColumnHtml = isUnavailable
+        ? '<span style="color:var(--text-muted); font-size:0.82rem;">—</span>'
+        : `<div style="font-size:0.85rem;">${escapeHtml(t.title || '')}</div>`;
+        
+      const replaceBtn = `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem;"
+          onclick="openReplaceSongModal('${escapeHtml(pm.currentPlaylistId)}','${safeId}',${i},'${safeTitle}','${safeArtist}','${safeAlbum}','${safeCover}')">
+          ⇄ replace
+        </button>`;
 
-    const queueBtn = isUnavailable
-      ? `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem; margin-left:0.4rem; background:var(--accent-olive); color:#fff; border-color:var(--accent-olive);"
-          onclick="openQueueAlbumModal('${safeTitle}','${safeArtist}','${safeAlbum}')">
-          ⬇ queue album
-        </button>`
-      : '';
+      const queueBtn = isUnavailable
+        ? `<button class="btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.65rem; margin-left:0.4rem; background:var(--accent-olive); color:#fff; border-color:var(--accent-olive);"
+            onclick="openQueueAlbumModal('${safeTitle}','${safeArtist}','${safeAlbum}')">
+            ⬇ queue album
+          </button>`
+        : '';
+        
+      actionsHtml = replaceBtn + queueBtn;
+    }
 
     return `<tr data-title="${escapeHtml((t.title||'').toLowerCase())}" data-artist="${escapeHtml((t.artistName||'').toLowerCase())}">
       <td style="color:var(--text-muted); font-size:0.8rem;">${i + 1}</td>
@@ -1703,13 +1734,9 @@ function renderPlaylistTrackTable(tracks) {
         <div style="font-weight:500; font-size:0.88rem;">${escapeHtml(t.title || '(untitled)')}</div>
         <div style="font-size:0.78rem; color:var(--text-muted);">${escapeHtml(t.artistName || '')} — ${escapeHtml(t.releaseTitle || '')}</div>
       </td>
-      <td>
-        ${isUnavailable
-          ? '<span style="color:var(--text-muted); font-size:0.82rem;">—</span>'
-          : `<div style="font-size:0.85rem;">${escapeHtml(t.title || '')}</div>`}
-      </td>
+      <td>${matchedColumnHtml}</td>
       <td>${statusBadge}</td>
-      <td style="white-space:nowrap;">${replaceBtn}${queueBtn}</td>
+      <td style="white-space:nowrap;">${actionsHtml}</td>
     </tr>`;
   }).join('');
 }
@@ -1757,7 +1784,7 @@ function showImportStep1() {
   document.getElementById('import-confirm-status').textContent = '';
 }
 
-async function previewImport() {
+async function startImport() {
   const errEl = document.getElementById('import-parse-error');
   errEl.style.display = 'none';
   const raw = document.getElementById('import-json-input').value.trim();
@@ -1773,8 +1800,7 @@ async function previewImport() {
     return;
   }
 
-  // Normalise Spotify-like exports → {name, artistName, releaseName}
-  pm.parsedImportTracks = parsed.map(item => ({
+  const tracks = parsed.map(item => ({
     name:        item.name        ?? item.track   ?? item.title   ?? '',
     artistName:  item.artistName  ?? (Array.isArray(item.artists) ? item.artists[0]?.name : item.artist) ?? '',
     releaseName: item.releaseName ?? item.album?.name ?? item.album ?? '',
@@ -1782,157 +1808,110 @@ async function previewImport() {
 
   const shouldReverse = document.getElementById('import-reverse-checkbox')?.checked;
   if (shouldReverse) {
-    pm.parsedImportTracks.reverse();
+    tracks.reverse();
   }
 
-  if (!pm.parsedImportTracks.length) {
+  if (!tracks.length) {
     errEl.textContent = 'No valid tracks found. Each item needs at least a "name" field.';
     errEl.style.display = 'block';
     return;
   }
 
-  document.getElementById('import-step-1').style.display = 'none';
-  document.getElementById('import-step-2').style.display = 'block';
-
-  const previewBody = document.getElementById('import-preview-body');
-  previewBody.innerHTML = pm.parsedImportTracks.map((t, i) => `
-    <tr>
-      <td style="color:var(--text-muted); font-size:0.8rem;">${i + 1}</td>
-      <td>
-        <div style="font-weight:500; font-size:0.85rem;">${escapeHtml(t.name)}</div>
-        <div style="font-size:0.78rem; color:var(--text-muted);">${escapeHtml(t.artistName)} — ${escapeHtml(t.releaseName)}</div>
-      </td>
-      <td id="import-match-${i}" style="color:var(--text-muted); font-size:0.82rem;">—</td>
-      <td id="import-status-${i}"><span style="font-size:0.75rem; color:var(--text-muted);">pending…</span></td>
-    </tr>`).join('');
-
-  document.getElementById('import-summary').textContent = `${pm.parsedImportTracks.length} tracks — matching against local library…`;
-  document.getElementById('btn-confirm-import').disabled = true;
-  await runPreviewMatching();
-}
-
-async function runPreviewMatching() {
-  const tracks = pm.parsedImportTracks;
-  pm.previewResults = new Array(tracks.length).fill(null);
-  const progressWrapper = document.getElementById('import-progress-bar-wrapper');
-  const progressBar     = document.getElementById('import-progress-bar');
-  progressWrapper.style.display = 'block';
-  progressBar.style.width = '5%';
-
-  const BATCH_SIZE = 25;
-  try {
-    for (let offset = 0; offset < tracks.length; offset += BATCH_SIZE) {
-      const chunk = tracks.slice(offset, offset + BATCH_SIZE);
-      const res = await authFetch(`${LIBRARY_API}/playlists/preview-import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(chunk),
-      });
-
-      if (!res.ok) throw new Error(`Preview failed: HTTP ${res.status}`);
-      const chunkResults = await res.json();
-
-      for (let j = 0; j < chunkResults.length; j++) {
-        const i = offset + j;
-        const r = chunkResults[j];
-        pm.previewResults[i] = r;
-
-        const matchCell  = document.getElementById(`import-match-${i}`);
-        const statusCell = document.getElementById(`import-status-${i}`);
-
-        if (r.isExactMatch) {
-          matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')}</div>
-            <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>`;
-          statusCell.innerHTML = `<span style="background:#2e7d32; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">exact match</span>`;
-        } else if (r.isSuggested) {
-          const isChecked = pm.parsedImportTracks[i].acceptSuggestion ?? false;
-          matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')} <span style="font-size:0.72rem; color:#ed6c02;">(suggested)</span></div>
-            <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>
-            <label style="font-size:0.75rem; color:var(--accent-olive); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; margin-top:0.25rem;">
-              <input type="checkbox" id="import-accept-${i}" ${isChecked ? 'checked' : ''} onchange="toggleAcceptSuggestion(${i}, this.checked)" />
-              ✓ accept suggestion
-            </label>`;
-          statusCell.innerHTML = `<span style="background:#ed6c02; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">suggestion</span>`;
-        } else {
-          matchCell.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">not found</span>`;
-          statusCell.innerHTML = `<span style="background:#c62828; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">unavailable</span>`;
-        }
-      }
-
-      const percent = Math.round(Math.min(100, ((offset + chunk.length) / tracks.length) * 100));
-      progressBar.style.width = percent + '%';
-      updateImportSummary();
-    }
-  } catch (err) {
-    console.error('Preview error:', err);
-    document.getElementById('import-summary').textContent = `Preview failed: ${err.message}`;
-  } finally {
-    document.getElementById('btn-confirm-import').disabled = false;
-    progressWrapper.style.display = 'none';
-  }
-}
-
-function toggleAcceptSuggestion(index, isChecked) {
-  if (pm.parsedImportTracks && pm.parsedImportTracks[index]) {
-    pm.parsedImportTracks[index].acceptSuggestion = isChecked;
-    if (pm.previewResults && pm.previewResults[index]) {
-      pm.parsedImportTracks[index].confirmedRecordingId = isChecked ? pm.previewResults[index].matchedRecordingId : null;
-    }
-  }
-  updateImportSummary();
-}
-
-function updateImportSummary() {
-  if (!pm.previewResults) return;
-  const exactCount = pm.previewResults.filter(r => r && r.isExactMatch).length;
-  const acceptedSuggestions = pm.parsedImportTracks.filter((t, i) => pm.previewResults[i]?.isSuggested && t.acceptSuggestion).length;
-  const totalMatched = exactCount + acceptedSuggestions;
-  const totalTracks = pm.parsedImportTracks.length;
-  document.getElementById('import-summary').textContent =
-    `${totalMatched} / ${totalTracks} tracks ready (${exactCount} exact, ${acceptedSuggestions} accepted suggestions). ${totalTracks - totalMatched} will be marked unavailable.`;
-}
-
-async function confirmImport() {
-  const name     = (document.getElementById('import-playlist-name').value.trim()) || 'Imported Playlist';
-  const statusEl = document.getElementById('import-confirm-status');
-  const btn      = document.getElementById('btn-confirm-import');
-  btn.disabled   = true;
-  statusEl.style.color = '';
-  statusEl.textContent = 'creating playlist…';
+  const name = (document.getElementById('import-playlist-name').value.trim()) || 'Imported Playlist';
+  const btn = document.getElementById('btn-start-import');
+  btn.disabled = true;
+  btn.textContent = 'creating...';
 
   try {
-    // 1. Create empty playlist
     const createRes = await authFetch(`${LIBRARY_API}/playlists/create-for-import`, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name, recordingIds: [] }),
+      body: JSON.stringify({ name, recordingIds: [] }),
     });
     if (!createRes.ok) throw new Error(`create failed: HTTP ${createRes.status}`);
     const { id: playlistId } = await createRes.json();
 
-    statusEl.textContent = 'matching & importing tracks…';
-
-    // 2. Server-side fuzzy import (DB-only, no MusicBrainz)
-    const importRes = await authFetch(`${LIBRARY_API}/playlists/${playlistId}/import-json`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(pm.parsedImportTracks),
-    });
-    if (!importRes.ok) throw new Error(`import failed: HTTP ${importRes.status}`);
-    const results = await importRes.json();
-
-    const matchedCount = results.filter(r => r.isAvailable).length;
-    statusEl.textContent = `✓ "${name}" created! ${matchedCount} / ${results.length} tracks matched.`;
-    statusEl.style.color = 'var(--accent-olive)';
-
-    setTimeout(async () => {
-      closeImportModal();
-      await fetchAndRenderPlaylists();
-    }, 1800);
-  } catch (err) {
-    statusEl.textContent = `error: ${err.message}`;
-    statusEl.style.color = '#c62828';
+    closeImportModal();
     btn.disabled = false;
+    btn.textContent = '✓ create & import';
+
+    await openPlaylistDetail(playlistId, name);
+
+    const progressContainer = document.getElementById('inline-import-progress-container');
+    const progressBar = document.getElementById('inline-import-progress-bar');
+    const progressText = document.getElementById('inline-import-progress-text');
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressText.textContent = `0 / ${tracks.length}`;
+
+    const BATCH_SIZE = 25;
+    for (let offset = 0; offset < tracks.length; offset += BATCH_SIZE) {
+      const chunk = tracks.slice(offset, offset + BATCH_SIZE);
+      const importRes = await authFetch(`${LIBRARY_API}/playlists/${playlistId}/import-json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(chunk),
+      });
+      if (!importRes.ok) throw new Error(`import failed: HTTP ${importRes.status}`);
+      
+      const percent = Math.round(Math.min(100, ((offset + chunk.length) / tracks.length) * 100));
+      progressBar.style.width = percent + '%';
+      progressText.textContent = `${Math.min(offset + chunk.length, tracks.length)} / ${tracks.length}`;
+
+      await fetchPlaylistRecordings(playlistId);
+    }
+    
+    setTimeout(() => {
+      progressContainer.style.display = 'none';
+      fetchAndRenderPlaylists(); // update sidebar/main lists
+    }, 1200);
+
+  } catch (err) {
+    errEl.textContent = `Error: ${err.message}`;
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '✓ create & import';
+  }
+}
+
+async function fetchPlaylistRecordings(playlistId) {
+  try {
+    let page = 1, pageSize = 50, all = [], hasMore = true;
+    while (hasMore) {
+      const res = await authFetch(`${LIBRARY_API}/playlists/${playlistId}/recordings?page=${page}&pageSize=${pageSize}`);
+      const tracks = await res.json();
+      all = all.concat(tracks);
+      hasMore = tracks.length === pageSize;
+      page++;
+    }
+    pm.currentTracks = all;
+    renderPlaylistTrackTable(all);
+    document.getElementById('playlist-track-count').textContent = `${all.length} tracks`;
+  } catch (err) {
+    console.error('Failed to fetch playlist tracks', err);
+  }
+}
+
+async function acceptSuggestionInline(playlistId, oldRecordingId, newRecordingId, title, artist, album) {
+  try {
+    const res = await authFetch(`${LIBRARY_API}/playlists/${playlistId}/recordings/${oldRecordingId}/replace`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: newRecordingId,
+        title: title,
+        artistName: artist,
+        releaseTitle: album,
+        cover: ''
+      }),
+    });
+
+    if (!res.ok) throw new Error(`replace failed: HTTP ${res.status}`);
+    
+    // Refresh the table
+    await fetchPlaylistRecordings(playlistId);
+  } catch (err) {
+    alert(`Failed to accept suggestion: ${err.message}`);
   }
 }
 

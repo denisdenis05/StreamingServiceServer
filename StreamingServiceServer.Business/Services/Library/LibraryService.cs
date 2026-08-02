@@ -100,39 +100,38 @@ public class LibraryService : ILibraryService
             .Select(p => p.IsSystem)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var query = _dbContext.PlaylistRecordings
-            .Where(playlistRecording => playlistRecording.PlaylistId == playlistId)
-            .GroupJoin(
-                _dbContext.Recordings,
-                playlistRecording => playlistRecording.RecordingId,
-                recording => recording.Id,
-                (playlistRecording, recordings) => new { playlistRecording, recordings }
-            )
-            .SelectMany(
-                x => x.recordings.DefaultIfEmpty(),
-                (x, recording) => new { x.playlistRecording, recording }
-            );
+        var query = from pr in _dbContext.PlaylistRecordings
+                    where pr.PlaylistId == playlistId
+                    join r in _dbContext.Recordings on pr.RecordingId equals r.Id into rGroup
+                    from r in rGroup.DefaultIfEmpty()
+                    join s in _dbContext.Recordings on pr.SuggestedRecordingId equals s.Id into sGroup
+                    from s in sGroup.DefaultIfEmpty()
+                    select new { pr, r, s };
 
         if (isSystemPlaylist)
         {
-            query = query.OrderByDescending(x => x.playlistRecording.Order);
+            query = query.OrderByDescending(x => x.pr.Order);
         }
         else
         {
-            query = query.OrderBy(x => x.playlistRecording.Order);
+            query = query.OrderBy(x => x.pr.Order);
         }
 
         return await query
             .Select(x => new RecordingResponse
             {
-                Id = x.playlistRecording.RecordingId,
-                ReleaseId = x.recording != null ? x.recording.Release.Id : (Guid?)null,
-                Title = x.playlistRecording.Title,
-                ArtistName = x.playlistRecording.Artist,
-                ReleaseTitle = x.playlistRecording.Album,
-                Cover = x.recording != null && !string.IsNullOrEmpty(x.recording.Cover) ? x.recording.Cover : x.playlistRecording.Cover,
-                PositionInAlbum = x.playlistRecording.Order,
-                IsLiked = likedRecordingIds.Contains(x.playlistRecording.RecordingId)
+                Id = x.pr.RecordingId,
+                ReleaseId = x.r != null ? x.r.Release.Id : (Guid?)null,
+                Title = x.pr.Title,
+                ArtistName = x.pr.Artist,
+                ReleaseTitle = x.pr.Album,
+                Cover = x.r != null && !string.IsNullOrEmpty(x.r.Cover) ? x.r.Cover : x.pr.Cover,
+                PositionInAlbum = x.pr.Order,
+                IsLiked = likedRecordingIds.Contains(x.pr.RecordingId),
+                SuggestedRecordingId = x.pr.SuggestedRecordingId,
+                SuggestedTitle = x.s != null ? x.s.Title : null,
+                SuggestedArtist = x.s != null ? x.s.ArtistCredit.Select(ac => ac.Name ?? ac.Artist.Name).FirstOrDefault() : null,
+                SuggestedAlbum = x.s != null ? x.s.Release.Title : null
             })
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -427,7 +426,8 @@ public class LibraryService : ILibraryService
                 Album = useMatchedRecording ? album : track.ReleaseName,
                 Cover = useMatchedRecording ? cover : string.Empty,
                 Order = ++currentMaxOrder,
-                AddedById = userId
+                AddedById = userId,
+                SuggestedRecordingId = (!useMatchedRecording && found && !isExact) ? recordingId : null
             };
 
             playlist.PlaylistRecordings.Add(recordingEntry);

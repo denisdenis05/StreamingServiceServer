@@ -49,7 +49,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("RefreshTokens", (string)null);
+                    b.ToTable("RefreshTokens");
                 });
 
             modelBuilder.Entity("SocialMedia.Data.Models.User", b =>
@@ -117,7 +117,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Provider", "ProviderId");
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.AlbumAnalysisResult", b =>
@@ -143,7 +143,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasKey("AlbumId");
 
-                    b.ToTable("AlbumAnalysisResults", (string)null);
+                    b.ToTable("AlbumAnalysisResults");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Artist", b =>
@@ -178,7 +178,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Name");
 
-                    b.ToTable("Artists", (string)null);
+                    b.ToTable("Artists");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.ArtistAlias", b =>
@@ -220,7 +220,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Name");
 
-                    b.ToTable("ArtistAliases", (string)null);
+                    b.ToTable("ArtistAliases");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.ArtistTag", b =>
@@ -241,7 +241,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Name");
 
-                    b.ToTable("ArtistTags", (string)null);
+                    b.ToTable("ArtistTags");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.DownloadProviderConfig", b =>
@@ -298,7 +298,7 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasIndex("ProviderName")
                         .IsUnique();
 
-                    b.ToTable("DownloadProviderConfigs", (string)null);
+                    b.ToTable("DownloadProviderConfigs");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.FailedDownload", b =>
@@ -317,7 +317,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("FailedDownloads", (string)null);
+                    b.ToTable("FailedDownloads");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Library.Playlist", b =>
@@ -354,7 +354,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("OwnerId");
 
-                    b.ToTable("Playlists", (string)null);
+                    b.ToTable("Playlists");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Library.PlaylistRecording", b =>
@@ -388,6 +388,9 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<int>("Order")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("SuggestedRecordingId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("text");
@@ -396,7 +399,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Order");
 
-                    b.ToTable("PlaylistRecordings", (string)null);
+                    b.ToTable("PlaylistRecordings");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Listen", b =>
@@ -475,7 +478,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Listens", (string)null);
+                    b.ToTable("Listens");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.PendingDownload", b =>
@@ -497,7 +500,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("PendingDownloads", (string)null);
+                    b.ToTable("PendingDownloads");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>
@@ -562,7 +565,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Title");
 
-                    b.ToTable("Recordings", (string)null);
+                    b.ToTable("Recordings");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.RecordingArtistCredit", b =>
@@ -586,7 +589,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("RecordingId");
 
-                    b.ToTable("RecordingArtistCredits", (string)null);
+                    b.ToTable("RecordingArtistCredits");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Release", b =>
@@ -642,7 +645,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("ArtistId");
 
-                    b.ToTable("Releases", (string)null);
+                    b.ToTable("Releases");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.ReleaseToDownload", b =>
@@ -661,7 +664,7 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ReleasesToDownload", (string)null);
+                    b.ToTable("ReleasesToDownload");
                 });
 
             modelBuilder.Entity("SocialMedia.Data.Models.RefreshToken", b =>

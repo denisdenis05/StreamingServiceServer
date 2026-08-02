@@ -1741,6 +1741,8 @@ function openImportModal() {
   showImportStep1();
   document.getElementById('import-json-input').value = '';
   document.getElementById('import-playlist-name').value = '';
+  const revCheckbox = document.getElementById('import-reverse-checkbox');
+  if (revCheckbox) revCheckbox.checked = false;
   document.getElementById('import-parse-error').style.display = 'none';
   document.getElementById('import-playlist-modal').style.display = 'flex';
 }
@@ -1777,6 +1779,11 @@ async function previewImport() {
     artistName:  item.artistName  ?? (Array.isArray(item.artists) ? item.artists[0]?.name : item.artist) ?? '',
     releaseName: item.releaseName ?? item.album?.name ?? item.album ?? '',
   })).filter(t => t.name);
+
+  const shouldReverse = document.getElementById('import-reverse-checkbox')?.checked;
+  if (shouldReverse) {
+    pm.parsedImportTracks.reverse();
+  }
 
   if (!pm.parsedImportTracks.length) {
     errEl.textContent = 'No valid tracks found. Each item needs at least a "name" field.';

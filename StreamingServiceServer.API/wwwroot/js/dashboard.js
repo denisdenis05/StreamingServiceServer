@@ -1813,49 +1813,56 @@ async function previewImport() {
 
 async function runPreviewMatching() {
   const tracks = pm.parsedImportTracks;
-  pm.previewResults = null;
+  pm.previewResults = new Array(tracks.length).fill(null);
   const progressWrapper = document.getElementById('import-progress-bar-wrapper');
   const progressBar     = document.getElementById('import-progress-bar');
   progressWrapper.style.display = 'block';
-  progressBar.style.width = '30%';
+  progressBar.style.width = '5%';
 
+  const BATCH_SIZE = 25;
   try {
-    const res = await authFetch(`${LIBRARY_API}/playlists/preview-import`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(tracks),
-    });
+    for (let offset = 0; offset < tracks.length; offset += BATCH_SIZE) {
+      const chunk = tracks.slice(offset, offset + BATCH_SIZE);
+      const res = await authFetch(`${LIBRARY_API}/playlists/preview-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(chunk),
+      });
 
-    if (!res.ok) throw new Error(`Preview failed: HTTP ${res.status}`);
-    const results = await res.json();
-    pm.previewResults = results;
-    progressBar.style.width = '100%';
+      if (!res.ok) throw new Error(`Preview failed: HTTP ${res.status}`);
+      const chunkResults = await res.json();
 
-    for (let i = 0; i < results.length; i++) {
-      const r = results[i];
-      const matchCell  = document.getElementById(`import-match-${i}`);
-      const statusCell = document.getElementById(`import-status-${i}`);
+      for (let j = 0; j < chunkResults.length; j++) {
+        const i = offset + j;
+        const r = chunkResults[j];
+        pm.previewResults[i] = r;
 
-      if (r.isExactMatch) {
-        matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>`;
-        statusCell.innerHTML = `<span style="background:#2e7d32; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">exact match</span>`;
-      } else if (r.isSuggested) {
-        const isChecked = pm.parsedImportTracks[i].acceptSuggestion ?? false;
-        matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')} <span style="font-size:0.72rem; color:#ed6c02;">(suggested)</span></div>
-          <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>
-          <label style="font-size:0.75rem; color:var(--accent-olive); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; margin-top:0.25rem;">
-            <input type="checkbox" id="import-accept-${i}" ${isChecked ? 'checked' : ''} onchange="toggleAcceptSuggestion(${i}, this.checked)" />
-            ✓ accept suggestion
-          </label>`;
-        statusCell.innerHTML = `<span style="background:#ed6c02; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">suggestion</span>`;
-      } else {
-        matchCell.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">not found</span>`;
-        statusCell.innerHTML = `<span style="background:#c62828; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">unavailable</span>`;
+        const matchCell  = document.getElementById(`import-match-${i}`);
+        const statusCell = document.getElementById(`import-status-${i}`);
+
+        if (r.isExactMatch) {
+          matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>`;
+          statusCell.innerHTML = `<span style="background:#2e7d32; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">exact match</span>`;
+        } else if (r.isSuggested) {
+          const isChecked = pm.parsedImportTracks[i].acceptSuggestion ?? false;
+          matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')} <span style="font-size:0.72rem; color:#ed6c02;">(suggested)</span></div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>
+            <label style="font-size:0.75rem; color:var(--accent-olive); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; margin-top:0.25rem;">
+              <input type="checkbox" id="import-accept-${i}" ${isChecked ? 'checked' : ''} onchange="toggleAcceptSuggestion(${i}, this.checked)" />
+              ✓ accept suggestion
+            </label>`;
+          statusCell.innerHTML = `<span style="background:#ed6c02; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">suggestion</span>`;
+        } else {
+          matchCell.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">not found</span>`;
+          statusCell.innerHTML = `<span style="background:#c62828; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">unavailable</span>`;
+        }
       }
-    }
 
-    updateImportSummary();
+      const percent = Math.round(Math.min(100, ((offset + chunk.length) / tracks.length) * 100));
+      progressBar.style.width = percent + '%';
+      updateImportSummary();
+    }
   } catch (err) {
     console.error('Preview error:', err);
     document.getElementById('import-summary').textContent = `Preview failed: ${err.message}`;

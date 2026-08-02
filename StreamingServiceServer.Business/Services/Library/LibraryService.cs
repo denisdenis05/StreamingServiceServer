@@ -503,20 +503,19 @@ public class LibraryService : ILibraryService
         var stripped = StripFeatureInfo(reqTitle);
         var useStripped = !string.Equals(reqTitle, stripped, StringComparison.OrdinalIgnoreCase);
 
-        var query = _dbContext.Recordings
+        // Filter candidates by title match using AsNoTracking() for speed
+        var candidates = await _dbContext.Recordings.AsNoTracking()
             .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
             .Include(r => r.Release).ThenInclude(rel => rel.Artist)
             .Where(r => r.Title.ToLower().Contains(reqTitle.ToLower()) ||
-                        (useStripped && r.Title.ToLower().Contains(stripped.ToLower())) ||
-                        (!string.IsNullOrEmpty(reqArtist) && r.ArtistCredit.Any(ac => (ac.Name ?? ac.Artist.Name).ToLower().Contains(reqArtist.ToLower()))) ||
-                        (!string.IsNullOrEmpty(reqArtist) && r.Release != null && r.Release.Artist != null && r.Release.Artist.Name.ToLower().Contains(reqArtist.ToLower())));
-
-        var candidates = await query.ToListAsync(cancellationToken);
+                        (useStripped && r.Title.ToLower().Contains(stripped.ToLower())))
+            .Take(30)
+            .ToListAsync(cancellationToken);
 
         if (!candidates.Any())
         {
             const double SimilarityThreshold = 0.35;
-            candidates = await _dbContext.Recordings
+            candidates = await _dbContext.Recordings.AsNoTracking()
                 .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
                 .Include(r => r.Release).ThenInclude(rel => rel.Artist)
                 .Where(r => EF.Functions.TrigramsSimilarity(r.Title, reqTitle) > SimilarityThreshold ||
@@ -524,6 +523,9 @@ public class LibraryService : ILibraryService
                 .Take(20)
                 .ToListAsync(cancellationToken);
         }
+
+        if (!candidates.Any())
+            return (false, Guid.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, false);
 
         var scored = candidates.Select(r =>
         {

@@ -1884,7 +1884,7 @@ function toggleAcceptSuggestion(index, isChecked) {
 
 function updateImportSummary() {
   if (!pm.previewResults) return;
-  const exactCount = pm.previewResults.filter(r => r.isExactMatch).length;
+  const exactCount = pm.previewResults.filter(r => r && r.isExactMatch).length;
   const acceptedSuggestions = pm.parsedImportTracks.filter((t, i) => pm.previewResults[i]?.isSuggested && t.acceptSuggestion).length;
   const totalMatched = exactCount + acceptedSuggestions;
   const totalTracks = pm.parsedImportTracks.length;

@@ -576,7 +576,7 @@ public class LibraryService : ILibraryService
                 ? (double)FuzzySharp.Fuzz.TokenSortRatio(r.Release.Title.ToLower(), reqRelease.ToLower())
                 : 50.0;
 
-            bool passesArtist = string.IsNullOrEmpty(reqArtist) || artistScore >= 65;
+            bool passesArtist = string.IsNullOrEmpty(reqArtist) || artistScore >= 50;
             bool passesTitle = titleScore > 65.0;
 
             double totalScore = (titleScore * 0.40) + (artistScore * 0.30) + (releaseScore * 0.30);
@@ -587,11 +587,11 @@ public class LibraryService : ILibraryService
 
             bool isArtistExact = string.IsNullOrEmpty(reqArtist) ||
                                  string.Equals(artistName.Trim(), reqArtist, StringComparison.OrdinalIgnoreCase) ||
-                                 artistScore >= 85;
+                                 artistScore >= 70;
 
             bool isAlbumGood = string.IsNullOrEmpty(reqRelease) || releaseScore >= 60.0;
 
-            bool isExactMatch = isTitleExact && isArtistExact && isAlbumGood;
+            bool isExactMatch = isTitleExact && isArtistExact && (isAlbumGood || (titleScore >= 90.0 && artistScore >= 85));
 
             return new
             {

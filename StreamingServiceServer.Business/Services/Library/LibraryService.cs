@@ -328,7 +328,7 @@ public class LibraryService : ILibraryService
 
         foreach (var request in requests)
         {
-            var (found, recordingId, title, artist, album, cover, _) =
+            var (found, recordingId, title, artist, album, cover, _, _) =
                 await FuzzyMatchInDbAsync(request, cancellationToken);
 
             if (found)
@@ -350,6 +350,35 @@ public class LibraryService : ILibraryService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<List<PlaylistImportResult>> PreviewPlaylistImportAsync(
+        List<AddRecordingToPlaylistFuzzyRequest> tracks,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<PlaylistImportResult>();
+        foreach (var track in tracks)
+        {
+            var (found, recordingId, title, artist, album, cover, score, isExact) =
+                await FuzzyMatchInDbAsync(track, cancellationToken);
+
+            results.Add(new PlaylistImportResult
+            {
+                OriginalName = track.Name,
+                OriginalArtist = track.ArtistName,
+                OriginalAlbum = track.ReleaseName,
+                MatchedRecordingId = found ? recordingId : Guid.Empty,
+                MatchedTitle = found ? title : string.Empty,
+                MatchedArtist = found ? artist : string.Empty,
+                MatchedAlbum = found ? album : string.Empty,
+                Cover = found ? cover : string.Empty,
+                MatchScore = score,
+                IsAvailable = found,
+                IsExactMatch = found && isExact,
+                IsSuggested = found && !isExact
+            });
+        }
+        return results;
+    }
+
     public async Task<List<PlaylistImportResult>> ImportPlaylistFromJsonAsync(
         Guid userId,
         Guid playlistId,
@@ -365,28 +394,42 @@ public class LibraryService : ILibraryService
             ? playlist.PlaylistRecordings.Max(pr => pr.Order)
             : -1;
 
+        var existingRecordingIds = playlist.PlaylistRecordings.Select(pr => pr.RecordingId).ToHashSet();
         var results = new List<PlaylistImportResult>();
 
         foreach (var track in tracks)
         {
-            var (found, recordingId, title, artist, album, cover, score) =
+            var (found, recordingId, title, artist, album, cover, score, isExact) =
                 await FuzzyMatchInDbAsync(track, cancellationToken);
 
-            // Always add the entry — unavailable tracks use Guid.Empty so the user can replace them later.
+            bool userAccepted = track.AcceptSuggestion || track.ConfirmedRecordingId.HasValue;
+            Guid targetRecordingId = track.ConfirmedRecordingId ?? recordingId;
+
+            bool useMatchedRecording = found && (isExact || userAccepted);
+
+            Guid dbRecordingId;
+            if (useMatchedRecording && targetRecordingId != Guid.Empty && !existingRecordingIds.Contains(targetRecordingId))
+            {
+                dbRecordingId = targetRecordingId;
+                existingRecordingIds.Add(dbRecordingId);
+            }
+            else
+            {
+                dbRecordingId = Guid.NewGuid();
+            }
+
             var recordingEntry = new PlaylistRecording
             {
                 PlaylistId = playlistId,
-                RecordingId = found ? recordingId : Guid.Empty,
-                Title = found ? title : track.Name,
-                Artist = found ? artist : track.ArtistName,
-                Album = found ? album : track.ReleaseName,
-                Cover = found ? cover : string.Empty,
+                RecordingId = dbRecordingId,
+                Title = useMatchedRecording ? title : track.Name,
+                Artist = useMatchedRecording ? artist : track.ArtistName,
+                Album = useMatchedRecording ? album : track.ReleaseName,
+                Cover = useMatchedRecording ? cover : string.Empty,
                 Order = ++currentMaxOrder,
                 AddedById = userId
             };
 
-            // Skip duplicate RecordingId=Guid.Empty entries would break the composite PK.
-            // Use a unique negative sentinel via Order — Order is unique per playlist row.
             playlist.PlaylistRecordings.Add(recordingEntry);
 
             results.Add(new PlaylistImportResult
@@ -394,13 +437,15 @@ public class LibraryService : ILibraryService
                 OriginalName = track.Name,
                 OriginalArtist = track.ArtistName,
                 OriginalAlbum = track.ReleaseName,
-                MatchedRecordingId = found ? recordingId : Guid.Empty,
-                MatchedTitle = found ? title : string.Empty,
-                MatchedArtist = found ? artist : string.Empty,
-                MatchedAlbum = found ? album : string.Empty,
-                Cover = found ? cover : string.Empty,
+                MatchedRecordingId = useMatchedRecording ? dbRecordingId : Guid.Empty,
+                MatchedTitle = useMatchedRecording ? title : string.Empty,
+                MatchedArtist = useMatchedRecording ? artist : string.Empty,
+                MatchedAlbum = useMatchedRecording ? album : string.Empty,
+                Cover = useMatchedRecording ? cover : string.Empty,
                 MatchScore = score,
-                IsAvailable = found
+                IsAvailable = useMatchedRecording,
+                IsExactMatch = isExact,
+                IsSuggested = found && !isExact
             });
         }
 
@@ -444,84 +489,110 @@ public class LibraryService : ILibraryService
     }
 
     // ── Shared DB-only fuzzy-match helper ────────────────────────────────────────
-    // Returns (found, recordingId, title, artist, album, cover, score).
-    // Tier-1: EF Contains (exact substring). Tier-2: pg_trgm similarity.
-    // MusicBrainz is never called.
-    private async Task<(bool Found, Guid RecordingId, string Title, string Artist, string Album, string Cover, double Score)>
+    // Returns (found, recordingId, title, artist, album, cover, score, isExactMatch).
+    private async Task<(bool Found, Guid RecordingId, string Title, string Artist, string Album, string Cover, double Score, bool IsExactMatch)>
         FuzzyMatchInDbAsync(AddRecordingToPlaylistFuzzyRequest request, CancellationToken cancellationToken)
     {
-        var stripped = StripFeatureInfo(request.Name);
-        var useStripped = !string.Equals(request.Name, stripped, StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return (false, Guid.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, false);
 
-        // Tier-1: substring match
-        var t1Query = _dbContext.Recordings
+        var reqTitle = request.Name.Trim();
+        var reqArtist = request.ArtistName?.Trim() ?? string.Empty;
+        var reqRelease = request.ReleaseName?.Trim() ?? string.Empty;
+
+        var stripped = StripFeatureInfo(reqTitle);
+        var useStripped = !string.Equals(reqTitle, stripped, StringComparison.OrdinalIgnoreCase);
+
+        var query = _dbContext.Recordings
             .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
             .Include(r => r.Release).ThenInclude(rel => rel.Artist)
-            .Where(r => r.Title.ToLower().Contains(request.Name.ToLower())
-                     || (useStripped && r.Title.ToLower().Contains(stripped.ToLower())));
+            .Where(r => r.Title.ToLower().Contains(reqTitle.ToLower()) ||
+                        (useStripped && r.Title.ToLower().Contains(stripped.ToLower())) ||
+                        (!string.IsNullOrEmpty(reqArtist) && r.ArtistCredit.Any(ac => (ac.Name ?? ac.Artist.Name).ToLower().Contains(reqArtist.ToLower()))) ||
+                        (!string.IsNullOrEmpty(reqArtist) && r.Release != null && r.Release.Artist != null && r.Release.Artist.Name.ToLower().Contains(reqArtist.ToLower())));
 
-        var tier1 = await t1Query.ToListAsync(cancellationToken);
+        var candidates = await query.ToListAsync(cancellationToken);
 
-        var bestT1 = tier1
-            .Select(r => new
-            {
-                Recording = r,
-                NameScore = Math.Max(
-                    FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
-                    useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), stripped.ToLower()) : 0),
-                ArtistScore = r.ArtistCredit.Any()
-                    ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? "").ToLower(), request.ArtistName.ToLower()))
-                    : (r.Release?.Artist != null ? FuzzySharp.Fuzz.Ratio(r.Release.Artist.Name.ToLower(), request.ArtistName.ToLower()) : 0),
-                ReleaseScore = r.Release != null
-                    ? FuzzySharp.Fuzz.Ratio((r.Release.Title ?? "").ToLower(), request.ReleaseName.ToLower())
-                    : 0
-            })
-            .Where(x => x.NameScore >= 80 && (x.ArtistScore >= 70 || x.ReleaseScore >= 70))
-            .OrderByDescending(x => x.NameScore + Math.Max(x.ArtistScore, x.ReleaseScore))
-            .FirstOrDefault();
-
-        if (bestT1 != null)
+        if (!candidates.Any())
         {
-            return BuildMatch(bestT1.Recording, bestT1.NameScore + Math.Max(bestT1.ArtistScore, bestT1.ReleaseScore));
+            const double SimilarityThreshold = 0.25;
+            candidates = await _dbContext.Recordings
+                .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
+                .Include(r => r.Release).ThenInclude(rel => rel.Artist)
+                .Where(r => EF.Functions.TrigramsSimilarity(r.Title, reqTitle) > SimilarityThreshold ||
+                            (useStripped && EF.Functions.TrigramsSimilarity(r.Title, stripped) > SimilarityThreshold))
+                .Take(20)
+                .ToListAsync(cancellationToken);
         }
 
-        // Tier-2: pg_trgm similarity
-        const double SimilarityThreshold = 0.25;
-        var tier2 = await _dbContext.Recordings
-            .Include(r => r.ArtistCredit).ThenInclude(ac => ac.Artist)
-            .Include(r => r.Release).ThenInclude(rel => rel.Artist)
-            .Where(r =>
-                EF.Functions.TrigramsSimilarity(r.Title, request.Name) > SimilarityThreshold ||
-                (useStripped && EF.Functions.TrigramsSimilarity(r.Title, stripped) > SimilarityThreshold))
-            .OrderByDescending(r =>
-                EF.Functions.TrigramsSimilarity(r.Title + " " + (r.Release != null ? r.Release.Artist.Name : ""), request.Name + " " + request.ArtistName))
-            .Take(10)
-            .ToListAsync(cancellationToken);
+        var scored = candidates.Select(r =>
+        {
+            var titleScore = Math.Max(
+                FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), reqTitle.ToLower()),
+                useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), stripped.ToLower()) : 0
+            );
 
-        var bestT2 = tier2
-            .Select(r => new
+            var artistName = r.ArtistCredit.FirstOrDefault()?.Name
+                          ?? r.ArtistCredit.FirstOrDefault()?.Artist?.Name
+                          ?? r.Release?.Artist?.Name
+                          ?? string.Empty;
+
+            var artistScore = r.ArtistCredit.Any()
+                ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? string.Empty).ToLower(), reqArtist.ToLower()))
+                : (!string.IsNullOrEmpty(r.Release?.Artist?.Name) ? FuzzySharp.Fuzz.Ratio(r.Release.Artist.Name.ToLower(), reqArtist.ToLower()) : 0);
+
+            var releaseScore = (!string.IsNullOrEmpty(r.Release?.Title) && !string.IsNullOrEmpty(reqRelease))
+                ? FuzzySharp.Fuzz.Ratio(r.Release.Title.ToLower(), reqRelease.ToLower())
+                : 100;
+
+            bool isTitleExact = string.Equals(r.Title.Trim(), reqTitle, StringComparison.OrdinalIgnoreCase) ||
+                                (useStripped && string.Equals(r.Title.Trim(), stripped, StringComparison.OrdinalIgnoreCase)) ||
+                                titleScore >= 95;
+
+            bool isArtistExact = string.IsNullOrEmpty(reqArtist) ||
+                                 string.Equals(artistName.Trim(), reqArtist, StringComparison.OrdinalIgnoreCase) ||
+                                 artistScore >= 90;
+
+            bool isAlbumPartial = string.IsNullOrEmpty(reqRelease) || releaseScore >= 50;
+
+            bool isExactMatch = isTitleExact && isArtistExact && isAlbumPartial;
+
+            double totalScore = (titleScore * 0.5) + (artistScore * 0.35) + (releaseScore * 0.15);
+
+            return new
             {
                 Recording = r,
-                NameScore = Math.Max(
-                    FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), request.Name.ToLower()),
-                    useStripped ? FuzzySharp.Fuzz.Ratio(r.Title.ToLower(), stripped.ToLower()) : 0),
-                ArtistScore = r.ArtistCredit.Any()
-                    ? r.ArtistCredit.Max(ac => FuzzySharp.Fuzz.Ratio((ac.Name ?? ac.Artist?.Name ?? "").ToLower(), request.ArtistName.ToLower()))
-                    : (r.Release?.Artist != null ? FuzzySharp.Fuzz.Ratio(r.Release.Artist.Name.ToLower(), request.ArtistName.ToLower()) : 0),
-                ReleaseScore = r.Release != null
-                    ? FuzzySharp.Fuzz.Ratio((r.Release.Title ?? "").ToLower(), request.ReleaseName.ToLower())
-                    : 0
-            })
-            .Where(x => x.NameScore >= 70 && (x.ArtistScore >= 60 || x.ReleaseScore >= 60))
-            .OrderByDescending(x => x.NameScore + Math.Max(x.ArtistScore, x.ReleaseScore))
+                TitleScore = titleScore,
+                ArtistScore = artistScore,
+                ReleaseScore = releaseScore,
+                IsExactMatch = isExactMatch,
+                TotalScore = totalScore
+            };
+        }).ToList();
+
+        var bestExact = scored
+            .Where(x => x.IsExactMatch)
+            .OrderByDescending(x => x.TotalScore)
             .FirstOrDefault();
 
-        if (bestT2 != null)
+        if (bestExact != null)
         {
-            return BuildMatch(bestT2.Recording, bestT2.NameScore + Math.Max(bestT2.ArtistScore, bestT2.ReleaseScore));
+            var (found, recId, title, artist, album, cover, score) = BuildMatch(bestExact.Recording, bestExact.TotalScore);
+            return (true, recId, title, artist, album, cover, score, true);
         }
 
-        return (false, Guid.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0);
+        var bestPartial = scored
+            .Where(x => x.TitleScore >= 70 && (string.IsNullOrEmpty(reqArtist) || x.ArtistScore >= 50))
+            .OrderByDescending(x => x.TotalScore)
+            .FirstOrDefault();
+
+        if (bestPartial != null)
+        {
+            var (found, recId, title, artist, album, cover, score) = BuildMatch(bestPartial.Recording, bestPartial.TotalScore);
+            return (true, recId, title, artist, album, cover, score, false);
+        }
+
+        return (false, Guid.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0, false);
     }
 
     private static (bool, Guid, string, string, string, string, double) BuildMatch(Recording r, double score)

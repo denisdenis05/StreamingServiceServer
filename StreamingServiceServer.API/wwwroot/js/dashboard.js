@@ -1674,7 +1674,7 @@ function renderPlaylistTrackTable(tracks) {
   }
   const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
   tbody.innerHTML = tracks.map((t, i) => {
-    const isUnavailable = !t.id || t.id === EMPTY_GUID;
+    const isUnavailable = !t.releaseId || !t.id || t.id === EMPTY_GUID;
     const statusBadge = isUnavailable
       ? `<span style="background:#c62828; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">unavailable</span>`
       : `<span style="background:#2e7d32; color:#fff; font-size:0.71rem; padding:0.14rem 0.48rem; border-radius:999px; font-weight:600;">available</span>`;
@@ -1813,38 +1813,76 @@ async function previewImport() {
 
 async function runPreviewMatching() {
   const tracks = pm.parsedImportTracks;
-  pm.importResults = new Array(tracks.length).fill(null);
+  pm.previewResults = null;
   const progressWrapper = document.getElementById('import-progress-bar-wrapper');
   const progressBar     = document.getElementById('import-progress-bar');
   progressWrapper.style.display = 'block';
+  progressBar.style.width = '30%';
 
-  for (let i = 0; i < tracks.length; i++) {
-    try {
-      const q = encodeURIComponent(tracks[i].name + ' ' + tracks[i].artistName);
-      const res  = await authFetch(`/Metadata/search/db?query=${q}&page=1&pageSize=3`);
-      const data = await res.json();
-      const best = [...(data.tracks || []), ...(data.fuzzyTracks || [])][0] || null;
-      pm.importResults[i] = best;
+  try {
+    const res = await authFetch(`${LIBRARY_API}/playlists/preview-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(tracks),
+    });
 
+    if (!res.ok) throw new Error(`Preview failed: HTTP ${res.status}`);
+    const results = await res.json();
+    pm.previewResults = results;
+    progressBar.style.width = '100%';
+
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
       const matchCell  = document.getElementById(`import-match-${i}`);
       const statusCell = document.getElementById(`import-status-${i}`);
-      if (best) {
-        matchCell.innerHTML  = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(best.title||'')}</div>
-          <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(best.artistName||'')} — ${escapeHtml(best.releaseTitle||'')}</div>`;
-        statusCell.innerHTML = `<span style="background:#2e7d32; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">matched</span>`;
+
+      if (r.isExactMatch) {
+        matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')}</div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>`;
+        statusCell.innerHTML = `<span style="background:#2e7d32; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">exact match</span>`;
+      } else if (r.isSuggested) {
+        const isChecked = pm.parsedImportTracks[i].acceptSuggestion ?? false;
+        matchCell.innerHTML = `<div style="font-size:0.83rem; font-weight:500;">${escapeHtml(r.matchedTitle || '')} <span style="font-size:0.72rem; color:#ed6c02;">(suggested)</span></div>
+          <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.matchedArtist || '')} — ${escapeHtml(r.matchedAlbum || '')}</div>
+          <label style="font-size:0.75rem; color:var(--accent-olive); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; margin-top:0.25rem;">
+            <input type="checkbox" id="import-accept-${i}" ${isChecked ? 'checked' : ''} onchange="toggleAcceptSuggestion(${i}, this.checked)" />
+            ✓ accept suggestion
+          </label>`;
+        statusCell.innerHTML = `<span style="background:#ed6c02; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">suggestion</span>`;
       } else {
-        matchCell.innerHTML  = `<span style="color:var(--text-muted); font-size:0.8rem;">not found</span>`;
+        matchCell.innerHTML = `<span style="color:var(--text-muted); font-size:0.8rem;">not found</span>`;
         statusCell.innerHTML = `<span style="background:#c62828; color:#fff; font-size:0.7rem; padding:0.12rem 0.45rem; border-radius:999px; font-weight:600;">unavailable</span>`;
       }
-    } catch (_) { pm.importResults[i] = null; }
-    progressBar.style.width = Math.round(((i + 1) / tracks.length) * 100) + '%';
-  }
+    }
 
-  const matched = pm.importResults.filter(r => r !== null).length;
+    updateImportSummary();
+  } catch (err) {
+    console.error('Preview error:', err);
+    document.getElementById('import-summary').textContent = `Preview failed: ${err.message}`;
+  } finally {
+    document.getElementById('btn-confirm-import').disabled = false;
+    progressWrapper.style.display = 'none';
+  }
+}
+
+function toggleAcceptSuggestion(index, isChecked) {
+  if (pm.parsedImportTracks && pm.parsedImportTracks[index]) {
+    pm.parsedImportTracks[index].acceptSuggestion = isChecked;
+    if (pm.previewResults && pm.previewResults[index]) {
+      pm.parsedImportTracks[index].confirmedRecordingId = isChecked ? pm.previewResults[index].matchedRecordingId : null;
+    }
+  }
+  updateImportSummary();
+}
+
+function updateImportSummary() {
+  if (!pm.previewResults) return;
+  const exactCount = pm.previewResults.filter(r => r.isExactMatch).length;
+  const acceptedSuggestions = pm.parsedImportTracks.filter((t, i) => pm.previewResults[i]?.isSuggested && t.acceptSuggestion).length;
+  const totalMatched = exactCount + acceptedSuggestions;
+  const totalTracks = pm.parsedImportTracks.length;
   document.getElementById('import-summary').textContent =
-    `${matched} / ${tracks.length} tracks matched. ${tracks.length - matched} will be marked unavailable.`;
-  document.getElementById('btn-confirm-import').disabled = false;
-  progressWrapper.style.display = 'none';
+    `${totalMatched} / ${totalTracks} tracks ready (${exactCount} exact, ${acceptedSuggestions} accepted suggestions). ${totalTracks - totalMatched} will be marked unavailable.`;
 }
 
 async function confirmImport() {

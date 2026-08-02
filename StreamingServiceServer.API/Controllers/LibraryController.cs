@@ -144,6 +144,23 @@ public class LibraryController : ControllerBase
     }
 
     /// <summary>
+    /// Preview playlist import matching results without creating a playlist.
+    /// </summary>
+    [HttpPost("playlists/preview-import")]
+    public async Task<IActionResult> PreviewPlaylistImport([FromBody] List<AddRecordingToPlaylistFuzzyRequest> tracks, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out _))
+            return Unauthorized("Invalid or missing user ID in token.");
+
+        if (tracks == null || tracks.Count == 0)
+            return BadRequest("Track list is empty.");
+
+        var results = await _libraryService.PreviewPlaylistImportAsync(tracks, cancellationToken);
+        return Ok(results);
+    }
+
+    /// <summary>
     /// Import a playlist from a JSON array of track objects (Spotify-like).
     /// Each item: { "name": "...", "artistName": "...", "releaseName": "..." }
     /// Returns per-track match results so the client can show matched vs unavailable.

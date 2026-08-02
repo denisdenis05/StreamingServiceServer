@@ -15,4 +15,10 @@ public class PlaylistImportResult
 
     /// <summary>True when a match was found in the local DB.</summary>
     public bool IsAvailable { get; set; }
+
+    /// <summary>True when song+artist matched exactly, with partial match on album allowed.</summary>
+    public bool IsExactMatch { get; set; }
+
+    /// <summary>True when no exact match was found, but a partial match is suggested for user approval.</summary>
+    public bool IsSuggested { get; set; }
 }

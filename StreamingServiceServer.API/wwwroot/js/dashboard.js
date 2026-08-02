@@ -1779,9 +1779,8 @@ function closeImportModal() {
 }
 
 function showImportStep1() {
-  document.getElementById('import-step-1').style.display = 'block';
-  document.getElementById('import-step-2').style.display = 'none';
-  document.getElementById('import-confirm-status').textContent = '';
+  const step1 = document.getElementById('import-step-1');
+  if (step1) step1.style.display = 'block';
 }
 
 async function startImport() {
@@ -1873,6 +1872,10 @@ async function startImport() {
     btn.textContent = '✓ create & import';
   }
 }
+
+// Fallbacks for cached HTML
+window.previewImport = startImport;
+window.confirmImport = startImport;
 
 async function fetchPlaylistRecordings(playlistId) {
   try {

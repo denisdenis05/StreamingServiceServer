@@ -26,9 +26,10 @@ public class PreviewDownloaderService : IPreviewDownloaderService
 
         var outputPath = Path.Combine(tempPath, $"{recording.Id}");
 
-        if (File.Exists(outputPath))
+        var existingFile = Directory.GetFiles(tempPath, $"{recording.Id}.*").FirstOrDefault();
+        if (existingFile != null)
         {
-            return outputPath;
+            return existingFile;
         }
 
         var query = $"{recording.Title} {recording.ArtistName} audio";
@@ -61,6 +62,8 @@ public class PreviewDownloaderService : IPreviewDownloaderService
              throw new Exception($"Preview downloader tool failed: {error}");
         }
 
-        return outputPath;
+        var downloadedFile = Directory.GetFiles(tempPath, $"{recording.Id}.*").FirstOrDefault()
+            ?? throw new Exception("Preview downloader succeeded but output file not found");
+        return downloadedFile;
     }
 }

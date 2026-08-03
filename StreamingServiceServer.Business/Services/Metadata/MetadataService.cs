@@ -43,6 +43,22 @@ public class MetadataService : IMetadataService
             .Select(recording => recording.ToResponse(_imageService))
             .ToList();
     }
+
+    public async Task<List<RecordingResponse>> GetSuggestedRecordings(int count)
+    {
+        var recordings = await _dbContext.Recordings
+            .Include(r => r.ArtistCredit)
+            .Include(r => r.Release)
+            .ThenInclude(rel => rel.Artist)
+            .Where(r => r.Release != null)
+            .OrderBy(_ => Guid.NewGuid())
+            .Take(count)
+            .ToListAsync();
+
+        return recordings
+            .Select(r => r.ToResponse(_imageService))
+            .ToList();
+    }
     public async Task<List<ReleaseResponse>> GetAllAlbums()
     {
         var releases = await _dbContext.Releases

@@ -21,4 +21,5 @@ public interface ILibraryService
     Task<List<PlaylistImportResult>> ImportPlaylistFromJsonAsync(Guid userId, Guid playlistId, List<AddRecordingToPlaylistFuzzyRequest> tracks, CancellationToken cancellationToken);
     Task ReplacePlaylistRecordingAsync(Guid userId, Guid playlistId, Guid oldRecordingId, AddSongToPlaylistRequest newSong, CancellationToken cancellationToken);
     Task DeletePlaylistAsync(Guid userId, Guid playlistId, CancellationToken cancellationToken);
+    Task<bool> ToggleSavedAlbumAsync(Guid userId, Guid albumId, CancellationToken cancellationToken);
 }

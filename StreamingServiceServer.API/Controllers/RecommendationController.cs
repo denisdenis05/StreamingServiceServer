@@ -31,6 +31,20 @@ public class RecommendationController : ControllerBase
         return Ok(sections);
     }
 
+    [HttpGet("recent-quick")]
+    public async Task<IActionResult> GetRecentQuick([FromQuery] int count = 6)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var items = await _recommendationService.GetRecentQuick(userId, Math.Clamp(count, 1, 12));
+        return Ok(items);
+    }
+
     [HttpGet("section/{id}")]
     public async Task<IActionResult> GetSection(string id)
     {

@@ -145,10 +145,10 @@ public class LibraryService : ILibraryService
             .Where(p => p.OwnerId == userId)
             .ToListAsync(cancellationToken);
 
-        var likedAlbums = await _dbContext.Releases
-            .Include(r => r.Artist)
-            .OrderBy(r => Guid.NewGuid())
-            .Take(10)
+        var savedAlbums = await _dbContext.UserSavedAlbums
+            .Include(x => x.Release).ThenInclude(r => r.Artist)
+            .Where(x => x.UserId == userId)
+            .OrderByDescending(x => x.SavedAt)
             .ToListAsync(cancellationToken);
 
         var response = new List<ReleaseResponse>();
@@ -162,18 +162,39 @@ public class LibraryService : ILibraryService
             Type = "Playlist"
         }));
 
-        response.AddRange(likedAlbums.Select(r => new ReleaseResponse
+        response.AddRange(savedAlbums.Select(x => new ReleaseResponse
         {
-            Id = r.Id,
-            Title = r.Title,
-            ArtistName = r.Artist.Name,
-            Cover = !string.IsNullOrEmpty(r.OptimizedCover) ? r.OptimizedCover : r.Cover,
-            SmallCover = !string.IsNullOrEmpty(r.OptimizedSmallCover) ? r.OptimizedSmallCover : r.SmallCover,
-            VerySmallCover = !string.IsNullOrEmpty(r.OptimizedVerySmallCover) ? r.OptimizedVerySmallCover : r.VerySmallCover,
+            Id = x.Release.Id,
+            Title = x.Release.Title,
+            ArtistName = x.Release.Artist.Name,
+            Cover = !string.IsNullOrEmpty(x.Release.OptimizedCover) ? x.Release.OptimizedCover : x.Release.Cover,
+            SmallCover = !string.IsNullOrEmpty(x.Release.OptimizedSmallCover) ? x.Release.OptimizedSmallCover : x.Release.SmallCover,
+            VerySmallCover = !string.IsNullOrEmpty(x.Release.OptimizedVerySmallCover) ? x.Release.OptimizedVerySmallCover : x.Release.VerySmallCover,
             Type = "Album"
         }));
 
         return response.OrderBy(x => x.Title).ToList();
+    }
+
+    public async Task<bool> ToggleSavedAlbumAsync(Guid userId, Guid albumId, CancellationToken cancellationToken)
+    {
+        var existing = await _dbContext.UserSavedAlbums
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.ReleaseId == albumId, cancellationToken);
+
+        if (existing != null)
+        {
+            _dbContext.UserSavedAlbums.Remove(existing);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+
+        var releaseExists = await _dbContext.Releases.AnyAsync(r => r.Id == albumId, cancellationToken);
+        if (!releaseExists)
+            throw new InvalidOperationException($"Release {albumId} not found.");
+
+        _dbContext.UserSavedAlbums.Add(new UserSavedAlbum { UserId = userId, ReleaseId = albumId });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task RemoveRecordingFromPlaylistAsync(Guid userId, Guid playlistId, Guid recordingId, CancellationToken cancellationToken)

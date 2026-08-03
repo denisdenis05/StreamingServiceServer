@@ -8,5 +8,6 @@ public interface IRecommendationService
 {
     Task<List<RecommendationSection>> GetSections(Guid userId);
     Task<List<ReleaseResponse>> GetSection(string sectionId, Guid userId);
+    Task<List<ReleaseResponse>> GetRecentQuick(Guid userId, int count);
 }
 

@@ -31,6 +31,7 @@ public class StreamingDbContext : DbContext
 
     public virtual DbSet<Listen> Listens { get; set; }
     public DbSet<AlbumAnalysisResult> AlbumAnalysisResults { get; set; }
+    public DbSet<UserSavedAlbum> UserSavedAlbums { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -100,6 +100,14 @@ public class MetadataController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("get-suggested-recordings")]
+    public async Task<IActionResult> GetSuggestedRecordings([FromQuery] int count = 20)
+    {
+        var response = await _metadataService.GetSuggestedRecordings(Math.Clamp(count, 1, 50));
+
+        return Ok(response);
+    }
+
     [HttpGet("get-recordings")]
     public async Task<IActionResult> GetAllRecordings([FromQuery] Guid albumId)
     {

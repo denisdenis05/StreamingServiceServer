@@ -402,6 +402,26 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("PlaylistRecordings");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.Library.UserSavedAlbum", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ReleaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("SavedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("UserId", "ReleaseId");
+
+                    b.HasIndex("ReleaseId");
+
+                    b.ToTable("UserSavedAlbums");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Listen", b =>
                 {
                     b.Property<Guid>("ListenId")
@@ -731,6 +751,25 @@ namespace StreamingServiceServer.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Playlist");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.Library.UserSavedAlbum", b =>
+                {
+                    b.HasOne("StreamingServiceServer.Data.Models.Release", "Release")
+                        .WithMany()
+                        .HasForeignKey("ReleaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SocialMedia.Data.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Release");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Listen", b =>

@@ -208,6 +208,20 @@ public class LibraryController : ControllerBase
         return Ok(new { id = playlist.Id, name = playlist.Name });
     }
 
+    [HttpGet("albums/{albumId}/saved")]
+    public async Task<IActionResult> IsAlbumSaved(Guid albumId, CancellationToken cancellationToken)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized("Invalid or missing user ID in token.");
+        }
+
+        var isSaved = await _libraryService.IsAlbumSavedAsync(userId, albumId, cancellationToken);
+        return Ok(new { isSaved });
+    }
+
     [HttpPost("albums/{albumId}")]
     public async Task<IActionResult> ToggleSavedAlbum(Guid albumId, CancellationToken cancellationToken)
     {

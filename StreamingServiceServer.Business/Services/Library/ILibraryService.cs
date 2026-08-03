@@ -22,4 +22,5 @@ public interface ILibraryService
     Task ReplacePlaylistRecordingAsync(Guid userId, Guid playlistId, Guid oldRecordingId, AddSongToPlaylistRequest newSong, CancellationToken cancellationToken);
     Task DeletePlaylistAsync(Guid userId, Guid playlistId, CancellationToken cancellationToken);
     Task<bool> ToggleSavedAlbumAsync(Guid userId, Guid albumId, CancellationToken cancellationToken);
+    Task<bool> IsAlbumSavedAsync(Guid userId, Guid albumId, CancellationToken cancellationToken);
 }

@@ -176,6 +176,12 @@ public class LibraryService : ILibraryService
         return response.OrderBy(x => x.Title).ToList();
     }
 
+    public async Task<bool> IsAlbumSavedAsync(Guid userId, Guid albumId, CancellationToken cancellationToken)
+    {
+        return await _dbContext.UserSavedAlbums
+            .AnyAsync(x => x.UserId == userId && x.ReleaseId == albumId, cancellationToken);
+    }
+
     public async Task<bool> ToggleSavedAlbumAsync(Guid userId, Guid albumId, CancellationToken cancellationToken)
     {
         var existing = await _dbContext.UserSavedAlbums

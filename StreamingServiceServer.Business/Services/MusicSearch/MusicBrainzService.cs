@@ -18,6 +18,9 @@ public class MusicBrainzService : IExternalMusicSearchService
     private static DateTime _lastRequestTime = DateTime.MinValue;
     private static readonly TimeSpan MinRequestDelay = TimeSpan.FromMilliseconds(1100);
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (List<ReleaseDto> Results, DateTime CachedAt)> _albumSearchCache = new();
+    private static readonly TimeSpan _albumCacheTtl = TimeSpan.FromMinutes(5);
+
     public MusicBrainzService(HttpClient httpClient, IConfiguration configuration)
     {
         _httpClient = httpClient;
@@ -202,21 +205,21 @@ public class MusicBrainzService : IExternalMusicSearchService
 
     private async Task<ICollection<ReleaseDto>> SearchForAlbumByQuery(string query, string? artistQuery = null)
     {
-        var searchQuery = string.Empty;
-        if (artistQuery != null)
-            searchQuery = $"release:\"{query}\" AND artist:\"{artistQuery}\"";
-        else
-            searchQuery = query;
+        var cacheKey = $"{query?.ToLowerInvariant()}|{artistQuery?.ToLowerInvariant()}";
+        if (_albumSearchCache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow - cached.CachedAt < _albumCacheTtl)
+            return cached.Results;
+
+        var searchQuery = artistQuery != null
+            ? $"release:\"{query}\" AND artist:\"{artistQuery}\""
+            : query ?? string.Empty;
 
         var releaseGroupUrl = $"{_baseUrl}release-group?query={Uri.EscapeDataString(searchQuery)}&fmt=json";
         var searchResponse = await GetJsonAsync<MusicBrainzSearchResponse>(releaseGroupUrl);
         if (searchResponse?.ReleaseGroups == null)
             return new List<ReleaseDto>();
 
-        var releaseGroup = searchResponse.ReleaseGroups.Take(5).ToList();
-
         var releases = new List<ReleaseDto>();
-        foreach (var releaseToCheck in releaseGroup)
+        foreach (var releaseToCheck in searchResponse.ReleaseGroups.Take(8))
         {
             var releaseToAdd = releaseToCheck.Releases?.FirstOrDefault();
             if (releaseToAdd == null) continue;
@@ -228,7 +231,8 @@ public class MusicBrainzService : IExternalMusicSearchService
             releases.Add(releaseToAdd);
         }
 
-        return releases.ToList();
+        _albumSearchCache[cacheKey] = (releases, DateTime.UtcNow);
+        return releases;
     }
 
     public async Task<ReleaseResponse> GetAlbumDetails(Guid albumId)

@@ -59,6 +59,7 @@ public class SoulseekProvider : IDownloadProvider
             var searchId = await _slskdHelper.SearchAsync(queryOption.Query, cancellationToken);
             if (searchId == null) continue;
 
+            bool downloadEnqueued = false;
             try
             {
 
@@ -87,6 +88,7 @@ public class SoulseekProvider : IDownloadProvider
 
                         if (enqueued > 0)
                         {
+                            downloadEnqueued = true;
                             return new DownloadSearchResult
                             {
                                 Success = true,
@@ -101,7 +103,8 @@ public class SoulseekProvider : IDownloadProvider
             }
             finally
             {
-                await _slskdHelper.DeleteSearchAsync(searchId.Value, cancellationToken);
+                if (!downloadEnqueued)
+                    await _slskdHelper.DeleteSearchAsync(searchId.Value, cancellationToken);
             }
         }
 

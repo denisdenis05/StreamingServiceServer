@@ -108,12 +108,13 @@ public class DashboardController : ControllerBase
             var pendingList = await _dbContext.PendingDownloads.ToListAsync(cancellationToken);
             var failedIds = (await _dbContext.FailedDownloads.Select(f => f.Id).ToListAsync(cancellationToken)).ToHashSet();
 
-            var pendingMap = pendingList.ToDictionary(p => p.Id, p => p.SourceName);
+            var pendingMap = pendingList.ToDictionary(p => p.Id, p => p);
 
             foreach (var rel in releasesToDownload)
             {
                 string status = "queued";
                 string? sourceName = null;
+                string? providerName = null;
                 double progress = 0;
                 string state = "waiting";
                 long size = 0;
@@ -123,23 +124,29 @@ public class DashboardController : ControllerBase
                     status = "failed";
                     state = "failed";
                 }
-                else if (pendingMap.TryGetValue(rel.Id, out sourceName))
+                else if (pendingMap.TryGetValue(rel.Id, out var pendingItem))
                 {
+                    sourceName = pendingItem.SourceName;
+                    providerName = pendingItem.ProviderName;
                     status = "downloading";
-                    state = "torrenting";
-                    try
+                    state = "downloading";
+
+                    if (providerName != "Soulseek")
                     {
-                        var info = await _torrentHelper.GetTorrentInfoAsync(sourceName);
-                        if (info != null)
+                        try
                         {
-                            progress = info.Progress;
-                            state = string.IsNullOrEmpty(info.State) ? "downloading" : info.State;
-                            size = info.Size;
+                            var info = await _torrentHelper.GetTorrentInfoAsync(sourceName);
+                            if (info != null)
+                            {
+                                progress = info.Progress;
+                                state = string.IsNullOrEmpty(info.State) ? "downloading" : info.State;
+                                size = info.Size;
+                            }
                         }
-                    }
-                    catch (Exception exception)
-                    {
-                        _logger.LogWarning(exception, "Failed to query torrent info for {SourceName}", sourceName);
+                        catch (Exception exception)
+                        {
+                            _logger.LogWarning(exception, "Failed to query torrent info for {SourceName}", sourceName);
+                        }
                     }
                 }
 
@@ -150,6 +157,7 @@ public class DashboardController : ControllerBase
                     artist = rel.Artist,
                     status = status,
                     sourceName = sourceName,
+                    providerName = providerName,
                     progress = Math.Min(1.0, Math.Max(0.0, progress)),
                     state = state,
                     size = size
@@ -411,6 +419,469 @@ public class DashboardController : ControllerBase
     }
 
     [Authorize(Roles = "Admin")]
+    [HttpGet("mb-search")]
+    public async Task<IActionResult> SearchMusicBrainzAlbums([FromQuery] string? title, [FromQuery] string? artist, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return Ok(Array.Empty<object>());
+
+        var results = await _externalMusicSearchService.SearchAlbumsAsync(title.Trim(), artist?.Trim());
+        return Ok(results.Take(8).Select(r => new
+        {
+            id = r.Id,
+            title = r.Title ?? string.Empty,
+            artist = r.ArtistCredit?.FirstOrDefault()?.Name ?? r.Artist?.Name ?? string.Empty,
+        }));
+    }
+
+    private static readonly HashSet<string> _audioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".alac", ".wma", ".opus"
+    };
+
+    private static string GetSlskdDirPath(string filename)
+    {
+        var lastSlash = Math.Max(filename.LastIndexOf('/'), filename.LastIndexOf('\\'));
+        return lastSlash < 0 ? filename : filename[..lastSlash];
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("album/{id:guid}/slskd-sources")]
+    public async Task<IActionResult> GetSlskdSources(Guid id, CancellationToken cancellationToken)
+    {
+        var pending = await _dbContext.PendingDownloads.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+        if (pending == null || !pending.SourceName.StartsWith("slskd:", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Album is not being downloaded via slskd." });
+
+        var parts = pending.SourceName.Split(':', 3);
+        if (parts.Length < 2 || !Guid.TryParse(parts[1], out var searchId))
+            return BadRequest(new { message = "Invalid slskd source identifier." });
+
+        var currentUsername = parts.Length >= 3 ? parts[2] : "";
+
+        var searchResult = await _slskdHelper.GetSearchResultsAsync(searchId, cancellationToken);
+        if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
+            return Ok(new { sources = Array.Empty<object>(), currentUsername });
+
+        var rows = new List<(bool hasFreeSlots, long uploadSpeedBps, object dto)>();
+        foreach (var response in searchResult.Responses)
+        {
+            if (string.IsNullOrWhiteSpace(response.Username) || response.Files == null || response.Files.Count == 0)
+                continue;
+
+            var dirGroups = response.Files
+                .GroupBy(f => GetSlskdDirPath(f.Filename ?? ""))
+                .Where(g => !string.IsNullOrWhiteSpace(g.Key));
+
+            foreach (var group in dirGroups)
+            {
+                var audioFiles = group
+                    .Where(f => f.Filename != null && !f.IsLocked &&
+                                _audioExtensions.Contains(Path.GetExtension(f.Filename)))
+                    .ToList();
+
+                if (audioFiles.Count == 0) continue;
+
+                var formats = audioFiles
+                    .Select(f => Path.GetExtension(f.Filename ?? "").ToUpperInvariant().TrimStart('.'))
+                    .Where(e => !string.IsNullOrEmpty(e))
+                    .Distinct()
+                    .ToList();
+
+                var bitRates = audioFiles.Where(f => f.BitRate.HasValue).Select(f => f.BitRate!.Value).ToList();
+                var avgBitRate = bitRates.Count > 0 ? (int)bitRates.Average() : 0;
+
+                var dto = new
+                {
+                    username = response.Username,
+                    directoryPath = group.Key,
+                    fileCount = audioFiles.Count,
+                    totalSizeBytes = audioFiles.Sum(f => f.Size),
+                    formats,
+                    avgBitRate,
+                    uploadSpeedBps = response.UploadSpeed,
+                    hasFreeSlots = response.FreeUploadSlots > 0,
+                    freeUploadSlots = response.FreeUploadSlots,
+                    isCurrentSource = response.Username.Equals(currentUsername, StringComparison.OrdinalIgnoreCase),
+                    files = audioFiles.Select(f => new { filename = f.Filename, size = f.Size }).ToList()
+                };
+                rows.Add((response.FreeUploadSlots > 0, response.UploadSpeed, dto));
+            }
+        }
+
+        var sources = rows
+            .OrderByDescending(r => r.hasFreeSlots)
+            .ThenByDescending(r => r.uploadSpeedBps)
+            .Select(r => r.dto)
+            .ToList();
+
+        return Ok(new { sources, currentUsername });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/{id:guid}/change-slskd-source")]
+    public async Task<IActionResult> ChangeSlskdSource(Guid id, [FromBody] ChangeSlskdSourceRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Username) || request.Files == null || request.Files.Count == 0)
+            return BadRequest(new { message = "Username and files are required." });
+
+        var pending = await _dbContext.PendingDownloads.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+        if (pending == null)
+            return BadRequest(new { message = "Album is not in pending downloads." });
+
+        var parts = pending.SourceName.Split(':', 3);
+        var searchIdStr = parts.Length >= 2 ? parts[1] : "";
+        var oldUsername = parts.Length >= 3 ? parts[2] : "";
+
+        if (!string.IsNullOrWhiteSpace(oldUsername))
+        {
+            try { await _slskdHelper.RemoveCompletedTransfersAsync(oldUsername, cancellationToken); }
+            catch { }
+        }
+
+        var fileRequests = request.Files
+            .Select(f => new StreamingServiceDownloader.Models.Slskd.SlskdFileDownloadRequest
+            {
+                Filename = f.Filename,
+                Size = f.Size
+            })
+            .ToList();
+
+        var enqueued = await _slskdHelper.EnqueueDirectoryDownloadAsync(request.Username, fileRequests, cancellationToken);
+        if (enqueued == 0)
+            return BadRequest(new { message = "Failed to enqueue any files from the new source." });
+
+        pending.SourceName = $"slskd:{searchIdStr}:{request.Username}";
+        pending.SavePath = request.DirectoryPath;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { message = $"Source changed to {request.Username}. {enqueued} file(s) enqueued." });
+    }
+
+    // ─── Recording Redownload ───
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, RecordingRedownloadJob> _recordingJobs = new();
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/{albumId:guid}/recording/{recordingId:guid}/redownload")]
+    public IActionResult StartRecordingRedownload(Guid albumId, Guid recordingId)
+    {
+        var job = new RecordingRedownloadJob { State = "pending", StartedAt = DateTime.UtcNow };
+        _recordingJobs[recordingId] = job;
+
+        var slskd = _slskdHelper;
+        var scopeFactory = _scopeFactory;
+        var config = _configuration;
+        var logger = _logger;
+
+        _ = Task.Run(async () =>
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+            try
+            {
+                await ExecuteRecordingRedownloadAsync(recordingId, albumId, slskd, db, config, logger, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                var j = _recordingJobs.GetValueOrDefault(recordingId);
+                if (j != null) { j.State = "error"; j.Message = ex.Message; j.CompletedAt = DateTime.UtcNow; }
+                logger.LogError(ex, "[RecordingRedownload] Unhandled error for recording {Id}", recordingId);
+            }
+        });
+
+        return Accepted(new { message = "Redownload started." });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("album/{albumId:guid}/recording/{recordingId:guid}/redownload/status")]
+    public IActionResult GetRecordingRedownloadStatus(Guid albumId, Guid recordingId)
+    {
+        if (!_recordingJobs.TryGetValue(recordingId, out var job))
+            return Ok(new { state = "idle" });
+
+        return Ok(new
+        {
+            job.State,
+            job.Message,
+            job.StartedAt,
+            job.CompletedAt
+        });
+    }
+
+    private static async Task ExecuteRecordingRedownloadAsync(
+        Guid recordingId, Guid albumId,
+        StreamingServiceDownloader.Helpers.SlskdHelper slskd,
+        StreamingDbContext db, IConfiguration config, ILogger logger,
+        CancellationToken ct)
+    {
+        void SetState(string state, string? msg = null)
+        {
+            var j = _recordingJobs.GetValueOrDefault(recordingId);
+            if (j == null) return;
+            j.State = state;
+            j.Message = msg;
+            if (state is "complete" or "error") j.CompletedAt = DateTime.UtcNow;
+        }
+
+        SetState("loading");
+
+        // Configure slskd with current DB settings (may not be done yet if downloader hasn't run)
+        var slskdConfig = await db.DownloadProviderConfigs
+            .FirstOrDefaultAsync(c => c.ProviderName == "Soulseek", ct);
+        if (slskdConfig == null)
+        {
+            SetState("error", "Soulseek provider is not configured.");
+            return;
+        }
+        slskd.Configure(slskdConfig.ApiUrl, slskdConfig.ApiKey ?? "", slskdConfig.Username ?? "", slskdConfig.Password ?? "");
+
+        var recording = await db.Recordings
+            .Include(r => r.Release)
+            .ThenInclude(r => r!.Artist)
+            .FirstOrDefaultAsync(r => r.Id == recordingId, ct);
+
+        if (recording == null)
+        {
+            SetState("error", "Recording not found.");
+            return;
+        }
+
+        var release = recording.Release;
+        if (release == null)
+        {
+            SetState("error", "Release not found for recording.");
+            return;
+        }
+
+        var artistName = release.Artist?.Name ?? "";
+        var albumTitle = release.Title ?? "";
+        var trackTitle = recording.Title ?? "";
+
+        SetState("searching", $"Searching for \"{trackTitle}\"…");
+        logger.LogInformation("[RecordingRedownload] Searching slskd for \"{Artist} {Track}\"", artistName, trackTitle);
+
+        var searchQuery = string.IsNullOrWhiteSpace(artistName)
+            ? trackTitle
+            : $"{artistName} {trackTitle}";
+
+        Guid? searchId;
+        try
+        {
+            searchId = await slskd.SearchAsync(searchQuery, ct);
+        }
+        catch (Exception ex)
+        {
+            SetState("error", $"Search failed: {ex.Message}");
+            return;
+        }
+
+        if (searchId == null)
+        {
+            SetState("error", "Search could not be started.");
+            return;
+        }
+
+        var searchResult = await slskd.WaitForSearchResultsAsync(searchId.Value, 60, ct);
+        if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
+        {
+            await slskd.DeleteSearchAsync(searchId.Value, ct);
+            SetState("error", "No results found on Soulseek.");
+            return;
+        }
+
+        var audioExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { ".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".alac", ".opus" };
+
+        var normalizedTitle = System.Text.RegularExpressions.Regex
+            .Replace(trackTitle.ToLowerInvariant(), @"[^\w\s]", " ").Trim();
+
+        var candidates = new List<(string username, StreamingServiceDownloader.Models.Slskd.SlskdFileDownloadRequest file, int score)>();
+        foreach (var resp in searchResult.Responses)
+        {
+            if (string.IsNullOrWhiteSpace(resp.Username)) continue;
+            foreach (var f in resp.Files ?? new())
+            {
+                if (f.Filename == null || f.IsLocked) continue;
+                var ext = Path.GetExtension(f.Filename);
+                if (!audioExts.Contains(ext)) continue;
+                if (f.Size < 1 * 1024 * 1024) continue;
+
+                var basename = Path.GetFileNameWithoutExtension(f.Filename);
+                var cleanName = System.Text.RegularExpressions.Regex
+                    .Replace(basename, @"^\d{1,2}[\s._\-]+", "")
+                    .Replace("_", " ").ToLowerInvariant().Trim();
+                cleanName = System.Text.RegularExpressions.Regex
+                    .Replace(cleanName, @"[^\w\s]", " ").Trim();
+
+                int score = Math.Max(
+                    FuzzySharp.Fuzz.TokenSetRatio(normalizedTitle, cleanName),
+                    FuzzySharp.Fuzz.PartialRatio(normalizedTitle, cleanName));
+
+                if (score < 55) continue;
+
+                if (ext.Equals(".flac", StringComparison.OrdinalIgnoreCase) || ext.Equals(".wav", StringComparison.OrdinalIgnoreCase))
+                    score += 10;
+                if (resp.FreeUploadSlots > 0) score += 5;
+
+                candidates.Add((resp.Username, new StreamingServiceDownloader.Models.Slskd.SlskdFileDownloadRequest
+                {
+                    Filename = f.Filename,
+                    Size = f.Size
+                }, score));
+            }
+        }
+
+        await slskd.DeleteSearchAsync(searchId.Value, ct);
+
+        if (candidates.Count == 0)
+        {
+            SetState("error", "No matching audio file found in search results.");
+            return;
+        }
+
+        var sortedCandidates = candidates.OrderByDescending(c => c.score).Take(8).ToList();
+        logger.LogInformation("[RecordingRedownload] {Count} candidate(s) to try for \"{Title}\"", sortedCandidates.Count, trackTitle);
+
+        var slskdDownloadDir = config["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
+        string? foundPath = null;
+        string? foundExt = null;
+
+        for (int ci = 0; ci < sortedCandidates.Count && foundPath == null; ci++)
+        {
+            var (cUsername, cFile, cScore) = sortedCandidates[ci];
+            var cBasename = Path.GetFileName(cFile.Filename);
+            var cExt = Path.GetExtension(cFile.Filename);
+
+            SetState("downloading", $"Trying source {ci + 1}/{sortedCandidates.Count} ({cUsername})…");
+            logger.LogInformation("[RecordingRedownload] Candidate {N}: \"{File}\" from {User} score={Score}", ci + 1, cFile.Filename, cUsername, cScore);
+
+            try
+            {
+                await slskd.EnqueueDownloadAsync(cUsername, cFile, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("[RecordingRedownload] Enqueue failed for {User}: {Msg}", cUsername, ex.Message);
+                continue;
+            }
+
+            // Poll transfer until it resolves (complete, failed, or disappeared)
+            bool definiteFail = false;
+            bool transferEverSeen = false;
+            var deadline = DateTime.UtcNow.AddMinutes(10);
+            var appearDeadline = DateTime.UtcNow.AddMinutes(2); // how long to wait for entry to appear
+
+            while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                await Task.Delay(4000, ct);
+                try
+                {
+                    var downloads = await slskd.GetDownloadsAsync(ct);
+                    var userXfers = downloads?.FirstOrDefault(d =>
+                        d.Username?.Equals(cUsername, StringComparison.OrdinalIgnoreCase) == true);
+
+                    var allXferFiles = userXfers?.Directories?
+                        .SelectMany(d => d.Files ?? new List<StreamingServiceDownloader.Models.Slskd.SlskdTransferItem>())
+                        .ToList() ?? new();
+
+                    var xfer = allXferFiles.FirstOrDefault(f =>
+                        f.Filename != null && f.Filename.EndsWith(cBasename, StringComparison.OrdinalIgnoreCase));
+
+                    if (xfer == null)
+                    {
+                        if (transferEverSeen)
+                            break; // was seen before, now gone — treat as complete, check disk
+
+                        if (DateTime.UtcNow > appearDeadline)
+                        {
+                            definiteFail = true; // never showed up in slskd — silent enqueue failure
+                            logger.LogWarning("[RecordingRedownload] Transfer from {User} never appeared in slskd API — skipping", cUsername);
+                        }
+                        continue; // not seen yet — keep waiting
+                    }
+
+                    transferEverSeen = true;
+
+                    var xState = xfer.State ?? "";
+                    if (xState.Contains("Completed", StringComparison.OrdinalIgnoreCase) ||
+                        xState.Contains("Succeeded", StringComparison.OrdinalIgnoreCase))
+                        break; // check disk below
+
+                    if (xState.Contains("Errored", StringComparison.OrdinalIgnoreCase) ||
+                        xState.Contains("Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                        xState.Contains("Rejected", StringComparison.OrdinalIgnoreCase) ||
+                        xState.Contains("TimedOut", StringComparison.OrdinalIgnoreCase) ||
+                        xState.Contains("Failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        definiteFail = true;
+                        logger.LogWarning("[RecordingRedownload] Transfer from {User} state='{State}' — skipping", cUsername, xState);
+                        break;
+                    }
+                }
+                catch { }
+            }
+
+            if (definiteFail) continue;
+
+            // Give the filesystem a moment to flush
+            await Task.Delay(1500, ct);
+
+            // Verify the file actually landed on disk — a rejection or timeout looks the same
+            // as a vanished transfer entry, so disk presence is the only reliable truth
+            if (Directory.Exists(slskdDownloadDir))
+            {
+                var matches = Directory.GetFiles(slskdDownloadDir, cBasename, SearchOption.AllDirectories);
+                var hit = matches.OrderByDescending(System.IO.File.GetLastWriteTimeUtc).FirstOrDefault();
+                if (hit != null)
+                {
+                    foundPath = hit;
+                    foundExt = cExt;
+                    logger.LogInformation("[RecordingRedownload] File confirmed on disk: {Path}", hit);
+                }
+                else
+                {
+                    logger.LogWarning("[RecordingRedownload] Transfer from {User} appeared to finish but file not on disk — trying next candidate", cUsername);
+                }
+            }
+        }
+
+        if (foundPath == null)
+        {
+            SetState("error", $"All {sortedCandidates.Count} source(s) failed — files were rejected, timed out, or not delivered.");
+            return;
+        }
+
+        SetState("importing", "Copying to music library…");
+
+        var musicPath = config["Music:Path"] ?? "/nas/media/AudioFiles/";
+        var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+        {
+            ArtistName = artistName,
+            ReleaseTitle = albumTitle
+        };
+        var relFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse);
+        var destDir = Path.Combine(musicPath, relFolder);
+        Directory.CreateDirectory(destDir);
+
+        var destFile = Path.Combine(destDir, recordingId + foundExt);
+
+        try
+        {
+            System.IO.File.Copy(foundPath, destFile, overwrite: true);
+            logger.LogInformation("[RecordingRedownload] Copied {Src} → {Dst}", foundPath, destFile);
+        }
+        catch (Exception ex)
+        {
+            SetState("error", $"Failed to copy file to library: {ex.Message}");
+            return;
+        }
+
+        SetState("complete", $"Track saved: {Path.GetFileName(destFile)}");
+        logger.LogInformation("[RecordingRedownload] Complete for recording {Id}", recordingId);
+    }
+
+    [Authorize(Roles = "Admin")]
     [HttpPost("album/add")]
     public async Task<IActionResult> AddAlbumToQueue([FromBody] AddAlbumRequest request, CancellationToken cancellationToken)
     {
@@ -423,19 +894,34 @@ public class DashboardController : ControllerBase
         string cleanArtist = request.Artist.Trim();
 
 
-        Guid releaseId = Guid.NewGuid();
+        Guid releaseId = request.MbId ?? Guid.NewGuid();
         try
         {
-            await _metadataService.SearchAndSaveAlbumRecordingsAsync($"{cleanArtist} {cleanTitle}");
-            var mbRelease = await _dbContext.Releases
-                .Include(r => r.Artist)
-                .FirstOrDefaultAsync(r => r.Title.ToLower().Contains(cleanTitle.ToLower()) || 
-                                          (r.Artist != null && r.Artist.Name.ToLower().Contains(cleanArtist.ToLower())), cancellationToken);
-            if (mbRelease != null)
+            if (request.MbId.HasValue)
             {
-                releaseId = mbRelease.Id;
-                cleanTitle = mbRelease.Title ?? cleanTitle;
-                cleanArtist = mbRelease.Artist?.Name ?? cleanArtist;
+                await _metadataService.SearchAndSaveAlbumRecordingsByIdAsync(request.MbId.Value);
+                var mbRelease = await _dbContext.Releases
+                    .Include(r => r.Artist)
+                    .FirstOrDefaultAsync(r => r.Id == request.MbId.Value, cancellationToken);
+                if (mbRelease != null)
+                {
+                    cleanTitle = mbRelease.Title ?? cleanTitle;
+                    cleanArtist = mbRelease.Artist?.Name ?? cleanArtist;
+                }
+            }
+            else
+            {
+                await _metadataService.SearchAndSaveAlbumRecordingsAsync($"{cleanArtist} {cleanTitle}");
+                var mbRelease = await _dbContext.Releases
+                    .Include(r => r.Artist)
+                    .FirstOrDefaultAsync(r => r.Title.ToLower().Contains(cleanTitle.ToLower()) ||
+                                              (r.Artist != null && r.Artist.Name.ToLower().Contains(cleanArtist.ToLower())), cancellationToken);
+                if (mbRelease != null)
+                {
+                    releaseId = mbRelease.Id;
+                    cleanTitle = mbRelease.Title ?? cleanTitle;
+                    cleanArtist = mbRelease.Artist?.Name ?? cleanArtist;
+                }
             }
         }
         catch (Exception exception)

@@ -548,6 +548,11 @@
         <label class="form-label">artist name</label>
         <input type="text" id="queue-album-artist-input" class="form-input" placeholder="e.g. Young Thug" />
       </div>
+      <div style="margin-top: 0.75rem;">
+        <button type="button" id="btn-queue-mb-search" class="btn-secondary" onclick="triggerMbSearch('queue')" style="width:100%;">search on MusicBrainz</button>
+        <div id="queue-mb-search-results" style="display:none; max-height:200px; overflow-y:auto; border:1px solid var(--border-light); border-radius:6px; margin-top:0.4rem;"></div>
+        <div id="queue-mb-id-display" style="display:none; margin-top:0.5rem; font-size:0.78rem; color:var(--text-muted); word-break:break-all;"></div>
+      </div>
       <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
         <button type="button" class="btn-secondary" onclick="closeQueueAlbumModal()">cancel</button>
         <button type="button" class="btn-cta" id="btn-confirm-queue-album" onclick="confirmQueueAlbum()">⬇ queue album</button>
@@ -573,11 +578,50 @@
           <label class="form-label">artist name</label>
           <input type="text" id="input-album-artist" class="form-input" required placeholder="e.g. The Beatles" />
         </div>
-        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+        <div style="margin-top: 0.75rem;">
+          <button type="button" id="btn-add-mb-search" class="btn-secondary" onclick="triggerMbSearch('add')" style="width:100%;">search on MusicBrainz</button>
+          <div id="add-mb-search-results" style="display:none; max-height:200px; overflow-y:auto; border:1px solid var(--border-light); border-radius:6px; margin-top:0.4rem;"></div>
+          <div id="add-mb-id-display" style="display:none; margin-top:0.5rem; font-size:0.78rem; color:var(--text-muted); word-break:break-all;"></div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1.5rem;">
           <button type="button" id="btn-close-modal" class="btn-secondary">cancel</button>
           <button type="submit" class="btn-cta">queue album</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Slskd Sources Modal -->
+  <div id="slskd-sources-modal" class="modal-backdrop" style="display:none; align-items:flex-start; padding-top: 2rem; overflow-y: auto;">
+    <div class="modal-content" style="max-width: 960px; width: 100%; margin: 0 auto;">
+      <h2 style="margin-bottom: 0.4rem;">change <i>download source</i></h2>
+      <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.2rem;">
+        select a different source from the original soulseek search. the current download will be cancelled and the new one queued.
+      </p>
+      <div id="slskd-sources-loading" style="text-align:center; color:var(--text-muted); padding: 2rem;">loading sources…</div>
+      <div id="slskd-sources-container" style="display:none; overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.83rem;">
+          <thead>
+            <tr style="border-bottom: 2px solid var(--border-light); color: var(--text-muted); text-align:left;">
+              <th style="padding: 0.5rem 0.7rem;">user</th>
+              <th style="padding: 0.5rem 0.7rem;">directory</th>
+              <th style="padding: 0.5rem 0.7rem; text-align:right;">files</th>
+              <th style="padding: 0.5rem 0.7rem; text-align:right;">size</th>
+              <th style="padding: 0.5rem 0.7rem;">format</th>
+              <th style="padding: 0.5rem 0.7rem; text-align:right;">bitrate</th>
+              <th style="padding: 0.5rem 0.7rem; text-align:right;">speed</th>
+              <th style="padding: 0.5rem 0.7rem; text-align:center;">slots</th>
+              <th style="padding: 0.5rem 0.7rem;"></th>
+            </tr>
+          </thead>
+          <tbody id="slskd-sources-table-body"></tbody>
+        </table>
+      </div>
+      <div id="slskd-sources-empty" style="display:none; text-align:center; color:var(--text-muted); padding: 2rem;">no sources found. the search may have expired.</div>
+      <div id="slskd-sources-status" style="margin-top: 0.8rem; font-size: 0.85rem; min-height: 1.2em;"></div>
+      <div style="display:flex; justify-content:flex-end; margin-top: 1rem;">
+        <button class="btn-secondary" onclick="closeSlskdSourcesModal()">close</button>
+      </div>
     </div>
   </div>
 

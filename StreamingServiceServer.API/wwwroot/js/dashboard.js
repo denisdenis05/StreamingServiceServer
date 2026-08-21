@@ -452,6 +452,10 @@ function renderQueueTable() {
   }
 
   container.innerHTML = state.queued.map(item => {
+    const isSlskd = item.providerName === 'Soulseek' && item.sourceName && item.sourceName.startsWith('slskd:');
+    const changeSourceBtn = isSlskd && item.status === 'downloading'
+      ? `<button onclick="openSlskdSourcesModal('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">change source</button>`
+      : '';
     return `
       <tr onclick="window.location.hash='#album?id=${item.id}'">
         <td>
@@ -467,6 +471,7 @@ function renderQueueTable() {
         <td onclick="event.stopPropagation()">
           <button onclick="handleRequeue('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;">requeue</button>
           <button onclick="handleSetDownloaded('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">set downloaded</button>
+          ${changeSourceBtn}
         </td>
       </tr>
     `;
@@ -591,14 +596,24 @@ function renderAlbumDetail(album) {
       <ul class="track-list">
         ${album.recordings.map((track, i) => {
           const isMissing = track.fileExists === false;
+          const dur = track.length ? Math.floor(track.length / 60) + ':' + String(track.length % 60).padStart(2, '0') : '';
           return `
-          <li class="track-item" style="${isMissing ? 'background-color: rgba(198, 40, 40, 0.06); border-left: 3px solid #c62828; padding-left: 0.8rem;' : ''}">
+          <li class="track-item" id="track-item-${track.id}" style="${isMissing ? 'background-color: rgba(198, 40, 40, 0.06); border-left: 3px solid #c62828; padding-left: 0.8rem;' : ''}">
             <span class="track-number">${track.position || i + 1}</span>
             <span class="track-name" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
               ${escapeHtml(track.title)}
-              ${isMissing ? `<span class="badge badge-terracotta" style="font-size: 0.75rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;" title="Audio file missing on filesystem">⚠️ missing file</span>` : ''}
+              ${isMissing ? `<span class="badge badge-terracotta" style="font-size: 0.75rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;" title="Audio file missing on filesystem">⚠ missing file</span>` : ''}
             </span>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">${track.length ? Math.floor(track.length / 60) + ':' + String(track.length % 60).padStart(2, '0') : ''}</span>
+            <span style="font-size: 0.85rem; color: var(--text-muted);">${dur}</span>
+            <span class="track-redownload-area" style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
+              <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="${isMissing ? 'Download missing track' : 'Re-download this track'}" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">↻</button>
+              <span id="rdc-${track.id}" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem;">
+                <span style="color:var(--text-muted);">${isMissing ? 'download?' : 'redownload?'}</span>
+                <button onclick="confirmRedownload('${album.id}','${track.id}')" class="btn-cta" style="padding:0.15rem 0.45rem; font-size:0.78rem;">yes</button>
+                <button onclick="hideRedownloadConfirm('${track.id}')" class="btn-secondary" style="padding:0.15rem 0.45rem; font-size:0.78rem;">no</button>
+              </span>
+              <span id="rds-${track.id}" style="display:none; font-size:0.78rem; color:var(--text-muted);"></span>
+            </span>
           </li>
         `;
         }).join('')}
@@ -890,12 +905,12 @@ function setupModal() {
   }
 
   if (closeBtn && modal) {
-    closeBtn.addEventListener('click', () => modal.style.display = 'none');
+    closeBtn.addEventListener('click', () => { modal.style.display = 'none'; clearMbSearch('add'); });
   }
 
   if (modal) {
     modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.style.display = 'none';
+      if (e.target === modal) { modal.style.display = 'none'; clearMbSearch('add'); }
     });
   }
 
@@ -904,18 +919,20 @@ function setupModal() {
       e.preventDefault();
       if (!requireAdminAuth(() => {})) return;
 
-      const title = document.getElementById('input-album-title').value;
+      const title  = document.getElementById('input-album-title').value;
       const artist = document.getElementById('input-album-artist').value;
+      const mbId   = _mbSelectedId.add || null;
 
       try {
         const res = await authFetch(`${API_BASE}/album/add`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, artist })
+          body: JSON.stringify({ title, artist, mbId })
         });
 
         if (res.ok) {
           modal.style.display = 'none';
+          clearMbSearch('add');
           form.reset();
           await refreshData();
           alert('album added to queue!');
@@ -2034,6 +2051,7 @@ function openQueueAlbumModal(trackTitle, artistName, albumName) {
 
 function closeQueueAlbumModal() {
   document.getElementById('queue-album-modal').style.display = 'none';
+  clearMbSearch('queue');
 }
 
 async function confirmQueueAlbum() {
@@ -2052,7 +2070,7 @@ async function confirmQueueAlbum() {
     const res = await authFetch(`${API_BASE}/album/add`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ title, artist }),
+      body:    JSON.stringify({ title, artist, mbId: _mbSelectedId.queue || null }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     statusEl.textContent = `✓ "${title}" queued for download!`;
@@ -2062,6 +2080,298 @@ async function confirmQueueAlbum() {
     statusEl.textContent = `error: ${err.message}`;
     statusEl.style.color = '#c62828';
     btn.disabled = false;
+  }
+}
+
+// ── MusicBrainz Album Search (shared for add-album + queue-album modals) ──
+const _mbSelectedId = { add: null, queue: null };
+
+function clearMbSearch(ctx) {
+  _mbSelectedId[ctx] = null;
+  const results  = document.getElementById(ctx === 'add' ? 'add-mb-search-results'  : 'queue-mb-search-results');
+  const idDisplay = document.getElementById(ctx === 'add' ? 'add-mb-id-display'      : 'queue-mb-id-display');
+  if (results)   { results.innerHTML = '';   results.style.display = 'none'; }
+  if (idDisplay) { idDisplay.textContent = ''; idDisplay.style.display = 'none'; }
+}
+
+async function triggerMbSearch(ctx) {
+  const title  = (ctx === 'add'
+    ? document.getElementById('input-album-title')?.value
+    : document.getElementById('queue-album-title-input')?.value || '').trim();
+  const artist = (ctx === 'add'
+    ? document.getElementById('input-album-artist')?.value
+    : document.getElementById('queue-album-artist-input')?.value || '').trim();
+
+  const resultsId = ctx === 'add' ? 'add-mb-search-results' : 'queue-mb-search-results';
+  const container = document.getElementById(resultsId);
+  if (!container) return;
+
+  if (!title) {
+    container.innerHTML = '<div style="padding:0.8rem; color:#c62828; font-size:0.85rem;">enter an album title first</div>';
+    container.style.display = 'block';
+    return;
+  }
+
+  container.style.display = 'block';
+  container.innerHTML = '<div style="padding:0.8rem; color:var(--text-muted); font-size:0.85rem;">searching MusicBrainz…</div>';
+  clearMbSearch(ctx);
+  container.style.display = 'block';
+
+  try {
+    const params = `title=${encodeURIComponent(title)}${artist ? `&artist=${encodeURIComponent(artist)}` : ''}`;
+    const res    = await authFetch(`${API_BASE}/mb-search?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const albums = await res.json();
+
+    if (!albums.length) {
+      container.innerHTML = '<div style="padding:0.8rem; color:var(--text-muted); font-size:0.85rem;">no results found</div>';
+      return;
+    }
+
+    container.innerHTML = albums.map(r => {
+      const titleDisplay  = escapeHtml(r.title  || '');
+      const artistDisplay = escapeHtml(r.artist || '');
+      const idAttr        = escapeHtml(r.id     || '');
+      const titleAttr     = (r.title  || '').replace(/"/g, '&quot;');
+      const artistAttr    = (r.artist || '').replace(/"/g, '&quot;');
+      return `<div class="mb-result-row"
+          data-title="${titleAttr}" data-artist="${artistAttr}" data-id="${idAttr}"
+          style="padding:0.65rem 1rem; cursor:pointer; border-bottom:1px solid var(--border-light); font-size:0.88rem; transition:background 0.12s;"
+          onmouseenter="this.style.background='var(--bg-card)'"
+          onmouseleave="this.style.background=''">
+        <div style="font-weight:500;">${titleDisplay}</div>
+        <div style="font-size:0.78rem; color:var(--text-muted);">${artistDisplay}</div>
+      </div>`;
+    }).join('');
+
+    container.querySelectorAll('.mb-result-row').forEach(row => {
+      row.addEventListener('click', () => selectMbAlbum(ctx, row.dataset.title, row.dataset.artist, row.dataset.id));
+    });
+  } catch (e) {
+    container.innerHTML = `<div style="padding:0.8rem; color:#c62828; font-size:0.82rem;">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function selectMbAlbum(ctx, title, artist, id) {
+  if (ctx === 'add') {
+    document.getElementById('input-album-title').value  = title;
+    document.getElementById('input-album-artist').value = artist;
+  } else {
+    document.getElementById('queue-album-title-input').value  = title;
+    document.getElementById('queue-album-artist-input').value = artist;
+  }
+
+  _mbSelectedId[ctx] = id || null;
+
+  const results   = document.getElementById(ctx === 'add' ? 'add-mb-search-results'  : 'queue-mb-search-results');
+  const idDisplay = document.getElementById(ctx === 'add' ? 'add-mb-id-display'      : 'queue-mb-id-display');
+  if (results)   { results.innerHTML = ''; results.style.display = 'none'; }
+  if (idDisplay && id) {
+    idDisplay.textContent = `MusicBrainz ID: ${id}`;
+    idDisplay.style.display = 'block';
+  }
+}
+
+// ─── RECORDING REDOWNLOAD ───
+
+function showRedownloadConfirm(albumId, recordingId) {
+  const btn = document.getElementById(`rdb-${recordingId}`);
+  const confirm = document.getElementById(`rdc-${recordingId}`);
+  if (btn) btn.style.display = 'none';
+  if (confirm) confirm.style.display = 'inline-flex';
+}
+
+function hideRedownloadConfirm(recordingId) {
+  const btn = document.getElementById(`rdb-${recordingId}`);
+  const confirm = document.getElementById(`rdc-${recordingId}`);
+  if (btn) btn.style.display = '';
+  if (confirm) confirm.style.display = 'none';
+}
+
+async function confirmRedownload(albumId, recordingId) {
+  hideRedownloadConfirm(recordingId);
+  const statusEl = document.getElementById(`rds-${recordingId}`);
+  if (statusEl) { statusEl.style.display = 'inline'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⟳ starting…'; }
+
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/recording/${recordingId}/redownload`, { method: 'POST' });
+    if (!res.ok) {
+      const d = await parseJsonResponse(res);
+      if (statusEl) { statusEl.textContent = `✗ ${d.message || 'failed'}`; statusEl.style.color = '#c62828'; }
+      return;
+    }
+    pollRedownloadStatus(albumId, recordingId);
+  } catch (err) {
+    if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.style.color = '#c62828'; }
+  }
+}
+
+function pollRedownloadStatus(albumId, recordingId) {
+  const statusEl = document.getElementById(`rds-${recordingId}`);
+
+  const stateLabels = {
+    pending: '⟳ pending…',
+    loading: '⟳ loading…',
+    searching: '⟳ searching…',
+    downloading: '⟳ downloading…',
+    importing: '⟳ importing…',
+    complete: '✓ done',
+    error: '✗ error'
+  };
+
+  const tick = async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/album/${albumId}/recording/${recordingId}/redownload/status`);
+      const data = await parseJsonResponse(res);
+      const label = stateLabels[data.state] || `⟳ ${data.state}`;
+
+      if (statusEl) {
+        statusEl.textContent = data.message ? `${label} — ${data.message}` : label;
+        statusEl.style.color = data.state === 'complete' ? '#388e3c' : (data.state === 'error' ? '#c62828' : 'var(--text-muted)');
+      }
+
+      if (data.state === 'complete') {
+        // Update track item styling: remove missing indicator
+        const item = document.getElementById(`track-item-${recordingId}`);
+        if (item) { item.style.backgroundColor = ''; item.style.borderLeft = ''; item.style.paddingLeft = ''; }
+        return;
+      }
+      if (data.state === 'error') return;
+
+      setTimeout(tick, 3000);
+    } catch (err) {
+      if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.style.color = '#c62828'; }
+    }
+  };
+
+  tick();
+}
+
+// ─── SLSKD SOURCE CHANGING ───
+
+let _slskdSourcesAlbumId = null;
+let _slskdSourcesData = [];
+
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function openSlskdSourcesModal(albumId) {
+  _slskdSourcesAlbumId = albumId;
+  _slskdSourcesData = [];
+
+  const modal = document.getElementById('slskd-sources-modal');
+  const loading = document.getElementById('slskd-sources-loading');
+  const container = document.getElementById('slskd-sources-container');
+  const empty = document.getElementById('slskd-sources-empty');
+  const status = document.getElementById('slskd-sources-status');
+  if (!modal) return;
+
+  modal.style.display = 'flex';
+  loading.style.display = 'block';
+  container.style.display = 'none';
+  empty.style.display = 'none';
+  status.textContent = '';
+
+  loadSlskdSources(albumId);
+}
+
+function closeSlskdSourcesModal() {
+  const modal = document.getElementById('slskd-sources-modal');
+  if (modal) modal.style.display = 'none';
+  _slskdSourcesAlbumId = null;
+  _slskdSourcesData = [];
+}
+
+async function loadSlskdSources(albumId) {
+  const loading = document.getElementById('slskd-sources-loading');
+  const container = document.getElementById('slskd-sources-container');
+  const empty = document.getElementById('slskd-sources-empty');
+  const tbody = document.getElementById('slskd-sources-table-body');
+
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/slskd-sources`);
+    const data = await parseJsonResponse(res);
+
+    loading.style.display = 'none';
+
+    if (!res.ok || !data.sources || data.sources.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    _slskdSourcesData = data.sources;
+    container.style.display = 'block';
+
+    tbody.innerHTML = data.sources.map((src, idx) => {
+      const sizeStr = formatBytes(src.totalSizeBytes);
+      const speedStr = formatBytes(src.uploadSpeedBps) + '/s';
+      const fmts = (src.formats || []).join(', ') || '—';
+      const bitrateStr = src.avgBitRate > 0 ? `${src.avgBitRate} kbps` : '—';
+      const slotsStr = src.hasFreeSlots ? `✓ ${src.freeUploadSlots}` : '—';
+      const rowBg = src.isCurrentSource ? 'background:rgba(0,0,0,0.04);' : '';
+      return `
+        <tr style="border-bottom: 1px solid var(--border-light); ${rowBg}">
+          <td style="padding: 0.45rem 0.7rem; font-family: monospace; font-size: 0.8rem;">${escapeHtml(src.username)}</td>
+          <td style="padding: 0.45rem 0.7rem; font-size: 0.78rem; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(src.directoryPath)}">${escapeHtml(src.directoryPath)}</td>
+          <td style="padding: 0.45rem 0.7rem; text-align:right;">${src.fileCount}</td>
+          <td style="padding: 0.45rem 0.7rem; text-align:right;">${sizeStr}</td>
+          <td style="padding: 0.45rem 0.7rem;">${fmts}</td>
+          <td style="padding: 0.45rem 0.7rem; text-align:right;">${bitrateStr}</td>
+          <td style="padding: 0.45rem 0.7rem; text-align:right;">${speedStr}</td>
+          <td style="padding: 0.45rem 0.7rem; text-align:center; color:${src.hasFreeSlots ? '#388e3c' : 'var(--text-muted)'};">${slotsStr}</td>
+          <td style="padding: 0.45rem 0.7rem;">
+            ${src.isCurrentSource
+              ? '<span style="color:var(--text-muted); font-size:0.78rem;">current</span>'
+              : `<button onclick="selectSlskdSource(${idx})" class="btn-cta" style="padding:0.2rem 0.55rem; font-size:0.78rem;">use this</button>`}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (err) {
+    loading.style.display = 'none';
+    empty.style.display = 'block';
+    empty.textContent = `error loading sources: ${err.message}`;
+  }
+}
+
+async function selectSlskdSource(idx) {
+  const src = _slskdSourcesData[idx];
+  if (!src || !_slskdSourcesAlbumId) return;
+
+  const status = document.getElementById('slskd-sources-status');
+  status.textContent = 'switching source…';
+  status.style.color = 'var(--text-muted)';
+
+  try {
+    const res = await authFetch(`${API_BASE}/album/${_slskdSourcesAlbumId}/change-slskd-source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: src.username,
+        directoryPath: src.directoryPath,
+        files: src.files
+      })
+    });
+    const data = await parseJsonResponse(res);
+
+    if (res.ok) {
+      status.textContent = data.message || 'source changed successfully.';
+      status.style.color = '#388e3c';
+      await fetchQueued();
+      await loadSlskdSources(_slskdSourcesAlbumId);
+    } else {
+      status.textContent = data.message || `error: HTTP ${res.status}`;
+      status.style.color = '#c62828';
+    }
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+    status.style.color = '#c62828';
   }
 }
 

@@ -7,4 +7,5 @@ public class AudioMetadata
     public string Album { get; set; }
     public uint? TrackNumber { get; set; }
     public uint? Year { get; set; }
+    public double? DurationSeconds { get; set; }
 }

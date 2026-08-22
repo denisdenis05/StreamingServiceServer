@@ -17,7 +17,8 @@ public static class AudioMetadataHelper
                 Artist = file.Tag.FirstPerformer ?? file.Tag.AlbumArtists?.FirstOrDefault(),
                 Album = file.Tag.Album,
                 TrackNumber = file.Tag.Track,
-                Year = file.Tag.Year
+                Year = file.Tag.Year,
+                DurationSeconds = file.Properties?.Duration.TotalSeconds
             };
         }
         catch

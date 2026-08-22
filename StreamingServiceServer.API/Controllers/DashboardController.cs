@@ -1437,7 +1437,9 @@ public class DashboardController : ControllerBase
                 totalTracks = r.TotalTracks,
                 presentTracks = r.PresentTracks,
                 missingTracks = r.MissingTracks,
-                lastAnalyzedAt = r.LastAnalyzedAt
+                lastAnalyzedAt = r.LastAnalyzedAt,
+                mismatchedTracksCount = r.MismatchedTracksCount,
+                lastMismatchCheckedAt = r.LastMismatchCheckedAt
             }).ToList();
 
             var summary = new
@@ -1602,6 +1604,494 @@ public class DashboardController : ControllerBase
         });
 
         return Accepted(new { success = true, message = $"Soulseek scan started for album {id}. Poll /api/dashboard/analysis/scan-soulseek/status for results.", status = SoulseekScanStatus.Current });
+    }
+
+    // ─── Batch Mismatch Redownload ───
+
+    private class BatchRedownloadStatus
+    {
+        public string State { get; set; } = "pending";
+        public string? Message { get; set; }
+        public int Done { get; set; }
+        public int Total { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, BatchRedownloadStatus> _batchJobs = new();
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/{id:guid}/redownload-mismatched")]
+    public IActionResult StartBatchMismatchRedownload(Guid id, [FromBody] BatchMismatchRedownloadRequest request)
+    {
+        if (request.RecordingIds == null || request.RecordingIds.Count == 0)
+            return BadRequest(new { message = "No recording IDs provided." });
+
+        var job = new BatchRedownloadStatus { State = "pending", StartedAt = DateTime.UtcNow, Total = request.RecordingIds.Count };
+        _batchJobs[id] = job;
+
+        var slskd = _slskdHelper;
+        var scopeFactory = _scopeFactory;
+        var config = _configuration;
+        var logger = _logger;
+        var ids = request.RecordingIds.ToList();
+
+        _ = Task.Run(async () =>
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+            try
+            {
+                await ExecuteBatchMismatchRedownloadAsync(id, ids, slskd, db, config, logger, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                if (_batchJobs.TryGetValue(id, out var j)) { j.State = "error"; j.Message = ex.Message; j.CompletedAt = DateTime.UtcNow; }
+                logger.LogError(ex, "[BatchRedownload] Unhandled error for album {Id}", id);
+            }
+        });
+
+        return Accepted(new { message = "Batch redownload started." });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("album/{id:guid}/redownload-mismatched/status")]
+    public IActionResult GetBatchMismatchRedownloadStatus(Guid id)
+    {
+        if (!_batchJobs.TryGetValue(id, out var job))
+            return Ok(new { state = "idle" });
+
+        return Ok(new { job.State, job.Message, job.Done, job.Total, job.StartedAt, job.CompletedAt });
+    }
+
+    private static async Task ExecuteBatchMismatchRedownloadAsync(
+        Guid albumId,
+        List<Guid> targetRecordingIds,
+        StreamingServiceDownloader.Helpers.SlskdHelper slskd,
+        StreamingDbContext db,
+        IConfiguration config,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        void SetState(string state, string? msg = null, int done = 0, int total = 0)
+        {
+            if (!_batchJobs.TryGetValue(albumId, out var j)) return;
+            j.State = state; j.Message = msg; j.Done = done; j.Total = total;
+            if (state is "complete" or "error") j.CompletedAt = DateTime.UtcNow;
+        }
+
+        SetState("loading");
+
+        var slskdConfig = await db.DownloadProviderConfigs.FirstOrDefaultAsync(c => c.ProviderName == "Soulseek", ct);
+        if (slskdConfig == null) { SetState("error", "Soulseek provider not configured."); return; }
+        slskd.Configure(slskdConfig.ApiUrl, slskdConfig.ApiKey ?? "", slskdConfig.Username ?? "", slskdConfig.Password ?? "");
+
+        var release = await db.Releases
+            .Include(r => r.Artist).Include(r => r.Recordings)
+            .FirstOrDefaultAsync(r => r.Id == albumId, ct);
+        if (release == null) { SetState("error", "Album not found."); return; }
+
+        var targetRecordings = release.Recordings
+            .Where(r => targetRecordingIds.Contains(r.Id))
+            .OrderBy(r => r.PositionInAlbum)
+            .ToList();
+
+        if (targetRecordings.Count == 0) { SetState("error", "No target recordings found."); return; }
+
+        var artistName = release.Artist?.Name ?? "";
+        var albumTitle = release.Title ?? "";
+        var searchQuery = string.IsNullOrWhiteSpace(artistName) ? albumTitle : $"{artistName} {albumTitle}";
+
+        SetState("searching", $"Searching Soulseek for \"{albumTitle}\"…", 0, targetRecordings.Count);
+        logger.LogInformation("[BatchRedownload] Search query: \"{Query}\"", searchQuery);
+
+        Guid? searchId;
+        try { searchId = await slskd.SearchAsync(searchQuery, ct); }
+        catch (Exception ex) { SetState("error", $"Search failed: {ex.Message}"); return; }
+        if (searchId == null) { SetState("error", "Could not start search."); return; }
+
+        var searchResult = await slskd.WaitForSearchResultsAsync(searchId.Value, 60, ct);
+        await slskd.DeleteSearchAsync(searchId.Value, ct);
+
+        if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
+        {
+            SetState("error", "No Soulseek results found."); return;
+        }
+
+        var audioExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { ".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".alac", ".opus" };
+
+        var sanitizedAlbum = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(
+            SoulseekMatchingHelper.SanitizeFolderName(albumTitle)).ToLowerInvariant();
+
+        // Collect and score candidates (one per user+directory)
+        var candidates = new List<(string Username, List<StreamingServiceDownloader.Models.Slskd.SlskdFile> Files, int DirScore, bool HasFreeSlots, long UploadSpeed)>();
+        foreach (var resp in searchResult.Responses)
+        {
+            if (string.IsNullOrWhiteSpace(resp.Username)) continue;
+            var audioFiles = (resp.Files ?? new())
+                .Where(f => f.Filename != null && !f.IsLocked && audioExts.Contains(Path.GetExtension(f.Filename)))
+                .GroupBy(f => GetSlskdDirPath(f.Filename!));
+
+            foreach (var grp in audioFiles)
+            {
+                var files = grp.ToList();
+                if (files.Count == 0) continue;
+
+                var dirName = Path.GetFileName(grp.Key.TrimEnd('/', '\\'));
+                var sanitizedDir = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(
+                    SoulseekMatchingHelper.SanitizeFolderName(dirName)).ToLowerInvariant();
+
+                int dirScore = Math.Max(
+                    FuzzySharp.Fuzz.TokenSetRatio(sanitizedAlbum, sanitizedDir),
+                    FuzzySharp.Fuzz.PartialRatio(sanitizedAlbum, sanitizedDir));
+
+                candidates.Add((resp.Username, files, dirScore, resp.FreeUploadSlots > 0, resp.UploadSpeed));
+            }
+        }
+
+        var sorted = candidates
+            .OrderByDescending(c => c.DirScore)
+            .ThenByDescending(c => c.HasFreeSlots)
+            .ThenByDescending(c => c.UploadSpeed)
+            .ToList();
+
+        var musicPath  = config["Music:Path"] ?? "/nas/media/AudioFiles/";
+        var downloadDir = config["Music:DownloadPath"] ?? "/nas/slskd-data/downloads";
+
+        var recResponseForPath = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+            { ArtistName = artistName, ReleaseTitle = albumTitle };
+        var destDir = Path.Combine(musicPath, MusicLocationHelper.GetRelativeFolderPathForRecording(recResponseForPath));
+        Directory.CreateDirectory(destDir);
+
+        var recResponses = targetRecordings.Select(r => new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+        {
+            Id = r.Id, Title = r.Title, PositionInAlbum = r.PositionInAlbum,
+            ReleaseTitle = albumTitle, ArtistName = artistName
+        }).ToList();
+
+        int totalDownloaded = 0;
+
+        foreach (var candidate in sorted)
+        {
+            // fullPath = slskd remote filename; MatchSongsWithRecordings uses filename for scoring
+            var fileList = candidate.Files
+                .Select(f => (Path.GetFileName(f.Filename!), f.Filename!))
+                .ToList();
+
+            var matchResults = SoulseekMatchingHelper.MatchSongsWithRecordings(recResponses, fileList);
+            var validMatches = matchResults.Where(m => m.Score >= 50 && !string.IsNullOrWhiteSpace(m.FullPath)).ToList();
+
+            if (validMatches.Count == 0) continue;
+
+            logger.LogInformation("[BatchRedownload] {User}: {Count} match(es), dir score {Score}",
+                candidate.Username, validMatches.Count, candidate.DirScore);
+
+            var fileLookup = candidate.Files.ToDictionary(f => f.Filename!, StringComparer.OrdinalIgnoreCase);
+            var downloadRequests = validMatches
+                .Where(m => fileLookup.ContainsKey(m.FullPath))
+                .Select(m => new StreamingServiceDownloader.Models.Slskd.SlskdFileDownloadRequest
+                    { Filename = m.FullPath, Size = fileLookup[m.FullPath].Size })
+                .ToList();
+
+            SetState("downloading", $"Queuing {downloadRequests.Count} track(s) from {candidate.Username}…", 0, validMatches.Count);
+
+            try { await slskd.EnqueueDirectoryDownloadAsync(candidate.Username, downloadRequests, ct); }
+            catch (Exception ex)
+            {
+                logger.LogWarning("[BatchRedownload] Enqueue failed for {User}: {Msg}", candidate.Username, ex.Message);
+                continue;
+            }
+
+            // Poll disk until each file arrives, then copy to library
+            var pending = validMatches.Select(m => (
+                Match: m,
+                Recording: targetRecordings.First(r => r.Id == m.Recording.Id),
+                BaseName: Path.GetFileName(m.FullPath),
+                Ext: Path.GetExtension(m.FullPath)
+            )).ToList();
+
+            var deadline = DateTime.UtcNow.AddMinutes(15);
+            int done = 0;
+
+            while (pending.Count > 0 && DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                await Task.Delay(4000, ct);
+
+                var stillPending = new List<(MusicFileMatch, Recording, string, string)>();
+                foreach (var (match, recording, baseName, ext) in pending)
+                {
+                    string? hit = null;
+                    if (Directory.Exists(downloadDir))
+                        hit = Directory.GetFiles(downloadDir, baseName, SearchOption.AllDirectories)
+                            .OrderByDescending(System.IO.File.GetLastWriteTimeUtc).FirstOrDefault();
+
+                    if (hit == null) { stillPending.Add((match, recording, baseName, ext)); continue; }
+
+                    var destFile = Path.Combine(destDir, recording.Id + ext);
+                    try
+                    {
+                        System.IO.File.Copy(hit, destFile, overwrite: true);
+                        done++;
+                        totalDownloaded++;
+                        SetState("downloading", $"{done}/{validMatches.Count} track(s) copied", done, validMatches.Count);
+                        logger.LogInformation("[BatchRedownload] {Src} → {Dst}", hit, destFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "[BatchRedownload] Copy failed: {File}", hit);
+                        stillPending.Add((match, recording, baseName, ext));
+                    }
+                }
+                pending = stillPending;
+            }
+
+            if (totalDownloaded > 0) break;
+        }
+
+        if (totalDownloaded > 0)
+            SetState("complete", $"Replaced {totalDownloaded} track(s) successfully.", totalDownloaded, totalDownloaded);
+        else
+            SetState("error", "No matching tracks could be downloaded from any source.");
+    }
+
+    // ─── Track Match Check Infrastructure ───
+
+    private record TrackIssue(string Type, string Severity, string Detail);
+
+    // Each entry is a named checker: (filePath, recording, release, metadata) → issues list.
+    // Add new entries here to extend the suite with additional checks.
+    private static readonly List<(string Name, Func<string, Recording, Release, StreamingServiceDownloader.Models.AudioMetadata?, List<TrackIssue>> Fn)> _trackCheckers = new()
+    {
+        ("metadata_name", CheckMetadataName),
+        ("track_length",  CheckTrackLength),
+    };
+
+    private static List<TrackIssue> CheckMetadataName(string filePath, Recording rec, Release release, StreamingServiceDownloader.Models.AudioMetadata? meta)
+    {
+        var issues = new List<TrackIssue>();
+        if (meta == null || string.IsNullOrWhiteSpace(meta.Title)) return issues;
+
+        var sanitizedDb   = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(rec.Title).ToLowerInvariant();
+        var sanitizedFile = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(meta.Title).ToLowerInvariant();
+
+        int titleScore = Math.Max(
+            FuzzySharp.Fuzz.PartialRatio(sanitizedDb, sanitizedFile),
+            FuzzySharp.Fuzz.TokenSetRatio(sanitizedDb, sanitizedFile));
+
+        if (titleScore < 70)
+        {
+            string severity = titleScore < 50 ? "error" : "warning";
+            issues.Add(new TrackIssue("name_mismatch", severity,
+                $"Tag: \"{meta.Title}\" — DB: \"{rec.Title}\""));
+        }
+
+        if (!string.IsNullOrWhiteSpace(meta.Artist))
+        {
+            var artistName = release.Artist?.Name ?? "";
+            if (!string.IsNullOrWhiteSpace(artistName))
+            {
+                var sanitizedDbArtist   = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(artistName).ToLowerInvariant();
+                var sanitizedFileArtist = StreamingServiceDownloader.Helpers.StringSanitizers.SanitizeTitle(meta.Artist).ToLowerInvariant();
+
+                int artistScore = Math.Max(
+                    FuzzySharp.Fuzz.PartialRatio(sanitizedDbArtist, sanitizedFileArtist),
+                    FuzzySharp.Fuzz.TokenSetRatio(sanitizedDbArtist, sanitizedFileArtist));
+
+                if (artistScore < 65)
+                    issues.Add(new TrackIssue("artist_mismatch", "warning",
+                        $"Tag artist: \"{meta.Artist}\" — DB: \"{artistName}\""));
+            }
+        }
+
+        return issues;
+    }
+
+    private static List<TrackIssue> CheckTrackLength(string filePath, Recording rec, Release release, StreamingServiceDownloader.Models.AudioMetadata? meta)
+    {
+        var issues = new List<TrackIssue>();
+        if (meta?.DurationSeconds == null || rec.Length == null) return issues;
+
+        double dbDurationSeconds = rec.Length.Value / 1000.0;
+        double diff = Math.Abs(meta.DurationSeconds.Value - dbDurationSeconds);
+        if (diff <= 1.0) return issues;
+
+        string fileFmt = FormatTrackSeconds(meta.DurationSeconds.Value);
+        string dbFmt   = FormatTrackSeconds(dbDurationSeconds);
+        string diffFmt = $"{(int)Math.Round(diff)}s";
+
+        string severity = diff <= 5.0 ? "warning" : "error";
+        string note     = diff <= 5.0 ? " — may be normal" : "";
+        issues.Add(new TrackIssue("length_mismatch", severity,
+            $"File: {fileFmt}, DB: {dbFmt} ({diffFmt}{note})"));
+
+        return issues;
+    }
+
+    private static string FormatTrackSeconds(double totalSeconds)
+    {
+        var ts = TimeSpan.FromSeconds(totalSeconds);
+        return $"{(int)ts.TotalMinutes}:{ts.Seconds:D2}";
+    }
+
+    private static readonly HashSet<string> _audioExtsCheck = new(StringComparer.OrdinalIgnoreCase)
+        { ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma", ".opus" };
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/{id:guid}/check-track-matches")]
+    public async Task<IActionResult> CheckAlbumTrackMatches(Guid id, CancellationToken cancellationToken)
+    {
+        var release = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .Include(r => r.Recordings)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (release == null)
+            return NotFound(new { message = "Album not found." });
+
+        var baseMusicPath = _configuration["Music:Path"] ?? "/nas/media/AudioFiles/";
+        var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+        {
+            ReleaseTitle = release.Title ?? "",
+            ArtistName   = release.Artist?.Name ?? ""
+        };
+        var folderPath = Path.Combine(baseMusicPath, MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse));
+
+        var filesByRecId = new Dictionary<Guid, string>();
+        if (Directory.Exists(folderPath))
+        {
+            foreach (var file in Directory.EnumerateFiles(folderPath))
+            {
+                if (!_audioExtsCheck.Contains(Path.GetExtension(file))) continue;
+                if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out var rid))
+                    filesByRecId[rid] = file;
+            }
+        }
+
+        var tracks = new List<object>();
+        int issueCount = 0;
+        int checkedFiles = 0;
+
+        foreach (var recording in release.Recordings.OrderBy(r => r.PositionInAlbum))
+        {
+            bool fileExists = filesByRecId.TryGetValue(recording.Id, out var filePath);
+
+            if (!fileExists)
+            {
+                tracks.Add(new { recordingId = recording.Id, title = recording.Title, position = recording.PositionInAlbum, fileExists = false, hasMetadata = false, hasIssues = false, issues = Array.Empty<object>() });
+                continue;
+            }
+
+            checkedFiles++;
+            var meta = StreamingServiceDownloader.Helpers.AudioMetadataHelper.GetAudioMetadata(filePath!);
+            var issues = new List<TrackIssue>();
+            foreach (var (_, fn) in _trackCheckers)
+                issues.AddRange(fn(filePath!, recording, release, meta));
+
+            if (issues.Count > 0) issueCount++;
+
+            tracks.Add(new
+            {
+                recordingId = recording.Id,
+                title       = recording.Title,
+                position    = recording.PositionInAlbum,
+                fileExists  = true,
+                hasMetadata = meta != null,
+                hasIssues   = issues.Count > 0,
+                issues      = issues.Select(i => new { i.Type, i.Severity, i.Detail }).ToList()
+            });
+        }
+
+        return Ok(new
+        {
+            albumId = id,
+            checkedFiles,
+            issueCount,
+            tracks
+        });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("analysis/check-mismatches")]
+    public async Task<IActionResult> CheckAllMismatches(CancellationToken cancellationToken)
+    {
+        var releases = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .Include(r => r.Recordings)
+            .ToListAsync(cancellationToken);
+
+        var baseMusicPath = _configuration["Music:Path"] ?? "/nas/media/AudioFiles/";
+        int albumsWithIssues = 0;
+        int totalIssues = 0;
+
+        foreach (var release in releases)
+        {
+            var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+            {
+                ReleaseTitle = release.Title ?? "",
+                ArtistName   = release.Artist?.Name ?? ""
+            };
+            var folderPath = Path.Combine(baseMusicPath, MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse));
+
+            var filesByRecId = new Dictionary<Guid, string>();
+            if (Directory.Exists(folderPath))
+            {
+                foreach (var file in Directory.EnumerateFiles(folderPath))
+                {
+                    if (!_audioExtsCheck.Contains(Path.GetExtension(file))) continue;
+                    if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out var rid))
+                        filesByRecId[rid] = file;
+                }
+            }
+
+            int mismatchCount = 0;
+            var trackIssuesList = new List<object>();
+
+            foreach (var recording in release.Recordings.OrderBy(r => r.PositionInAlbum))
+            {
+                if (!filesByRecId.TryGetValue(recording.Id, out var filePath)) continue;
+
+                var meta = StreamingServiceDownloader.Helpers.AudioMetadataHelper.GetAudioMetadata(filePath);
+                var issues = new List<TrackIssue>();
+                foreach (var (_, fn) in _trackCheckers)
+                    issues.AddRange(fn(filePath, recording, release, meta));
+
+                if (issues.Count > 0)
+                {
+                    mismatchCount++;
+                    totalIssues += issues.Count;
+                    trackIssuesList.Add(new
+                    {
+                        recordingId = recording.Id,
+                        title       = recording.Title,
+                        position    = recording.PositionInAlbum,
+                        issues      = issues.Select(i => new { i.Type, i.Severity, i.Detail }).ToList()
+                    });
+                }
+            }
+
+            var analysis = await _dbContext.AlbumAnalysisResults.FirstOrDefaultAsync(a => a.AlbumId == release.Id, cancellationToken);
+            if (analysis == null)
+            {
+                analysis = new AlbumAnalysisResult { AlbumId = release.Id };
+                _dbContext.AlbumAnalysisResults.Add(analysis);
+            }
+            analysis.MismatchedTracksCount  = mismatchCount;
+            analysis.TrackMatchIssuesJson   = System.Text.Json.JsonSerializer.Serialize(trackIssuesList);
+            analysis.LastMismatchCheckedAt  = DateTime.UtcNow;
+
+            if (mismatchCount > 0) albumsWithIssues++;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            success          = true,
+            totalAlbums      = releases.Count,
+            albumsWithIssues,
+            totalIssues
+        });
     }
 
     private static async Task PerformFullAnalysisScanAsync(

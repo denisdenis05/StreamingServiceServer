@@ -19,4 +19,8 @@ public class AlbumAnalysisResult
     public string MissingRecordingIdsJson { get; set; } = "[]";
 
     public DateTime LastAnalyzedAt { get; set; } = DateTime.UtcNow;
+
+    public int MismatchedTracksCount { get; set; }
+    public string TrackMatchIssuesJson { get; set; } = "[]";
+    public DateTime? LastMismatchCheckedAt { get; set; }
 }

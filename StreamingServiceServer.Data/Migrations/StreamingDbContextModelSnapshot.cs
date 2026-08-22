@@ -128,6 +128,12 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<DateTime>("LastAnalyzedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("LastMismatchCheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MismatchedTracksCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("MissingRecordingIdsJson")
                         .IsRequired()
                         .HasColumnType("text");
@@ -140,6 +146,10 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.Property<int>("TotalTracks")
                         .HasColumnType("integer");
+
+                    b.Property<string>("TrackMatchIssuesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("AlbumId");
 

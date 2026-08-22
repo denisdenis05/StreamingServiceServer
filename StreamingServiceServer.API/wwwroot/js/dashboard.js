@@ -596,24 +596,30 @@ function renderAlbumDetail(album) {
       <ul class="track-list">
         ${album.recordings.map((track, i) => {
           const isMissing = track.fileExists === false;
-          const dur = track.length ? Math.floor(track.length / 60) + ':' + String(track.length % 60).padStart(2, '0') : '';
+          const durSec = track.length ? Math.round(track.length / 1000) : 0;
+          const dur = durSec ? Math.floor(durSec / 60) + ':' + String(durSec % 60).padStart(2, '0') : '';
+          const missingStyle = isMissing ? 'background-color: rgba(198, 40, 40, 0.06); border-left: 3px solid #c62828;' : '';
+          const mainRowPadding = isMissing ? 'padding: 0.8rem 0 0.8rem 0.8rem;' : 'padding: 0.8rem 0;';
           return `
-          <li class="track-item" id="track-item-${track.id}" style="${isMissing ? 'background-color: rgba(198, 40, 40, 0.06); border-left: 3px solid #c62828; padding-left: 0.8rem;' : ''}">
-            <span class="track-number">${track.position || i + 1}</span>
-            <span class="track-name" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-              ${escapeHtml(track.title)}
-              ${isMissing ? `<span class="badge badge-terracotta" style="font-size: 0.75rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;" title="Audio file missing on filesystem">⚠ missing file</span>` : ''}
-            </span>
-            <span style="font-size: 0.85rem; color: var(--text-muted);">${dur}</span>
-            <span class="track-redownload-area" style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
-              <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="${isMissing ? 'Download missing track' : 'Re-download this track'}" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">↻</button>
-              <span id="rdc-${track.id}" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem;">
-                <span style="color:var(--text-muted);">${isMissing ? 'download?' : 'redownload?'}</span>
-                <button onclick="confirmRedownload('${album.id}','${track.id}')" class="btn-cta" style="padding:0.15rem 0.45rem; font-size:0.78rem;">yes</button>
-                <button onclick="hideRedownloadConfirm('${track.id}')" class="btn-secondary" style="padding:0.15rem 0.45rem; font-size:0.78rem;">no</button>
+          <li id="track-item-${track.id}" style="display: block; border-bottom: 1px solid var(--border-light); ${missingStyle}">
+            <div style="display: flex; justify-content: space-between; align-items: center; ${mainRowPadding}">
+              <span class="track-number">${track.position || i + 1}</span>
+              <span class="track-name" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                ${escapeHtml(track.title)}
+                ${isMissing ? `<span class="badge badge-terracotta" style="font-size: 0.75rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: #ffebee; color: #c62828; border: 1px solid #ffcdd2;" title="Audio file missing on filesystem">⚠ missing file</span>` : ''}
               </span>
-              <span id="rds-${track.id}" style="display:none; font-size:0.78rem; color:var(--text-muted);"></span>
-            </span>
+              <span style="font-size: 0.85rem; color: var(--text-muted);">${dur}</span>
+              <span class="track-redownload-area" style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
+                <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="${isMissing ? 'Download missing track' : 'Re-download this track'}" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">↻</button>
+                <span id="rdc-${track.id}" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem;">
+                  <span style="color:var(--text-muted);">${isMissing ? 'download?' : 'redownload?'}</span>
+                  <button onclick="confirmRedownload('${album.id}','${track.id}')" class="btn-cta" style="padding:0.15rem 0.45rem; font-size:0.78rem;">yes</button>
+                  <button onclick="hideRedownloadConfirm('${track.id}')" class="btn-secondary" style="padding:0.15rem 0.45rem; font-size:0.78rem;">no</button>
+                </span>
+                <span id="rds-${track.id}" style="display:none; font-size:0.78rem; color:var(--text-muted);"></span>
+              </span>
+            </div>
+            <div id="track-check-${track.id}" style="display: none;"></div>
           </li>
         `;
         }).join('')}
@@ -647,6 +653,11 @@ function renderAlbumDetail(album) {
           <button onclick="handleRequeue('${album.id}')" class="btn-secondary">
             requeue download
           </button>
+          ${album.isDownloaded && album.recordings && album.recordings.length > 0 ? `
+            <button id="btn-check-matches-${album.id}" onclick="checkAlbumTrackMatches('${album.id}')" class="btn-secondary">
+              &#9741; check track matches
+            </button>
+          ` : ''}
           ${!album.isDownloaded ? `
             <button onclick="handleSetDownloaded('${album.id}')" class="btn-cta" style="background-color: var(--accent-olive);">
               mark as downloaded
@@ -656,6 +667,7 @@ function renderAlbumDetail(album) {
             remove album
           </button>
         </div>
+        <div id="track-match-actions-${album.id}" style="display: none; margin-top: 0.75rem; gap: 0.5rem; flex-wrap: wrap;"></div>
 
         <!-- Replace Audio Uploader -->
         <div style="margin-top: 2.5rem;">
@@ -1482,6 +1494,174 @@ function filterAnalysisList() {
   renderAnalysisUI(false);
 }
 
+const _trackCheckCache = {};
+
+async function checkAlbumTrackMatches(albumId) {
+  const btn = document.getElementById(`btn-check-matches-${albumId}`);
+  if (btn) { btn.disabled = true; btn.textContent = 'checking...'; }
+
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/check-track-matches`, { method: 'POST' });
+    const data = await parseJsonResponse(res);
+
+    if (!data.tracks) {
+      if (btn) { btn.innerHTML = '&#9741; check track matches'; btn.disabled = false; }
+      return;
+    }
+
+    _trackCheckCache[albumId] = data.tracks;
+
+    data.tracks.forEach(track => {
+      const issuesDiv = document.getElementById(`track-check-${track.recordingId}`);
+      if (!issuesDiv) return;
+
+      if (track.issues && track.issues.length > 0) {
+        const issuesHtml = track.issues.map(issue => {
+          const isError = issue.severity === 'error';
+          const color  = isError ? '#c62828' : '#f57f17';
+          const bg     = isError ? '#ffebee' : '#fff8e1';
+          const border = isError ? '#ffcdd2' : '#ffe082';
+          const icon   = isError ? '✗' : '⚠';
+          return `<span style="display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;padding:0.2rem 0.5rem;background:${bg};color:${color};border:1px solid ${border};border-radius:4px;">${icon} ${escapeHtml(issue.detail)}</span>`;
+        }).join(' ');
+
+        issuesDiv.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.35rem 0 0.75rem 2rem;">${issuesHtml}</div>`;
+        issuesDiv.style.display = 'block';
+
+        const trackItem = document.getElementById(`track-item-${track.recordingId}`);
+        if (trackItem && !trackItem.style.borderLeft.includes('c62828')) {
+          trackItem.style.borderLeft = '3px solid #e65100';
+          trackItem.style.backgroundColor = 'rgba(230,81,0,0.04)';
+        }
+      }
+    });
+
+    const issueCount = data.issueCount || 0;
+    if (btn) {
+      btn.innerHTML = issueCount > 0 ? `&#9741; ${issueCount} issue(s) found` : '&#10003; all tracks ok';
+      btn.disabled = false;
+    }
+
+    // Render bulk-action buttons if there are any mismatches
+    const actionsDiv = document.getElementById(`track-match-actions-${albumId}`);
+    if (actionsDiv && issueCount > 0) {
+      const tagIds    = data.tracks.filter(t => t.issues && t.issues.some(i => i.type === 'name_mismatch' || i.type === 'artist_mismatch')).map(t => t.recordingId);
+      const lengthIds = data.tracks.filter(t => t.issues && t.issues.some(i => i.type === 'length_mismatch')).map(t => t.recordingId);
+
+      let html = '';
+      if (tagIds.length > 0)    html += `<button class="btn-secondary" style="font-size:0.82rem;" onclick="bulkRedownloadMismatches('${albumId}','tag')">&#8635; redownload ${tagIds.length} tag mismatch(es)</button>`;
+      if (lengthIds.length > 0) html += `<button class="btn-secondary" style="font-size:0.82rem;" onclick="bulkRedownloadMismatches('${albumId}','length')">&#8635; redownload ${lengthIds.length} length mismatch(es)</button>`;
+
+      actionsDiv.innerHTML = html;
+      actionsDiv.style.display = 'flex';
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (btn) { btn.innerHTML = '&#9741; check track matches'; btn.disabled = false; }
+    }
+  }
+}
+window.checkAlbumTrackMatches = checkAlbumTrackMatches;
+
+async function bulkRedownloadMismatches(albumId, kind) {
+  const tracks = _trackCheckCache[albumId];
+  if (!tracks) return;
+
+  const issueTypes = kind === 'tag' ? ['name_mismatch', 'artist_mismatch'] : ['length_mismatch'];
+  const targets = tracks.filter(t => t.issues && t.issues.some(i => issueTypes.includes(i.type)));
+  if (targets.length === 0) return;
+
+  const actionsDiv = document.getElementById(`track-match-actions-${albumId}`);
+  const btn = actionsDiv ? actionsDiv.querySelector(`[onclick*="'${kind}'"]`) : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'searching Soulseek for album…'; }
+
+  const statusEl = document.createElement('span');
+  statusEl.style.cssText = 'font-size:0.82rem; color:var(--text-muted); margin-left:0.5rem;';
+  if (btn) btn.insertAdjacentElement('afterend', statusEl);
+
+  const recordingIds = targets.map(t => t.recordingId);
+
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/redownload-mismatched`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordingIds })
+    });
+    if (!res.ok) {
+      const d = await parseJsonResponse(res);
+      if (btn) { btn.disabled = false; btn.textContent = `✗ ${d.message || 'failed'}`; }
+      return;
+    }
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = '✗ request failed'; }
+    return;
+  }
+
+  // Poll status
+  const stateLabels = {
+    pending: '⟳ pending…', loading: '⟳ loading…', searching: '⟳ searching…',
+    downloading: '⟳ downloading…', complete: '✓ done', error: '✗ error'
+  };
+
+  const poll = async () => {
+    try {
+      const res = await authFetch(`${API_BASE}/album/${albumId}/redownload-mismatched/status`);
+      const data = await parseJsonResponse(res);
+      const label = stateLabels[data.state] || `⟳ ${data.state}`;
+
+      if (btn) {
+        const progress = (data.total > 0 && data.done > 0) ? ` (${data.done}/${data.total})` : '';
+        btn.textContent = `${label}${progress}`;
+      }
+      if (data.message) statusEl.textContent = data.message;
+
+      if (data.state === 'complete') {
+        if (btn) { btn.disabled = false; btn.style.color = '#388e3c'; }
+        return;
+      }
+      if (data.state === 'error') {
+        if (btn) { btn.disabled = false; btn.style.color = '#c62828'; }
+        return;
+      }
+
+      setTimeout(poll, 3000);
+    } catch (err) {
+      if (btn) { btn.disabled = false; btn.textContent = `✗ ${err.message}`; }
+    }
+  };
+
+  setTimeout(poll, 2000);
+}
+window.bulkRedownloadMismatches = bulkRedownloadMismatches;
+
+async function triggerCheckAllMismatches() {
+  const btn = document.getElementById('btn-analysis-check-mismatches');
+  const notice = document.getElementById('analysis-status-notice');
+  if (btn) btn.disabled = true;
+  if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; color: var(--accent-olive);">&#9741; Checking track metadata for all albums...</div>`;
+
+  try {
+    const res = await authFetch('/api/dashboard/analysis/check-mismatches', { method: 'POST' });
+    const data = await parseJsonResponse(res);
+    if (data.success) {
+      const msg = data.albumsWithIssues > 0
+        ? `Done. ${data.albumsWithIssues} album(s) have ${data.totalIssues} track issue(s).`
+        : 'Done. No track mismatches found.';
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; border-radius: 6px; color: #2e7d32;">&#10003; ${escapeHtml(msg)}</div>`;
+      await fetchAnalysisData();
+    } else {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Error: ${escapeHtml(data.message)}</div>`;
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (notice) notice.innerHTML = `<div style="padding: 0.8rem; background: #ffebee; border: 1px solid #ffcdd2; border-radius: 6px; color: #c62828;">Error: ${escapeHtml(err.message)}</div>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.triggerCheckAllMismatches = triggerCheckAllMismatches;
+
 function renderAnalysisUI(updateStats = true) {
   if (updateStats) {
     const s = analysisState.summary || {};
@@ -1545,6 +1725,11 @@ function renderAnalysisUI(updateStats = true) {
           <div style="padding: 0.35rem 0.8rem; background: ${badgeBg}; border: 1px solid ${badgeBorder}; color: ${badgeColor}; border-radius: 20px; font-weight: 600; font-size: 0.85rem;">
             ${badgeText}
           </div>
+          ${item.lastMismatchCheckedAt ? (
+            item.mismatchedTracksCount > 0
+              ? `<div style="padding: 0.35rem 0.8rem; background: #fff8e1; border: 1px solid #ffe082; color: #f57f17; border-radius: 20px; font-weight: 600; font-size: 0.85rem;" title="Track metadata mismatches found — view album for details">&#9888; ${item.mismatchedTracksCount} mismatched</div>`
+              : `<div style="padding: 0.35rem 0.8rem; background: #e8f5e9; border: 1px solid #c8e6c9; color: #2e7d32; border-radius: 20px; font-size: 0.85rem;" title="No track mismatches found">&#10003; tags ok</div>`
+          ) : ''}
           <button class="btn-secondary" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;" onclick="triggerSoulseekImportSingle('${item.albumId}')">
             scan inside soulseek folder
           </button>

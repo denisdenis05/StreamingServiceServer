@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using FuzzySharp;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,18 @@ public class PendingDownloadChecker : BackgroundService
     private readonly ITorrentHelper _torrentHelper;
     private readonly IConfiguration _configuration;
     private string _musicLocation;
+
+    private sealed class StallTracker
+    {
+        public double LastSeenProgress { get; set; } = -1;
+        public DateTime LastProgressAt { get; set; } = DateTime.UtcNow;
+        public bool HasSeenActiveTransfers { get; set; }
+        public int RetryCount { get; set; }
+    }
+
+    private readonly ConcurrentDictionary<Guid, StallTracker> _stallTrackers = new();
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromMinutes(30);
+    private const int MaxStallRetries = 3;
 
     public PendingDownloadChecker(
         IServiceScopeFactory scopeFactory, 
@@ -71,12 +84,11 @@ public class PendingDownloadChecker : BackgroundService
             try
             {
                 var providerName = item.ProviderName ?? "Torrent";
-                var providerEntry = providers.FirstOrDefault(p => 
+                var providerEntry = providers.FirstOrDefault(p =>
                     p.provider.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase));
 
                 if (providerEntry.provider == null)
                 {
-
                     await CheckTorrentPendingAsync(item, scope.ServiceProvider);
                     continue;
                 }
@@ -84,14 +96,42 @@ public class PendingDownloadChecker : BackgroundService
                 var progressInfo = await providerEntry.provider.CheckProgressAsync(
                     item.SourceName, cancellationToken);
 
-                if (progressInfo != null && progressInfo.Progress >= 1.0)
+                if (progressInfo == null) continue;  // transient API error — skip this cycle
+
+                var tracker = _stallTrackers.GetOrAdd(item.Id, _ => new StallTracker());
+
+                if (progressInfo.State == "Failed")
                 {
+                    Console.WriteLine($"[PendingDownloadChecker] All transfers failed/cancelled for {item.Id}. Requeueing (attempt {tracker.RetryCount + 1}/{MaxStallRetries})...");
+                    await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext);
+                    continue;
+                }
+
+                if (progressInfo.State == "NoTransfersFound")
+                {
+                    if (tracker.HasSeenActiveTransfers)
+                    {
+                        // Transfers were active and are now gone — slskd likely auto-cleaned after completion.
+                        // Attempt disk recovery using the last known save path.
+                        await TryDiskRecoveryAsync(item, tracker, providerEntry.provider, dbContext,
+                            metadataService, externalMusicSearchService, imageService);
+                    }
+                    else if (DateTime.UtcNow - tracker.LastProgressAt > TimeSpan.FromMinutes(5))
+                    {
+                        Console.WriteLine($"[PendingDownloadChecker] No transfers ever seen for {item.Id} after 5min. Requeueing...");
+                        await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext);
+                    }
+                    continue;
+                }
+
+                if (progressInfo.Progress >= 1.0)
+                {
+                    tracker.HasSeenActiveTransfers = true;
                     Console.WriteLine($"[PendingDownloadChecker] {providerName} download complete for {item.Id}");
 
                     var rawSavePath = !string.IsNullOrWhiteSpace(progressInfo.SavePath)
                         ? progressInfo.SavePath
                         : item.SavePath ?? "";
-
 
                     if (providerName == "Torrent")
                     {
@@ -106,7 +146,7 @@ public class PendingDownloadChecker : BackgroundService
                         var files = GetMusicFilesInSavePath(resolvedSavePath);
                         if (files.Count == 0)
                         {
-                            Console.WriteLine($"[PendingDownloadChecker] WARNING: No music files found at resolved path '{resolvedSavePath}' (raw: '{rawSavePath}') for album {item.Id}. Will retry...");
+                            Console.WriteLine($"[PendingDownloadChecker] WARNING: No music files at '{resolvedSavePath}' (raw: '{rawSavePath}') for {item.Id}. Will retry...");
                             continue;
                         }
 
@@ -115,15 +155,31 @@ public class PendingDownloadChecker : BackgroundService
 
                         if (movedCount > 0)
                         {
-
                             await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
                             await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
                             await providerEntry.provider.CleanUpAsync(item.SourceName, true);
+                            _stallTrackers.TryRemove(item.Id, out _);
                         }
                         else
                         {
-                            Console.WriteLine($"[PendingDownloadChecker] WARNING: 0 files matched/moved for album {item.Id} at path '{resolvedSavePath}'. Will retry...");
+                            Console.WriteLine($"[PendingDownloadChecker] WARNING: 0 files moved for {item.Id} at '{resolvedSavePath}'. Will retry...");
                         }
+                    }
+                }
+                else
+                {
+                    // Actively downloading — track progress to detect stalls
+                    tracker.HasSeenActiveTransfers = true;
+
+                    if (progressInfo.Progress > tracker.LastSeenProgress + 0.001)
+                    {
+                        tracker.LastSeenProgress = progressInfo.Progress;
+                        tracker.LastProgressAt = DateTime.UtcNow;
+                    }
+                    else if (DateTime.UtcNow - tracker.LastProgressAt > StallTimeout)
+                    {
+                        Console.WriteLine($"[PendingDownloadChecker] No progress for {(int)StallTimeout.TotalMinutes}min on {item.Id}. Requeueing (attempt {tracker.RetryCount + 1}/{MaxStallRetries})...");
+                        await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext);
                     }
                 }
             }
@@ -183,6 +239,72 @@ public class PendingDownloadChecker : BackgroundService
         return rawSavePath;
     }
 
+
+    private async Task HandleStalledDownloadAsync(
+        StreamingServiceServer.Data.Models.PendingDownload item,
+        StallTracker tracker,
+        IDownloadProvider provider,
+        StreamingDbContext dbContext)
+    {
+        tracker.RetryCount++;
+
+        try { await provider.CleanUpAsync(item.SourceName, false); } catch { }
+
+        if (tracker.RetryCount > MaxStallRetries)
+        {
+            Console.WriteLine($"[PendingDownloadChecker] Stall retry limit ({MaxStallRetries}) reached for {item.Id}. Marking as failed.");
+            _stallTrackers.TryRemove(item.Id, out _);
+
+            if (!await dbContext.FailedDownloads.AnyAsync(f => f.Id == item.Id))
+            {
+                var release = await dbContext.ReleasesToDownload.FindAsync(item.Id);
+                await dbContext.FailedDownloads.AddAsync(new StreamingServiceServer.Data.Models.FailedDownload
+                {
+                    Id = item.Id,
+                    Title = release?.Title ?? "Unknown",
+                    Artist = release?.Artist ?? "Unknown"
+                });
+            }
+        }
+        else
+        {
+            Console.WriteLine($"[PendingDownloadChecker] Stall retry {tracker.RetryCount}/{MaxStallRetries} for {item.Id}. Requeueing for new search...");
+            tracker.LastSeenProgress = -1;
+            tracker.LastProgressAt = DateTime.UtcNow;
+            tracker.HasSeenActiveTransfers = false;
+        }
+
+        dbContext.PendingDownloads.Remove(item);
+        await dbContext.SaveChangesAsync();
+    }
+
+    private async Task TryDiskRecoveryAsync(
+        StreamingServiceServer.Data.Models.PendingDownload item,
+        StallTracker tracker,
+        IDownloadProvider provider,
+        StreamingDbContext dbContext,
+        IMetadataService metadataService,
+        IExternalMusicSearchService externalMusicSearchService,
+        IImageService imageService)
+    {
+        var resolvedPath = ResolveSavePath(item.SavePath ?? "");
+        if (string.IsNullOrWhiteSpace(resolvedPath)) return;
+
+        var files = GetMusicFilesInSavePath(resolvedPath);
+        if (files.Count == 0) return;
+
+        Console.WriteLine($"[PendingDownloadChecker] Disk recovery: {files.Count} file(s) found for {item.Id} at '{resolvedPath}'.");
+        var matches = await MatchSongsWithMetadataAsync(item.Id, files, externalMusicSearchService, imageService);
+        var movedCount = MoveMatchedFiles(matches);
+
+        if (movedCount > 0)
+        {
+            await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+            await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
+            await provider.CleanUpAsync(item.SourceName, true);
+            _stallTrackers.TryRemove(item.Id, out _);
+        }
+    }
 
     private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item, IServiceProvider serviceProvider)
     {

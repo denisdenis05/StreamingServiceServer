@@ -78,13 +78,13 @@ public class SoulseekProvider : IDownloadProvider
                     if (!FormatExtensions.TryGetValue(format, out var allowedExtensions))
                         continue;
 
-                    var bestMatch = FindBestDirectoryForFormat(release, queryOption.ContainsArtist, searchResult.Responses, allowedExtensions);
-                    if (bestMatch != null)
+                    var candidates = FindCandidateDirectoriesForFormat(release, queryOption.ContainsArtist, searchResult.Responses, allowedExtensions);
+                    foreach (var candidate in candidates)
                     {
-                        Console.WriteLine($"[Soulseek] Found {format} match from user '{bestMatch.Value.username}' in folder '{bestMatch.Value.directoryPath}' ({bestMatch.Value.files.Count} valid tracks). Enqueuing...");
+                        Console.WriteLine($"[Soulseek] Trying {format} candidate user='{candidate.Username}' dir='{candidate.DirectoryPath}' score={candidate.Score} freeSlots={candidate.HasFreeSlots} ({candidate.Files.Count} tracks)...");
 
                         var enqueued = await _slskdHelper.EnqueueDirectoryDownloadAsync(
-                            bestMatch.Value.username, bestMatch.Value.files, cancellationToken);
+                            candidate.Username, candidate.Files, cancellationToken);
 
                         if (enqueued > 0)
                         {
@@ -92,10 +92,12 @@ public class SoulseekProvider : IDownloadProvider
                             return new DownloadSearchResult
                             {
                                 Success = true,
-                                SourceIdentifier = $"slskd:{searchId.Value}:{bestMatch.Value.username}",
-                                SavePath = bestMatch.Value.directoryPath
+                                SourceIdentifier = $"slskd:{searchId.Value}:{candidate.Username}",
+                                SavePath = candidate.DirectoryPath
                             };
                         }
+
+                        Console.WriteLine($"[Soulseek] Enqueue failed for '{candidate.Username}', trying next candidate...");
                     }
                 }
 
@@ -120,19 +122,15 @@ public class SoulseekProvider : IDownloadProvider
 
         var username = parts[2];
         var downloads = await _slskdHelper.GetDownloadsAsync(cancellationToken);
-        if (downloads == null) return null;
+        if (downloads == null) return null;  // transient API error — caller should skip this cycle
 
-        var userTransfers = downloads.FirstOrDefault(d => 
+        var userTransfers = downloads.FirstOrDefault(d =>
             d.Username?.Equals(username, StringComparison.OrdinalIgnoreCase) == true);
 
         if (userTransfers?.Directories == null || userTransfers.Directories.Count == 0)
         {
-            return new DownloadProgressInfo
-            {
-                Progress = 1.0,
-                SavePath = "",
-                State = "Completed"
-            };
+            // slskd has no record for this user — could be post-cleanup or a silent enqueue failure
+            return new DownloadProgressInfo { Progress = 0, SavePath = "", State = "NoTransfersFound" };
         }
 
         double totalProgress = 0;
@@ -152,17 +150,27 @@ public class SoulseekProvider : IDownloadProvider
             }
         }
 
-        var avgProgress = fileCount > 0 ? totalProgress / fileCount / 100.0 : 0;
-        var allComplete = fileCount > 0 && userTransfers.Directories
+        var allFiles = userTransfers.Directories
             .SelectMany(d => d.Files ?? new List<SlskdTransferItem>())
-            .All(f => f.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true);
+            .ToList();
 
-        return new DownloadProgressInfo
-        {
-            Progress = allComplete ? 1.0 : avgProgress,
-            SavePath = savePath,
-            State = allComplete ? "Completed" : "Downloading"
-        };
+        var avgProgress = fileCount > 0 ? totalProgress / fileCount / 100.0 : 0;
+
+        var allComplete = fileCount > 0 && allFiles.All(f =>
+            f.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true);
+
+        var allTerminallyFailed = fileCount > 0 && allFiles.All(f =>
+            (f.State?.Contains("Errored", StringComparison.OrdinalIgnoreCase) == true) ||
+            (f.State?.Contains("Cancelled", StringComparison.OrdinalIgnoreCase) == true) ||
+            (f.State?.Contains("Canceled", StringComparison.OrdinalIgnoreCase) == true));
+
+        if (allComplete)
+            return new DownloadProgressInfo { Progress = 1.0, SavePath = savePath, State = "Completed" };
+
+        if (allTerminallyFailed)
+            return new DownloadProgressInfo { Progress = 0, SavePath = savePath, State = "Failed" };
+
+        return new DownloadProgressInfo { Progress = avgProgress, SavePath = savePath, State = "Downloading" };
     }
 
     public async Task CleanUpAsync(string sourceIdentifier, bool deleteFiles)
@@ -256,7 +264,7 @@ public class SoulseekProvider : IDownloadProvider
         return result;
     }
 
-    private (string username, string directoryPath, List<SlskdFileDownloadRequest> files)? FindBestDirectoryForFormat(
+    private List<CandidateDirectory> FindCandidateDirectoriesForFormat(
         ReleaseToDownload release,
         bool queryContainsArtist,
         List<SlskdSearchResponse> responses,
@@ -391,24 +399,22 @@ public class SoulseekProvider : IDownloadProvider
 
         Console.WriteLine($"[Soulseek][Match] Summary: totalDirs={totalDirs} skippedNoAudio={skippedNoAudio} skippedVa={skippedVa} skippedAlbumScore={skippedAlbumScore} skippedArtistScore={skippedArtistScore} candidates={candidates.Count}");
 
-        if (candidates.Count == 0) return null;
-
-        var bestCandidate = candidates
+        var ranked = candidates
             .Where(c => c.Score >= 50)
             .OrderByDescending(c => c.Score)
             .ThenByDescending(c => c.HasFreeSlots)
             .ThenByDescending(c => c.FileCount)
             .ThenByDescending(c => c.UploadSpeed)
-            .FirstOrDefault();
+            .ToList();
 
-        if (bestCandidate != null)
+        if (ranked.Count == 0)
         {
-            Console.WriteLine($"[Soulseek][Match] BEST: '{bestCandidate.DirectoryPath}' user='{bestCandidate.Username}' score={bestCandidate.Score}");
-            return (bestCandidate.Username, bestCandidate.DirectoryPath, bestCandidate.Files);
+            Console.WriteLine($"[Soulseek][Match] No candidate passed score>=50 threshold. Best scores: {string.Join(", ", candidates.OrderByDescending(c => c.Score).Take(5).Select(c => $"'{c.DirectoryPath}'={c.Score}"))}");
+            return ranked;
         }
 
-        Console.WriteLine($"[Soulseek][Match] No candidate passed score>=50 threshold. Best scores: {string.Join(", ", candidates.OrderByDescending(c => c.Score).Take(5).Select(c => $"'{c.DirectoryPath}'={c.Score}"))}");
-        return null;
+        Console.WriteLine($"[Soulseek][Match] {ranked.Count} candidate(s) ranked. Best: '{ranked[0].DirectoryPath}' user='{ranked[0].Username}' score={ranked[0].Score}");
+        return ranked;
     }
 
     private static int CalculateAudioQualityScore(SlskdFile file, string extension)

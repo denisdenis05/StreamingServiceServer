@@ -1311,6 +1311,252 @@ public class DashboardController : ControllerBase
         }
     }
 
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/add-manual")]
+    public async Task<IActionResult> AddManualAlbum([FromBody] AddManualAlbumRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.ArtistName))
+            return BadRequest(new { message = "Title and ArtistName are required." });
+
+        var artist = await _dbContext.Artists
+            .FirstOrDefaultAsync(a => a.Name.ToLower() == request.ArtistName.ToLower().Trim(), cancellationToken);
+
+        if (artist == null)
+        {
+            artist = new Artist { Id = Guid.NewGuid(), Name = request.ArtistName.Trim() };
+            _dbContext.Artists.Add(artist);
+        }
+
+        var release = new Release
+        {
+            Id = Guid.NewGuid(),
+            Title = request.Title.Trim(),
+            Artist = artist,
+            Cover = "/api/dashboard/placeholder-cover",
+            DateAdded = DateTime.UtcNow
+        };
+
+        _dbContext.Releases.Add(release);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { message = "Album created.", id = release.Id });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/{id:guid}/recording/add")]
+    public async Task<IActionResult> AddRecording(Guid id, [FromBody] AddRecordingRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+            return BadRequest(new { message = "Title is required." });
+
+        if (request.PositionInAlbum < 1)
+            return BadRequest(new { message = "PositionInAlbum must be >= 1." });
+
+        var release = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (release == null)
+            return NotFound(new { message = "Album not found." });
+
+        var recording = new Recording
+        {
+            Id = Guid.NewGuid(),
+            Title = request.Title.Trim(),
+            PositionInAlbum = request.PositionInAlbum,
+            Length = request.LengthMs,
+            Release = release,
+            Cover = release.Cover ?? string.Empty,
+            SmallCover = release.SmallCover,
+            VerySmallCover = release.VerySmallCover,
+            OptimizedCover = release.OptimizedCover ?? string.Empty,
+            OptimizedSmallCover = release.OptimizedSmallCover ?? string.Empty,
+            OptimizedVerySmallCover = release.OptimizedVerySmallCover ?? string.Empty,
+            LocalCover = release.LocalCover ?? string.Empty,
+            LocalSmallCover = release.LocalSmallCover ?? string.Empty,
+            LocalVerySmallCover = release.LocalVerySmallCover ?? string.Empty,
+            DateAdded = DateTime.UtcNow
+        };
+
+        _dbContext.Recordings.Add(recording);
+
+        var analysis = await _dbContext.AlbumAnalysisResults.FirstOrDefaultAsync(a => a.AlbumId == id, cancellationToken);
+        if (analysis != null) _dbContext.AlbumAnalysisResults.Remove(analysis);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { message = "Track added.", id = recording.Id, title = recording.Title, position = recording.PositionInAlbum });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("album/{id:guid}/recording/{recordingId:guid}")]
+    public async Task<IActionResult> DeleteRecording(Guid id, Guid recordingId, CancellationToken cancellationToken)
+    {
+        var recording = await _dbContext.Recordings
+            .Include(r => r.Release)
+                .ThenInclude(rel => rel.Artist)
+            .FirstOrDefaultAsync(r => r.Id == recordingId && r.Release.Id == id, cancellationToken);
+
+        if (recording == null)
+            return NotFound(new { message = "Recording not found on this album." });
+
+        var baseMusicPath = _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
+        var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+        {
+            ReleaseTitle = recording.Release?.Title ?? "",
+            ArtistName = recording.Release?.Artist?.Name ?? ""
+        };
+        var relFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse);
+        var folderPath = Path.Combine(baseMusicPath, relFolder);
+
+        if (Directory.Exists(folderPath))
+        {
+            var audioFile = Directory.EnumerateFiles(folderPath)
+                .FirstOrDefault(f => string.Equals(
+                    Path.GetFileNameWithoutExtension(f), recordingId.ToString(), StringComparison.OrdinalIgnoreCase));
+            if (audioFile != null)
+            {
+                try { System.IO.File.Delete(audioFile); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to delete audio file for recording {Id}", recordingId); }
+            }
+        }
+
+        _dbContext.Recordings.Remove(recording);
+
+        var analysis = await _dbContext.AlbumAnalysisResults.FirstOrDefaultAsync(a => a.AlbumId == id, cancellationToken);
+        if (analysis != null) _dbContext.AlbumAnalysisResults.Remove(analysis);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { message = "Track deleted." });
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpDelete("album/{id:guid}/recordings/missing")]
+    public async Task<IActionResult> DeleteMissingRecordings(Guid id, CancellationToken cancellationToken)
+    {
+        var release = await _dbContext.Releases
+            .Include(r => r.Artist)
+            .Include(r => r.Recordings)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (release == null)
+            return NotFound(new { message = "Album not found." });
+
+        var baseMusicPath = _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
+        var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+        {
+            ReleaseTitle = release.Title ?? "",
+            ArtistName = release.Artist?.Name ?? ""
+        };
+        var relFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse);
+        var folderPath = Path.Combine(baseMusicPath, relFolder);
+
+        var existingFileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (Directory.Exists(folderPath))
+        {
+            var audioExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma" };
+            foreach (var file in Directory.EnumerateFiles(folderPath))
+                if (audioExts.Contains(Path.GetExtension(file)))
+                    existingFileIds.Add(Path.GetFileNameWithoutExtension(file));
+        }
+
+        var missing = release.Recordings
+            .Where(r => !existingFileIds.Contains(r.Id.ToString()))
+            .ToList();
+
+        if (missing.Count == 0)
+            return Ok(new { removed = 0, message = "No missing-file tracks found." });
+
+        _dbContext.Recordings.RemoveRange(missing);
+
+        var analysis = await _dbContext.AlbumAnalysisResults.FirstOrDefaultAsync(a => a.AlbumId == id, cancellationToken);
+        if (analysis != null) _dbContext.AlbumAnalysisResults.Remove(analysis);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { removed = missing.Count, message = $"Removed {missing.Count} track(s) with no audio file." });
+    }
+
+    private static readonly HashSet<string> _allowedImageTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg", "image/jpg", "image/png", "image/webp"
+    };
+
+    private static readonly Dictionary<string, string> _imageTypeToExt = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["image/jpeg"] = ".jpg",
+        ["image/jpg"] = ".jpg",
+        ["image/png"] = ".png",
+        ["image/webp"] = ".webp"
+    };
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("album/{id:guid}/update-cover")]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = 10485760)]
+    public async Task<IActionResult> UpdateAlbumCover(Guid id, IFormFile? file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "No image file received." });
+
+        var contentType = file.ContentType?.ToLowerInvariant() ?? "";
+        if (!_allowedImageTypes.Contains(contentType))
+            return BadRequest(new { message = "Only JPEG, PNG, and WebP images are accepted." });
+
+        var release = await _dbContext.Releases
+            .Include(r => r.Recordings)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (release == null)
+            return NotFound(new { message = "Album not found." });
+
+        var coverPath = _configuration["Cover:Path"] ?? "/nas/media/Images/";
+        var domainExtension = _configuration["Cover:DomainExtension"] ?? "/images/";
+        var domain = _configuration["Domain"] ?? "";
+
+        var ext = _imageTypeToExt.TryGetValue(contentType, out var e) ? e : Path.GetExtension(file.FileName);
+        var fileName = $"{id}_cover{ext}";
+        var filePath = Path.Combine(coverPath, fileName);
+
+        Directory.CreateDirectory(coverPath);
+        using (var stream = new FileStream(filePath, FileMode.Create))
+            await file.CopyToAsync(stream, cancellationToken);
+
+        var publicUrl = $"{domain}{domainExtension}{fileName}";
+
+        release.Cover = publicUrl;
+        release.SmallCover = publicUrl;
+        release.VerySmallCover = publicUrl;
+        release.OptimizedCover = publicUrl;
+        release.OptimizedSmallCover = publicUrl;
+        release.OptimizedVerySmallCover = publicUrl;
+        release.LocalCover = publicUrl;
+        release.LocalSmallCover = publicUrl;
+        release.LocalVerySmallCover = publicUrl;
+
+        if (release.Recordings != null)
+        {
+            foreach (var rec in release.Recordings)
+            {
+                rec.Cover = publicUrl;
+                rec.SmallCover = publicUrl;
+                rec.VerySmallCover = publicUrl;
+                rec.OptimizedCover = publicUrl;
+                rec.OptimizedSmallCover = publicUrl;
+                rec.OptimizedVerySmallCover = publicUrl;
+                rec.LocalCover = publicUrl;
+                rec.LocalSmallCover = publicUrl;
+                rec.LocalVerySmallCover = publicUrl;
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { message = "Cover updated.", coverUrl = publicUrl });
+    }
+
     [AllowAnonymous]
     [HttpGet("placeholder-cover")]
     public IActionResult GetPlaceholderCover()

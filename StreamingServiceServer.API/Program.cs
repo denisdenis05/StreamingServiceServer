@@ -124,6 +124,17 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowFrontend");
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+var coverPath = app.Configuration["Cover:Path"];
+if (!string.IsNullOrWhiteSpace(coverPath))
+{
+    Directory.CreateDirectory(coverPath);
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(Path.GetFullPath(coverPath)),
+        RequestPath = "/images"
+    });
+}
 app.UseHttpsRedirection();
 app.UseAuthentication();    
 app.UseAuthorization();

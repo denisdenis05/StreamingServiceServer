@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initApp() {
   setupNavigation();
   setupModal();
+  setupAddTrackModal();
   setupAuthForms();
   setupCarouselButtons();
   
@@ -617,6 +618,7 @@ function renderAlbumDetail(album) {
                   <button onclick="hideRedownloadConfirm('${track.id}')" class="btn-secondary" style="padding:0.15rem 0.45rem; font-size:0.78rem;">no</button>
                 </span>
                 <span id="rds-${track.id}" style="display:none; font-size:0.78rem; color:var(--text-muted);"></span>
+                <button onclick="requireAdminAuth(() => deleteTrack('${album.id}','${track.id}'))" class="btn-secondary" title="Delete this track" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--accent-terracotta);">✕</button>
               </span>
             </div>
             <div id="track-check-${track.id}" style="display: none;"></div>
@@ -640,7 +642,11 @@ function renderAlbumDetail(album) {
 
     <div class="album-detail-grid">
       <div>
-        <img src="${coverUrl}" class="album-detail-cover" onError="this.src='${API_BASE}/placeholder-cover'" />
+        <div style="position: relative; display: inline-block;">
+          <img src="${coverUrl}" id="album-cover-img-${album.id}" class="album-detail-cover" onError="this.src='${API_BASE}/placeholder-cover'" style="display: block;" />
+          <button onclick="requireAdminAuth(() => document.getElementById('cover-file-input-${album.id}').click())" class="btn-secondary" style="position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; padding: 0.2rem 0.6rem; opacity: 0.85;">change cover</button>
+          <input type="file" id="cover-file-input-${album.id}" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="uploadCover('${album.id}', this)" />
+        </div>
       </div>
       <div>
         <span class="album-badge ${badgeClass}" style="position: relative; top: auto; right: auto; display: inline-block; margin-bottom: 0.8rem;">
@@ -661,6 +667,14 @@ function renderAlbumDetail(album) {
           ${!album.isDownloaded ? `
             <button onclick="handleSetDownloaded('${album.id}')" class="btn-cta" style="background-color: var(--accent-olive);">
               mark as downloaded
+            </button>
+          ` : ''}
+          <button onclick="requireAdminAuth(() => openAddTrackModal('${album.id}'))" class="btn-secondary">
+            + add track
+          </button>
+          ${album.isDownloaded && album.recordings && album.recordings.some(t => t.fileExists === false) ? `
+            <button onclick="removeMissingTracks('${album.id}')" class="btn-secondary" style="color: var(--accent-terracotta); border-color: var(--accent-terracotta);">
+              remove missing tracks
             </button>
           ` : ''}
           <button onclick="handleDeleteAlbum('${album.id}')" class="btn-secondary" style="color: var(--accent-terracotta); border-color: var(--accent-terracotta);">
@@ -876,6 +890,142 @@ async function handleDeleteAlbum(id) {
     if (err.message !== 'Authentication/Authorization required') {
       alert('failed to remove album.');
     }
+  }
+}
+
+// ─── ADD TRACK MODAL ───
+
+function openAddTrackModal(albumId) {
+  const modal = document.getElementById('add-track-modal');
+  if (!modal) return;
+  document.getElementById('add-track-album-id').value = albumId;
+  document.getElementById('input-track-title').value = '';
+  document.getElementById('input-track-position').value = '';
+  document.getElementById('input-track-duration').value = '';
+  modal.style.display = 'flex';
+}
+
+function setupAddTrackModal() {
+  const modal = document.getElementById('add-track-modal');
+  const closeBtn = document.getElementById('btn-close-add-track-modal');
+  const form = document.getElementById('add-track-form');
+  if (!modal) return;
+
+  if (closeBtn) closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!requireAdminAuth(() => {})) return;
+      const albumId = document.getElementById('add-track-album-id').value;
+      const title = document.getElementById('input-track-title').value.trim();
+      const position = parseInt(document.getElementById('input-track-position').value, 10);
+      const durationSec = parseInt(document.getElementById('input-track-duration').value, 10) || null;
+
+      try {
+        const res = await authFetch(`${API_BASE}/album/${albumId}/recording/add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, positionInAlbum: position, lengthMs: durationSec ? durationSec * 1000 : null })
+        });
+        if (res.ok) {
+          modal.style.display = 'none';
+          await loadAlbumDetail(albumId);
+        } else {
+          const data = await res.json().catch(() => ({}));
+          alert(data.message || 'failed to add track.');
+        }
+      } catch (err) {
+        if (err.message !== 'Authentication/Authorization required') alert('error adding track.');
+      }
+    });
+  }
+}
+
+// ─── DELETE TRACK ───
+
+async function removeMissingTracks(albumId) {
+  if (!confirm('Remove all tracks that have no audio file? This cannot be undone.')) return;
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/recordings/missing`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      await loadAlbumDetail(albumId);
+    } else {
+      alert(data.message || 'failed to remove missing tracks.');
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') alert('error removing missing tracks.');
+  }
+}
+
+async function deleteTrack(albumId, recordingId) {
+  if (!confirm('Delete this track and its audio file? This cannot be undone.')) return;
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/recording/${recordingId}`, { method: 'DELETE' });
+    if (res.ok) {
+      await loadAlbumDetail(albumId);
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.message || 'failed to delete track.');
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') alert('error deleting track.');
+  }
+}
+
+// ─── COVER UPLOAD ───
+
+async function uploadCover(albumId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('upload-status');
+  if (statusEl) statusEl.textContent = 'uploading cover...';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/update-cover`, { method: 'POST', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const img = document.getElementById(`album-cover-img-${albumId}`);
+      if (img && data.coverUrl) img.src = data.coverUrl + '?t=' + Date.now();
+      if (statusEl) statusEl.textContent = 'cover updated.';
+    } else {
+      if (statusEl) statusEl.textContent = data.message || 'cover upload failed.';
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') {
+      if (statusEl) statusEl.textContent = 'error uploading cover.';
+    }
+  }
+  input.value = '';
+}
+
+// ─── ADD MANUAL ALBUM ───
+
+async function addManualAlbum() {
+  const title = document.getElementById('input-album-title')?.value?.trim();
+  const artist = document.getElementById('input-album-artist')?.value?.trim();
+  if (!title || !artist) { alert('enter title and artist first.'); return; }
+  if (!requireAdminAuth(() => {})) return;
+  try {
+    const res = await authFetch(`${API_BASE}/album/add-manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, artistName: artist })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const modal = document.getElementById('add-album-modal');
+      if (modal) modal.style.display = 'none';
+      await refreshData();
+      if (data.id) navigateTo('album-detail', data.id);
+    } else {
+      alert(data.message || 'failed to create album.');
+    }
+  } catch (err) {
+    if (err.message !== 'Authentication/Authorization required') alert('error creating album.');
   }
 }
 

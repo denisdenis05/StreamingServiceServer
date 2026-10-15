@@ -2,7 +2,7 @@
 
 ## Start
 
-From the server repository:
+From the server repository, create `.env` only if it does not already exist:
 
 ```sh
 cp .env.example .env
@@ -17,7 +17,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-The service is available at `http://localhost:3003`. Nginx owns host port 3003 and proxies to the API on internal port 8080. The API publishes no host port. The Dockerfile publishes the API with `dotnet publish --configuration Release` and runs with both .NET environment names set to Production. Swagger remains disabled under the existing production behavior.
+The service is available at `http://localhost:3003`. Compose publishes the API directly as host port 3003 to container port 8080. Your existing external Nginx proxies to this endpoint; Compose does not start an Nginx container. The Dockerfile publishes the API with `dotnet publish --configuration Release` and runs with both .NET environment names set to Production. Swagger remains disabled under the existing production behavior.
 
 The stack expects an existing PostgreSQL database with the application's schema and existing download-provider services. It does not provision a database, apply migrations, or start torrent/Soulseek services. Apply the project's existing EF migrations before using a new database.
 
@@ -34,7 +34,7 @@ The stack expects an existing PostgreSQL database with the application's schema 
 | COVERS_HOST_PATH | Absolute host directory containing cover images. |
 | DOWNLOADS_HOST_PATH | Absolute host directory shared with the external downloader. |
 
-All three directories must already exist. Bind mounts deliberately fail if a directory is missing. Both containers default to UID/GID `1654:1654`; the server needs read/write access and Nginx needs read access to the music files. Set `SERVER_USER` to the owner UID/GID of existing directories if necessary. File ownership on the host is preserved.
+All three directories must already exist. Bind mounts deliberately fail if a directory is missing. The server container defaults to UID/GID `1654:1654` and needs read/write access. Your external Nginx needs read access to the same host music directory for streaming. Set `SERVER_USER` to the owner UID/GID of existing directories if necessary. File ownership on the host is preserved.
 
 To generate a signing key locally:
 
@@ -55,7 +55,7 @@ Additional optional variables:
 | Variable | Default / meaning |
 | --- | --- |
 | SERVER_BIND_ADDRESS | `0.0.0.0`; use `127.0.0.1` when a TLS reverse proxy on the host is the public entry point. |
-| SERVER_USER | `1654:1654`; host filesystem UID/GID used by both containers. |
+| SERVER_USER | `1654:1654`; host filesystem UID/GID used by the server container. |
 | TORRENT_MAX_DOWNLOADS | `3`. |
 | MUSICBRAINZ_BASE_URL | Public MusicBrainz API endpoint. |
 | ALBUM_COVER_BASE_URL | Public Cover Art Archive release endpoint. |
@@ -90,9 +90,9 @@ Compose reads `.env` for interpolation automatically. Exported shell variables t
 
 ## Streaming and HTTPS
 
-The current stream controller returns `X-Accel-Redirect`, so directly exposing Kestrel would return no audio body. Nginx handles that header and serves the shared music directory with byte-range support. Its `/protected/` locations are internal and cannot be requested directly. The second internal location handles the absolute music path currently returned by the preview fallback. Only music files are mounted into the proxy, read-only; the rest of the host filesystem is not exposed through the alias.
+Your external Nginx must proxy API requests to port 3003 and handle the stream controller's `X-Accel-Redirect` header. A direct request to Kestrel's streaming endpoint returns that header rather than an audio body. Keep an internal `/protected/` location pointing to the same host music directory supplied by MUSIC_HOST_PATH, with range support. Preview fallback can return an absolute container path beginning `/data/music/`; the external internal-location mapping must also account for `/protected//data/music/` or normalize it to the same music root. The container path and the Nginx host path may differ.
 
-Port 3003 is HTTP. For a public production endpoint, terminate TLS at your existing reverse proxy and route it to port 3003. On the same host, bind this stack to `127.0.0.1`. The TLS proxy must set `X-Forwarded-Proto: https`; the included Nginx forwards that HTTPS indication and replaces the forwarded client-address header. The API accepts forwarded headers only through this unexposed container entry point. Do not expose the API container separately.
+Port 3003 is HTTP. TLS is terminated by your existing external Nginx, which must set Host, X-Forwarded-For and X-Forwarded-Proto correctly. Use SERVER_BIND_ADDRESS=127.0.0.1 when Nginx runs on the same host. If it runs elsewhere, bind an address it can reach and restrict access to that proxy. The API's forwarded-header support assumes this trusted proxy entry point.
 
 Production JWT diagnostic logging no longer enables personally identifiable information, and JWT HTTPS metadata is required outside Development. These changes do not modify the existing CORS policy or downloader HTTP behavior.
 
@@ -104,7 +104,7 @@ docker compose up --build -d
 docker compose down
 ```
 
-Bind-mounted media, covers and downloads survive container replacement. Health checks verify the static application endpoint; they do not establish database readiness or external-provider availability. Log rotation is configured for both containers.
+Bind-mounted media, covers and downloads survive container replacement. Health checks verify the static application endpoint; they do not establish database readiness or external-provider availability. Log rotation is configured for the server container.
 
 After changing `.env`, run `docker compose up -d` to recreate affected containers. `docker compose restart` does not reload their environment. No production configuration, database mutation or running deployment is performed merely by building the image.
 
@@ -116,8 +116,10 @@ After changing `.env`, run `docker compose up -d` to recreate affected container
 
 ## Build record
 
-On 2026-10-15, docker compose config --quiet passed using temporary nonsecret placeholder inputs. docker build and docker compose build both completed the actual Release publication and runtime image build. Image metadata reports runtime UID 1654 and internal port 8080. The included proxy configuration passed nginx -t as UID/GID 1654:1654 with a read-only root filesystem and writable /tmp.
+On 2026-10-15, docker compose config --quiet passed using temporary nonsecret placeholder inputs. docker build and docker compose build both completed the actual Release publication and runtime image build. Image metadata reports runtime UID 1654 and internal port 8080. The initially bundled proxy configuration was checked before the user clarified that Nginx is external; that proxy service and configuration have now been removed.
 
 This host does not have the Docker buildx plugin, so its Docker/Compose installation used the classic builder successfully. No app test suites were added or run for this deployment change. No containers were started against the real database or providers, and no live deployment was performed. Supply your private environment and mount directories before docker compose up.
 
 The user's existing edits to both appsettings files and IDE directory were left untouched and excluded from this commit.
+
+The external-Nginx correction publishes the server directly on port 3003. No Nginx configuration checks or app tests were run for that correction. The private environment and existing appsettings files remain untouched.

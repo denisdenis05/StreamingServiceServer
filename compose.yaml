@@ -1,0 +1,108 @@
+name: streaming-service
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "${SERVER_USER:-1654:1654}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      DOTNET_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      ConnectionStrings__DefaultConnection: "${DATABASE_CONNECTION_STRING:?Set DATABASE_CONNECTION_STRING}"
+      Jwt__SecretKey: "${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}"
+      Jwt__Issuer: "${JWT_ISSUER:?Set JWT_ISSUER}"
+      Jwt__Audience: "${JWT_AUDIENCE:?Set JWT_AUDIENCE}"
+      LastFm__ApiKey: "${LASTFM_API_KEY:-}"
+      LastFm__ApiSecret: "${LASTFM_API_SECRET:-}"
+      LastFm__Redirect: "${LASTFM_REDIRECT:-}"
+      Domain: "${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}"
+      Music__Path: /data/music
+      MusicDirectory: /data/music
+      Music__DownloadPath: /data/downloads
+      Music__External__MusicBrainz__BaseUrl: "${MUSICBRAINZ_BASE_URL:-https://musicbrainz.org/ws/2/}"
+      Music__External__MusicBrainz__User-Agent: "${MUSICBRAINZ_USER_AGENT:?Set MUSICBRAINZ_USER_AGENT}"
+      Music__External__AlbumCover__BaseUrl: "${ALBUM_COVER_BASE_URL:-https://coverartarchive.org/release/}"
+      Music__DownloadSource__BaseUrl: "${DOWNLOAD_SOURCE_BASE_URL:-}"
+      Music__DownloadSource__Parameters: "${DOWNLOAD_SOURCE_PARAMETERS:-}"
+      Music__DownloadSource__RetryParameters: "${DOWNLOAD_SOURCE_RETRY_PARAMETERS:-}"
+      Music__DownloadSource__Torrent__Url: "${TORRENT_URL:-}"
+      Music__DownloadSource__Torrent__User: "${TORRENT_USER:-}"
+      Music__DownloadSource__Torrent__Password: "${TORRENT_PASSWORD:-}"
+      Music__DownloadSource__Torrent__MaxDownloads: "${TORRENT_MAX_DOWNLOADS:-3}"
+      Music__PreviewDownloader__Arguments: "${PREVIEW_DOWNLOADER_ARGUMENTS:--x --audio-format mp3 --no-playlist -o}"
+      Music__PreviewDownloader__SearchArguments: "${PREVIEW_DOWNLOADER_SEARCH_ARGUMENTS:-ytsearch1:}"
+      Cover__Path: /data/covers
+      Cover__DomainExtension: /images/
+      Logging__LogLevel__Default: "${LOG_LEVEL:-Information}"
+      Logging__LogLevel__Microsoft.AspNetCore: "${ASPNETCORE_LOG_LEVEL:-Warning}"
+    volumes:
+      - type: bind
+        source: "${MUSIC_HOST_PATH:?Set MUSIC_HOST_PATH}"
+        target: /data/music
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${COVERS_HOST_PATH:?Set COVERS_HOST_PATH}"
+        target: /data/covers
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${DOWNLOADS_HOST_PATH:?Set DOWNLOADS_HOST_PATH}"
+        target: /data/downloads
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1:8080/index.html"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:stable-alpine
+    restart: unless-stopped
+    user: "${SERVER_USER:-1654:1654}"
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "${SERVER_BIND_ADDRESS:-0.0.0.0}:3003:8080"
+    volumes:
+      - ./deployment/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - type: bind
+        source: "${MUSIC_HOST_PATH:?Set MUSIC_HOST_PATH}"
+        target: /data/music
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=/dev/null", "http://127.0.0.1:8080/index.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

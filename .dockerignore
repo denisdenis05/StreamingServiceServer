@@ -1,0 +1,15 @@
+.git
+.idea
+.env
+.env.*
+**/bin
+**/obj
+**/appsettings*.json
+**/launchSettings.json
+**/secrets.json
+**/*.pfx
+**/*.p12
+**/*.pem
+**/*.key
+secrets
+StreamingServiceServer.PreviewDownloader/Tools/preview-downloader

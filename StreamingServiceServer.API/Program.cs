@@ -9,8 +9,7 @@ using StreamingServiceServer.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Enable PII logging for debugging JWT issues (REMOVE IN PRODUCTION!)
-Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = true;
+Microsoft.IdentityModel.Logging.IdentityModelEventSource.ShowPII = builder.Environment.IsDevelopment();
 
 builder.Services.AddApplicationServices();
 builder.Services.RegisterHelpers();
@@ -85,7 +84,7 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    options.RequireHttpsMetadata = false; // For development only
+    options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
     options.SaveToken = true;
     
     options.TokenValidationParameters = new TokenValidationParameters

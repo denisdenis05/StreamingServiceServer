@@ -4,3 +4,7 @@ obj/
 riderModule.iml
 /_ReSharper.Caches/
 StreamingServiceServer.PreviewDownloader/Tools/preview-downloader
+.env
+.env.*
+!.env.example
+secrets/

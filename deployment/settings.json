@@ -1,0 +1,27 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "ConnectionStrings": { "DefaultConnection": "" },
+  "Jwt": { "SecretKey": "", "Issuer": "", "Audience": "" },
+  "LastFm": { "ApiKey": "", "ApiSecret": "", "Redirect": "" },
+  "Music": {
+    "Path": "/data/music",
+    "DownloadPath": "/data/downloads",
+    "External": {
+      "MusicBrainz": { "BaseUrl": "", "User-Agent": "" },
+      "AlbumCover": { "BaseUrl": "" }
+    },
+    "DownloadSource": {
+      "BaseUrl": "", "Parameters": "", "RetryParameters": "",
+      "Torrent": { "Url": "", "User": "", "Password": "", "MaxDownloads": 3 }
+    },
+    "PreviewDownloader": { "Arguments": "", "SearchArguments": "" }
+  },
+  "MusicDirectory": "/data/music",
+  "Cover": { "Path": "/data/covers", "DomainExtension": "/images/" },
+  "Domain": ""
+}

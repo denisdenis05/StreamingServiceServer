@@ -63,6 +63,9 @@ Additional optional variables:
 | PREVIEW_DOWNLOADER_SEARCH_ARGUMENTS | `ytsearch1:`. |
 | LOG_LEVEL | `Information`. |
 | ASPNETCORE_LOG_LEVEL | `Warning`. |
+| COVER_DOMAIN_EXTENSION | `/images/`; keep this value to match the existing application image route. |
+
+The complete `.env.example` follows every section and leaf field in `appsettings.Development.json`, using the Compose variable names. Music:Path, Music:DownloadPath and Cover:Path are supplied through their corresponding host-directory variables; Compose translates them to the fixed container mount paths. No private settings are copied from the development JSON.
 
 The image includes FFmpeg, Python and yt-dlp 2026.8.19 at the executable path expected by PreviewDownloaderService. `YT_DLP_VERSION` is a Docker build argument for deliberately updating that tool; credentials are never build arguments. External extractor support depends on yt-dlp and the remote site. Sites requiring additional JavaScript runtimes need those runtimes installed in a derived image.
 

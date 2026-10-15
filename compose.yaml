@@ -37,7 +37,7 @@ services:
       Music__PreviewDownloader__Arguments: "${PREVIEW_DOWNLOADER_ARGUMENTS:--x --audio-format mp3 --no-playlist -o}"
       Music__PreviewDownloader__SearchArguments: "${PREVIEW_DOWNLOADER_SEARCH_ARGUMENTS:-ytsearch1:}"
       Cover__Path: /data/covers
-      Cover__DomainExtension: /images/
+      Cover__DomainExtension: "${COVER_DOMAIN_EXTENSION:-/images/}"
       Logging__LogLevel__Default: "${LOG_LEVEL:-Information}"
       Logging__LogLevel__Microsoft.AspNetCore: "${ASPNETCORE_LOG_LEVEL:-Warning}"
     volumes:

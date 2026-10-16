@@ -8,3 +8,4 @@ StreamingServiceServer.PreviewDownloader/Tools/preview-downloader
 .env.*
 !.env.example
 secrets/
+deployment/nginx.external.local.conf

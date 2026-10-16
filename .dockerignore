@@ -13,3 +13,4 @@
 **/*.key
 secrets
 StreamingServiceServer.PreviewDownloader/Tools/preview-downloader
+deployment/nginx.external.local.conf

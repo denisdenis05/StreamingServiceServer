@@ -96,6 +96,14 @@ Port 3003 is HTTP. TLS is terminated by your existing external Nginx, which must
 
 Production JWT diagnostic logging no longer enables personally identifiable information, and JWT HTTPS metadata is required outside Development. These changes do not modify the existing CORS policy or downloader HTTP behavior.
 
+### External Nginx configuration file
+
+`deployment/nginx.external.conf.example` is a reusable server-block template with placeholders for the API address and filesystem directories. The configured `deployment/nginx.external.local.conf` is Git-ignored and excluded from Docker builds. It belongs on the external Nginx machine, not in the API container.
+
+Both music aliases must point to the same music directory on the Nginx machine and retain their trailing slash. The longer internal location handles the absolute `/data/music/` path returned by preview fallback; the other handles normal relative recording paths. Both are internal-only. Images are public under `/images/` and use the image directory on the Nginx machine. That machine must have the NAS mounted and its Nginx worker must have filesystem read/traverse permissions.
+
+The example is an HTTP server block. When using an existing HTTPS site, keep that site's listen, server_name and certificate directives and use this template's locations plus server-level merge_slashes/client_max_body_size settings. Filesystem paths and the upstream address are local deployment values and are not stored in the tracked template. No Nginx configuration checks were run for this addition, as requested.
+
 ## Operations
 
 ```sh

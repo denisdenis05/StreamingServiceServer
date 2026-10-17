@@ -963,3 +963,45 @@ input:checked + .toggle-slider:before {
   margin-bottom: 1rem;
 }
 
+
+.cover-progress-panel {
+  margin: 1rem 0 2.5rem;
+  padding: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+}
+.cover-progress-heading, .cover-progress-controls, .cover-progress-pagination, .cover-album-completion {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.cover-progress-heading { justify-content: space-between; margin-bottom: 1rem; }
+.cover-progress-heading h2 { margin: 0; }
+.cover-progress-heading p, #cover-progress-caption, #cover-progress-message { color: var(--text-muted); margin: 0.5rem 0; }
+#cover-progress-summary { font-size: 1.8rem; white-space: nowrap; }
+#cover-progress-bar { width: 100%; height: 1.1rem; }
+.cover-progress-panel progress { accent-color: var(--accent-olive); border: none; border-radius: 12px; overflow: hidden; }
+.cover-progress-panel progress::-webkit-progress-bar { background: var(--border-light); }
+.cover-progress-panel progress::-webkit-progress-value { background: var(--accent-olive); transition: width 0.3s; }
+.cover-progress-panel progress::-moz-progress-bar { background: var(--accent-olive); }
+.cover-progress-controls { flex-wrap: wrap; margin: 1.3rem 0; }
+.cover-progress-controls label { display: flex; align-items: center; gap: 0.5rem; }
+.cover-progress-controls .form-input { width: auto; margin: 0; }
+.cover-progress-table { overflow-x: auto; }
+.cover-progress-table .table-view { margin-bottom: 0; }
+.cover-album-link { background: none; border: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; text-align: left; padding: 0; }
+.cover-album-link:hover { text-decoration: underline; }
+.cover-album-completion progress { width: 7rem; height: 0.6rem; }
+.cover-album-completion span { min-width: 3.5rem; }
+.cover-status { font-size: 0.85rem; white-space: nowrap; }
+.cover-status-downloaded { color: var(--accent-olive); font-weight: 600; }
+.cover-status-unavailable, .cover-status-retrying { color: var(--accent-terracotta); }
+.cover-progress-pagination { justify-content: flex-end; margin-top: 1rem; }
+.cover-progress-pagination button:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 640px) {
+  .cover-progress-panel { padding: 1rem; }
+  .cover-progress-controls label, .cover-progress-controls .form-input { width: 100%; }
+  .cover-progress-controls label { flex-direction: column; align-items: stretch; }
+  .cover-progress-pagination { justify-content: space-between; }
+}

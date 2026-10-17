@@ -42,6 +42,7 @@ builder.Services.AddSingleton<ICoverAssetStore>(services => new CoverAssetStore(
     services.GetRequiredService<ICoverImageRenderer>(), services.GetRequiredService<Microsoft.Extensions.Options.IOptions<CoverAssetOptions>>(),
     services.GetRequiredService<TimeProvider>(), services.GetRequiredService<ILogger<CoverAssetStore>>(), services.GetRequiredService<ICoverArchiveFallback>()));
 builder.Services.AddScoped<CoverJobInterceptor>();
+builder.Services.AddScoped<StreamingServiceServer.Business.Services.Images.Progress.CoverDownloadProgress>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetJobService>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetMaintenanceService>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverMetadataRefreshService>();

@@ -4,6 +4,7 @@
    ========================================================================== */
 
 const API_BASE = '/api/dashboard';
+let coverDownloadProgress = null;
 
 const state = {
   stats: {},
@@ -40,6 +41,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initApp() {
+  coverDownloadProgress = CoverDownloadProgress.createController({ document, request: authFetch, isAuthorized: isAdmin, escapeHtml,
+    onAlbumSelected(identifier) { window.location.hash = '#album?id=' + encodeURIComponent(identifier); } });
   setupNavigation();
   setupModal();
   setupAddTrackModal();
@@ -63,6 +66,7 @@ async function initApp() {
         renderQueuedCarousel();
       } else if (getCurrentView() === 'queue') {
         renderQueueTable();
+        void coverDownloadProgress?.refresh();
       }
     }
   }, 10000);
@@ -123,6 +127,7 @@ function handleLogout() {
 }
 
 function updateAuthUI() {
+  coverDownloadProgress?.setActive(getCurrentView() === 'queue');
   const loginLink = document.getElementById('nav-login-link');
   const userBadge = document.getElementById('header-user-badge');
   const userNameEl = document.getElementById('user-display-name');
@@ -223,6 +228,7 @@ function getCurrentView() {
 
 function handleRoute() {
   const hash = window.location.hash || '#overview';
+  coverDownloadProgress?.setActive(hash === '#queue');
   
   document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));

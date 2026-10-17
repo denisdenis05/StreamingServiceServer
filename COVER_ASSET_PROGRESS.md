@@ -53,3 +53,7 @@ The follow-up findings were implemented in three coordinated tracks. [Transfer r
 ## Missing covers follow-up
 
 [MISSING_COVER_DIAGNOSIS.md](MISSING_COVER_DIAGNOSIS.md) records the screenshot investigation, strictly read-only database queries, the Android missing-destination regression and the release-to-group archive fallback. The non-PostgreSQL server suite passed 64 tests, including nine new recovery cases; Release publish passed. No production records or schema were changed. The inspected database does not yet have the cover-job tables, so automatic recovery requires deployment of the previously prepared migrations and updated server.
+
+## Browser queue progress
+
+[COVER_PROGRESS_DASHBOARD.md](COVER_PROGRESS_DASHBOARD.md) records the library-wide cover percentage, per-album progress/status, search, filters and pagination added to the browser queue page. The full server suite passed 116 tests, the browser controller suite passed 12 tests, and Release publish succeeded. No production database changes or deployment were performed.

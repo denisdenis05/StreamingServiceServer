@@ -177,6 +177,43 @@
         </div>
       </div>
 
+      <section class="cover-progress-panel" aria-labelledby="cover-progress-heading">
+        <div class="cover-progress-heading">
+          <div>
+            <h2 id="cover-progress-heading">album cover downloads</h2>
+            <p>Across your library, including albums whose audio is already downloaded.</p>
+          </div>
+          <strong id="cover-progress-summary" aria-live="polite">—</strong>
+        </div>
+        <progress id="cover-progress-bar" max="100" value="0" aria-label="Albums with downloaded covers"></progress>
+        <p id="cover-progress-caption" aria-live="polite"></p>
+        <div class="cover-progress-controls">
+          <label>Show
+            <select id="cover-progress-filter" class="form-input">
+              <option value="All">All albums</option>
+              <option value="Missing">Needs a cover</option>
+              <option value="Downloaded">Downloaded covers</option>
+            </select>
+          </label>
+          <label>Find an album
+            <input id="cover-progress-search" class="form-input" type="search" maxlength="200" placeholder="Album or artist">
+          </label>
+        </div>
+        <div class="cover-progress-table">
+          <table class="table-view">
+            <thead><tr><th>Album</th><th>Artist</th><th>Cover progress</th><th>Cover status</th></tr></thead>
+            <tbody id="cover-progress-rows"></tbody>
+          </table>
+        </div>
+        <p id="cover-progress-message" role="status"></p>
+        <div class="cover-progress-pagination">
+          <button id="cover-progress-previous" class="btn-secondary" disabled>Previous</button>
+          <span id="cover-progress-page"></span>
+          <button id="cover-progress-next" class="btn-secondary" disabled>Next</button>
+        </div>
+      </section>
+      <h2 class="section-title">audio downloads</h2>
+
       <table class="table-view">
         <thead>
           <tr>
@@ -698,6 +735,7 @@
     </div>
   </footer>
 
+  <script src="/js/cover-progress.js"></script>
   <script src="/js/dashboard.js"></script>
 </body>
 </html>

@@ -18,7 +18,7 @@ public static class ServiceExtensions
         services.AddScoped<ILibraryService, LibraryService>();
         services.AddScoped<ILastFmService, LastFmService>();
         services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
-        services.AddScoped<IPreviewDownloaderService, PreviewDownloaderService>();
+        services.AddSingleton<IPreviewDownloaderService, PreviewDownloaderService>();
         services.AddScoped<IImageService, ImageService>();
         services.AddScoped<IRecommendationService, RecommendationService>();
     }

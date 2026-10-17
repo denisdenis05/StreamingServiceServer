@@ -28,22 +28,30 @@ public class StreamController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> StreamAudio([FromQuery] Guid id)
+    public async Task<IActionResult> StreamAudio([FromQuery] Guid id, CancellationToken cancellationToken = default)
     {
         string trackPath;
         try 
         {
-            trackPath = await _streamingService.GetStreamingPath(id);
+            trackPath = await _streamingService.GetStreamingPath(id, cancellationToken);
         }
-        catch (Exception)
+        catch (RecordingAudioUnavailableException)
         {
-            var recording = await _metadataService.SearchRecordingByIdAsync(id);
+            var recording = await _metadataService.SearchRecordingByIdAsync(id).WaitAsync(cancellationToken);
             if (recording == null)
             {
                 return NotFound("Recording not found");
             }
 
-            trackPath = await _previewDownloaderService.DownloadPreview(recording);
+            try
+            {
+                trackPath = await _previewDownloaderService.DownloadPreview(recording, cancellationToken);
+            }
+            catch (StreamingServiceServer.PreviewDownloader.PreviewCapacityException)
+            {
+                Response.Headers["Retry-After"] = "10";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, "Preview capacity is exhausted. Retry later.");
+            }
         } 
 
         var encodedSegments = trackPath

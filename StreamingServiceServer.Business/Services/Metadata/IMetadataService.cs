@@ -7,8 +7,8 @@ public interface IMetadataService
 {
     Task<RecordingResponse> SearchRecordingByIdAsync(Guid id);
 
-    Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId);
-    Task<DbSearchResponse> DbSearch(string query, int page, int pageSize, Guid userId);
+    Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId, CancellationToken cancellationToken = default);
+    Task<DbSearchResponse> DbSearch(string query, int page, int pageSize, Guid userId, CancellationToken cancellationToken = default);
 
     Task SearchAndSaveRecordingAsync(string query);
     Task SearchAndSaveArtistAsync(string query);

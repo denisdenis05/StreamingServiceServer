@@ -14,85 +14,46 @@ public class StreamingService : IStreamingService
         _configuration = configuration;
     }
 
-    public async Task<string> GetFullStreamingPath(Guid songId)
+    public async Task<string> GetFullStreamingPath(Guid songId, CancellationToken cancellationToken = default)
     {
-        var record = await _metadataService.GetRecordingById(songId, Guid.Empty);
-
-        if (record == null)
-            throw new Exception("Record not found");
-
-        var folderPath = Path.Combine(
-            _configuration["Music:Path"],
-            MusicLocationHelper.GetRelativeFolderPathForRecording(record)
-        );
-
-        if (!Directory.Exists(folderPath))
-        {
-            throw new FileNotFoundException($"Folder not found for recording: {folderPath}");
-        }
-
-        var matchingFile = Directory.GetFiles(folderPath, record.Id.ToString() + ".*")
-            .FirstOrDefault();
-
-        if (matchingFile == null)
-        {
-            throw new FileNotFoundException($"No file found for recording ID {record.Id} in {folderPath}");
-        }
-
-        var extension = Path.GetExtension(matchingFile);
-
-        return Path.Combine(folderPath, record.Id + extension);
+        var relativePath = await GetStreamingPath(songId, cancellationToken);
+        return Path.Combine(_configuration["Music:Path"]!, relativePath);
     }
 
-    public async Task<string> GetStreamingPath(Guid songId)
+    public async Task<string> GetStreamingPath(Guid songId, CancellationToken cancellationToken = default)
     {
-        var record = await _metadataService.GetRecordingById(songId, Guid.Empty);
-
-        if (record == null)
+        var record = await _metadataService.GetRecordingById(songId, Guid.Empty).WaitAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var musicRoot = _configuration["Music:Path"]
+            ?? throw new InvalidOperationException("Music storage path is not configured.");
+        File.GetAttributes(musicRoot);
+        var relativeFolder = record == null
+            ? "TEMP"
+            : MusicLocationHelper.GetRelativeFolderPathForRecording(record);
+        var fullFolder = Path.GetFullPath(Path.Combine(musicRoot, relativeFolder));
+        var fullRoot = Path.GetFullPath(musicRoot);
+        if (!Path.EndsInDirectorySeparator(fullRoot)) fullRoot += Path.DirectorySeparatorChar;
+        if (!fullFolder.StartsWith(fullRoot, StringComparison.Ordinal))
+            throw new InvalidOperationException("Recording folder is outside music storage.");
+        try
         {
-            var tempPath = CheckTempFolder(songId);
-            if (tempPath != null) return tempPath;
-            throw new Exception("Record not found");
+            var matchingFile = Directory.EnumerateFiles(fullFolder, songId + ".*")
+                .FirstOrDefault(path => AudioFileExtensions.Contains(Path.GetExtension(path)));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (matchingFile != null)
+                return Path.GetRelativePath(musicRoot, matchingFile).Replace(Path.DirectorySeparatorChar, '/');
         }
-
-        var relativeFolderPath = MusicLocationHelper.GetRelativeFolderPathForRecording(record);
-
-        var folderPath = Path.Combine(
-            _configuration["Music:Path"],
-            relativeFolderPath
-        );
-
-        if (!Directory.Exists(folderPath))
+        catch (DirectoryNotFoundException)
         {
-            throw new FileNotFoundException($"Folder not found for recording: {folderPath}");
+            File.GetAttributes(musicRoot);
         }
-
-        var matchingFile = Directory.GetFiles(folderPath, record.Id.ToString() + ".*")
-            .FirstOrDefault();
-
-        if (matchingFile == null)
-        {
-            throw new FileNotFoundException($"No file found for recording ID {record.Id} in {folderPath}");
-        }
-
-        var extension = Path.GetExtension(matchingFile);
-
-        return Path.Combine(relativeFolderPath, record.Id + extension);
+        throw new RecordingAudioUnavailableException(songId);
     }
 
-    private string? CheckTempFolder(Guid songId)
+    private static readonly HashSet<string> AudioFileExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        var tempPath = Path.Combine(_configuration["Music:Path"], "TEMP");
-        var matchingFile = Directory.GetFiles(tempPath, songId.ToString() + ".*")
-            .FirstOrDefault();    
-
-        if (matchingFile != null)
-        {
-            return Path.Combine("TEMP", Path.GetFileName(matchingFile));
-        }
-
-        return null;
-    }
+        ".flac", ".mp3", ".opus", ".ogg", ".wav", ".m4a", ".aac"
+    };
 
     public string GetContentType(string path)
     {

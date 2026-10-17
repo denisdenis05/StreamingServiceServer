@@ -5,6 +5,10 @@
 
 const API_BASE = '/api/dashboard';
 let coverDownloadProgress = null;
+let dashboardPolling = null;
+let downloadedSearch = '';
+let pollingAuthenticationIdentity = null;
+
 
 const state = {
   stats: {},
@@ -43,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initApp() {
   coverDownloadProgress = CoverDownloadProgress.createController({ document, request: authFetch, isAuthorized: isAdmin, escapeHtml,
     onAlbumSelected(identifier) { window.location.hash = '#album?id=' + encodeURIComponent(identifier); } });
+  setupDashboardPolling();
+  document.addEventListener('visibilitychange', synchronizeDashboardPolling);
   setupNavigation();
   setupModal();
   setupAddTrackModal();
@@ -53,23 +59,7 @@ async function initApp() {
   
   await tryRefreshToken();
   updateAuthUI();
-  await refreshData();
   handleRoute();
-  
-  // Periodically refresh queued downloads & stats every 10 seconds if admin
-  setInterval(async () => {
-    if (isAdmin()) {
-      await fetchStats();
-      await fetchQueued();
-      renderStats();
-      if (getCurrentView() === 'overview') {
-        renderQueuedCarousel();
-      } else if (getCurrentView() === 'queue') {
-        renderQueueTable();
-        void coverDownloadProgress?.refresh();
-      }
-    }
-  }, 10000);
 }
 
 // ─── AUTHENTICATION & ROLE HELPERS ───
@@ -127,7 +117,7 @@ function handleLogout() {
 }
 
 function updateAuthUI() {
-  coverDownloadProgress?.setActive(getCurrentView() === 'queue');
+  synchronizeDashboardPolling();
   const loginLink = document.getElementById('nav-login-link');
   const userBadge = document.getElementById('header-user-badge');
   const userNameEl = document.getElementById('user-display-name');
@@ -158,11 +148,13 @@ async function tryRefreshToken() {
 }
 
 function authFetch(url, options = {}) {
+  const authenticationIdentity = state.authToken;
   options.headers = options.headers || {};
   if (state.authToken) {
     options.headers['Authorization'] = `Bearer ${state.authToken}`;
   }
   return fetch(url, options).then(async (response) => {
+    if (options.signal?.aborted || authenticationIdentity !== state.authToken) throw new DOMException('Request superseded', 'AbortError');
     if (response.status === 401 || response.status === 403) {
       if (response.status === 403) {
         alert('Access Denied: Only Admin users are authorized to view or manage library data.');
@@ -228,7 +220,7 @@ function getCurrentView() {
 
 function handleRoute() {
   const hash = window.location.hash || '#overview';
-  coverDownloadProgress?.setActive(hash === '#queue');
+  synchronizeDashboardPolling();
   
   document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
@@ -276,63 +268,64 @@ function handleRoute() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-async function refreshData() {
+function setupDashboardPolling() {
+  const resources = [
+    { name: 'stats', views: ['overview'], endpoint: () => `${API_BASE}/stats`, publish(data) { state.stats = data; renderStats(); } },
+    { name: 'queued', views: ['overview', 'queue'], endpoint: () => `${API_BASE}/queued`, publish(data) {
+      state.queued = data;
+      if (getCurrentView() === 'overview') renderQueuedCarousel();
+      else renderQueueTable();
+    } },
+    { name: 'downloaded', views: ['overview', 'downloaded'], endpoint: () => `${API_BASE}/downloaded?search=${encodeURIComponent(downloadedSearch)}`, publish(data) {
+      state.downloaded = data;
+      if (getCurrentView() === 'overview') renderDownloadedCarousel();
+      else renderDownloadedGrid();
+    } },
+    { name: 'failed', views: ['failed'], endpoint: () => `${API_BASE}/failed`, publish(data) { state.failed = data; renderFailedTable(); } }
+  ].map(resource => ({ ...resource, async load(signal) {
+    const response = await authFetch(resource.endpoint(), { signal });
+    if (!response.ok) throw new Error(`Could not load ${resource.name}`);
+    return response.json();
+  } }));
+  resources.push({ name: 'covers', views: ['queue'], load: () => coverDownloadProgress.refresh(), publish() {} });
+  dashboardPolling = DashboardPolling.createController({ resources });
+}
+
+function synchronizeDashboardPolling() {
+  const visible = document.visibilityState !== 'hidden';
+  const view = getCurrentView();
+  if (pollingAuthenticationIdentity !== state.authToken) {
+    coverDownloadProgress?.setActive(false);
+    pollingAuthenticationIdentity = state.authToken;
+    downloadedSearch = '';
+  }
+  coverDownloadProgress?.setActive(visible && view === 'queue');
+  dashboardPolling?.setContext({ view, visible, authorized: isAdmin(), identity: state.authToken + ':' + downloadedSearch });
+}
+
+function refreshData() {
+  synchronizeDashboardPolling();
   if (!isAdmin()) {
     state.stats = {};
     state.queued = [];
     state.downloaded = [];
     state.failed = [];
     renderStats();
-    return;
   }
-
-  try {
-    const [statsRes, queuedRes, downloadedRes, failedRes] = await Promise.all([
-      authFetch(`${API_BASE}/stats`),
-      authFetch(`${API_BASE}/queued`),
-      authFetch(`${API_BASE}/downloaded`),
-      authFetch(`${API_BASE}/failed`)
-    ]);
-
-    if (statsRes.ok) state.stats = await statsRes.json();
-    if (queuedRes.ok) state.queued = await queuedRes.json();
-    if (downloadedRes.ok) state.downloaded = await downloadedRes.json();
-    if (failedRes.ok) state.failed = await failedRes.json();
-  } catch (err) {
-    console.error('Failed to fetch dashboard data:', err);
-  }
-  renderStats();
+  return dashboardPolling?.refresh() || Promise.resolve();
 }
 
-async function fetchStats() {
-  if (!isAdmin()) return;
-  try {
-    const res = await authFetch(`${API_BASE}/stats`);
-    if (res.ok) state.stats = await res.json();
-  } catch (err) {
-    console.error('Failed to fetch stats:', err);
-  }
+function fetchQueued() {
+  return dashboardPolling?.refresh('queued') || Promise.resolve();
 }
 
-async function fetchQueued() {
-  if (!isAdmin()) return;
-  try {
-    const res = await authFetch(`${API_BASE}/queued`);
-    if (res.ok) state.queued = await res.json();
-  } catch (err) {
-    console.error('Failed to fetch queued albums:', err);
+function fetchDownloaded(search = '') {
+  if (downloadedSearch !== search) {
+    downloadedSearch = search;
+    dashboardPolling?.setContext({ view: getCurrentView(), visible: document.visibilityState !== 'hidden',
+      authorized: isAdmin(), identity: state.authToken + ':' + downloadedSearch });
   }
-}
-
-async function fetchDownloaded(search = '') {
-  if (!isAdmin()) return;
-  try {
-    const url = search ? `${API_BASE}/downloaded?search=${encodeURIComponent(search)}` : `${API_BASE}/downloaded`;
-    const res = await authFetch(url);
-    if (res.ok) state.downloaded = await res.json();
-  } catch (err) {
-    console.error('Failed to fetch downloaded albums:', err);
-  }
+  return dashboardPolling?.refresh('downloaded') || Promise.resolve();
 }
 
 function renderStats() {

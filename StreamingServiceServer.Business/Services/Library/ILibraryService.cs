@@ -16,6 +16,7 @@ public interface ILibraryService
     Task AddRecordingsToPlaylistAsync(Guid userId, Guid playlistId, List<AddSongToPlaylistRequest> songs, CancellationToken cancellationToken);
     Task ToggleLikeAsync(Guid userId, Guid recordingId, AddSongToPlaylistRequest songDetails, CancellationToken cancellationToken);
     Task<HashSet<Guid>> GetLikedRecordingIdsAsync(Guid userId, CancellationToken cancellationToken);
+    Task<HashSet<Guid>> GetLikedRecordingIdsAsync(Guid userId, IReadOnlyCollection<Guid> candidateRecordingIds, CancellationToken cancellationToken);
     Task AddRecordingsToPlaylistFuzzyAsync(Guid userId, Guid playlistId, List<AddRecordingToPlaylistFuzzyRequest> requests, CancellationToken cancellationToken);
     Task<List<PlaylistImportResult>> PreviewPlaylistImportAsync(List<AddRecordingToPlaylistFuzzyRequest> tracks, CancellationToken cancellationToken);
     Task<List<PlaylistImportResult>> ImportPlaylistFromJsonAsync(Guid userId, Guid playlistId, List<AddRecordingToPlaylistFuzzyRequest> tracks, CancellationToken cancellationToken);

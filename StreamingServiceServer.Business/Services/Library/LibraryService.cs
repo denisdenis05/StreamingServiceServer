@@ -96,8 +96,6 @@ public class LibraryService : ILibraryService
 
     public async Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, Guid userId, int page, int pageSize, CancellationToken cancellationToken)
     {
-        var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, cancellationToken);
-
         var isSystemPlaylist = await _dbContext.Playlists
             .Where(p => p.Id == playlistId)
             .Select(p => p.IsSystem)
@@ -133,7 +131,7 @@ public class LibraryService : ILibraryService
                     ArtistName = playlistRow.pr.Artist,
                     ReleaseTitle = playlistRow.pr.Album,
                     PositionInAlbum = playlistRow.pr.Order,
-                    IsLiked = likedRecordingIds.Contains(playlistRow.pr.RecordingId),
+                    IsLiked = false,
                     SuggestedRecordingId = playlistRow.pr.SuggestedRecordingId,
                     SuggestedTitle = playlistRow.s != null ? playlistRow.s.Title : null,
                     SuggestedArtist = playlistRow.s != null ? playlistRow.s.ArtistCredit.Select(credit => credit.Name ?? credit.Artist.Name).FirstOrDefault() : null,
@@ -149,8 +147,10 @@ public class LibraryService : ILibraryService
                 OptimizedSmall = playlistRow.r != null ? playlistRow.r.OptimizedSmallCover : null,
                 OptimizedThumbnail = playlistRow.r != null ? playlistRow.r.OptimizedVerySmallCover : null
             }).ToListAsync(cancellationToken);
+        var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, recordings.Select(recording => recording.Response.Id).ToArray(), cancellationToken);
         foreach (var recording in recordings)
         {
+            recording.Response.IsLiked = likedRecordingIds.Contains(recording.Response.Id);
             recording.Response.Cover = SelectCover(recording.Local, recording.Optimized, recording.Original);
             recording.Response.SmallCover = SelectCover(recording.LocalSmall, recording.OptimizedSmall, recording.Small);
             recording.Response.VerySmallCover = SelectCover(recording.LocalThumbnail, recording.OptimizedThumbnail, recording.Thumbnail);
@@ -348,18 +348,21 @@ public class LibraryService : ILibraryService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<HashSet<Guid>> GetLikedRecordingIdsAsync(Guid userId, CancellationToken cancellationToken)
+    private IQueryable<Guid> LikedRecordingIds(Guid userId) => _dbContext.PlaylistRecordings.AsNoTracking()
+        .Where(recording => recording.PlaylistId == _dbContext.Playlists
+            .Where(playlist => playlist.OwnerId == userId && playlist.IsSystem)
+            .Select(playlist => (Guid?)playlist.Id).FirstOrDefault())
+        .Select(recording => recording.RecordingId);
+
+    public async Task<HashSet<Guid>> GetLikedRecordingIdsAsync(Guid userId, CancellationToken cancellationToken) =>
+        (await LikedRecordingIds(userId).ToListAsync(cancellationToken)).ToHashSet();
+
+    public async Task<HashSet<Guid>> GetLikedRecordingIdsAsync(Guid userId, IReadOnlyCollection<Guid> candidateRecordingIds, CancellationToken cancellationToken)
     {
-        var likedPlaylist = await _dbContext.Playlists
-            .Include(p => p.PlaylistRecordings)
-            .FirstOrDefaultAsync(p => p.OwnerId == userId && p.IsSystem, cancellationToken);
-
-        if (likedPlaylist == null)
-        {
-            return new HashSet<Guid>();
-        }
-
-        return likedPlaylist.PlaylistRecordings.Select(pr => pr.RecordingId).ToHashSet();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (candidateRecordingIds.Count == 0) return new HashSet<Guid>();
+        return (await LikedRecordingIds(userId).Where(identifier => candidateRecordingIds.Contains(identifier))
+            .ToListAsync(cancellationToken)).ToHashSet();
     }
 
     public async Task AddRecordingsToPlaylistFuzzyAsync(Guid userId, Guid playlistId, List<AddRecordingToPlaylistFuzzyRequest> requests, CancellationToken cancellationToken)

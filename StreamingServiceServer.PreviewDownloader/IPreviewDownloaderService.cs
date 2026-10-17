@@ -4,5 +4,5 @@ namespace StreamingServiceServer.PreviewDownloader;
 
 public interface IPreviewDownloaderService
 {
-    Task<string> DownloadPreview(RecordingResponse recording);
+    Task<string> DownloadPreview(RecordingResponse recording, CancellationToken cancellationToken = default);
 }

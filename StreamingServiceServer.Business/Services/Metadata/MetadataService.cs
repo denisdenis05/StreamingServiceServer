@@ -542,13 +542,13 @@ private void RemoveDuplicatesFromChangeTracker()
     private const double FuzzySimilarityThreshold = 0.25;
     private const int FuzzyLimit = 10;
 
-    public async Task<DbSearchResponse> DbSearch(string query, int page, int pageSize, Guid userId)
+    public async Task<DbSearchResponse> DbSearch(string query, int page, int pageSize, Guid userId, CancellationToken cancellationToken = default)
     {
         var lower = query.ToLower();
-        var likedIds = await _libraryService.GetLikedRecordingIdsAsync(userId, CancellationToken.None);
+        cancellationToken.ThrowIfCancellationRequested();
 
         // ── Tier 1: substring match ─────────────────────────────────────────
-        var rawTier1 = await _dbContext.Recordings
+        var rawTier1 = await _dbContext.Recordings.AsNoTracking()
             .Include(r => r.Release).ThenInclude(r => r.Artist)
             .Where(r =>
                 r.Title.ToLower().Contains(lower) ||
@@ -557,7 +557,7 @@ private void RemoveDuplicatesFromChangeTracker()
             .ThenBy(r => r.Title)
             .Skip((page - 1) * pageSize)
             .Take(pageSize + 1)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         var hasMore = rawTier1.Count > pageSize;
         var tier1Tracks = rawTier1.Take(pageSize).ToList();
@@ -565,13 +565,13 @@ private void RemoveDuplicatesFromChangeTracker()
 
         var albums = new List<ReleaseResponse>();
         var artists = new List<ArtistResponse>();
-        var fuzzyTracks = new List<RecordingResponse>();
+        var rawFuzzyTracks = new List<Recording>();
         var fuzzyAlbums = new List<ReleaseResponse>();
         var fuzzyArtists = new List<ArtistResponse>();
 
         if (page == 1)
         {
-            var rawAlbums = await _dbContext.Releases
+            var rawAlbums = await _dbContext.Releases.AsNoTracking()
                 .Include(r => r.Artist)
                 .Where(r =>
                     r.Title != null && (r.Title.ToLower().Contains(lower) ||
@@ -579,14 +579,14 @@ private void RemoveDuplicatesFromChangeTracker()
                 .OrderBy(r => r.Title!.ToLower() == lower ? 0 : r.Title!.ToLower().StartsWith(lower) ? 1 : 2)
                 .ThenBy(r => r.Title)
                 .Take(pageSize)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
-            var rawArtists = await _dbContext.Artists
+            var rawArtists = await _dbContext.Artists.AsNoTracking()
                 .Where(a => a.Name.ToLower().Contains(lower))
                 .OrderBy(a => a.Name.ToLower() == lower ? 0 : a.Name.ToLower().StartsWith(lower) ? 1 : 2)
                 .ThenBy(a => a.Name)
                 .Take(pageSize)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             albums = rawAlbums.Select(r => r.ToResponse(_imageService)).ToList();
             artists = rawArtists.Select(a => a.ToResponse()).ToList();
@@ -598,7 +598,7 @@ private void RemoveDuplicatesFromChangeTracker()
             // Order by similarity of the combined "title artist" string so the
             // best-matching result sorts first regardless of which field matched.
 
-            var rawFuzzyTracks = await _dbContext.Recordings
+            rawFuzzyTracks = await _dbContext.Recordings.AsNoTracking()
                 .Include(r => r.Release).ThenInclude(r => r.Artist)
                 .Where(r => !tier1TrackIds.Contains(r.Id))
                 .Where(r =>
@@ -607,13 +607,9 @@ private void RemoveDuplicatesFromChangeTracker()
                 .OrderByDescending(r =>
                     EF.Functions.TrigramsSimilarity(r.Title + " " + r.Release.Artist.Name, query))
                 .Take(FuzzyLimit)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
-            fuzzyTracks = rawFuzzyTracks
-                .Select(r => r.ToResponse(_imageService, likedIds.Contains(r.Id)))
-                .ToList();
-
-            var rawFuzzyAlbums = await _dbContext.Releases
+            var rawFuzzyAlbums = await _dbContext.Releases.AsNoTracking()
                 .Include(r => r.Artist)
                 .Where(r => !tier1AlbumIds.Contains(r.Id) && r.Title != null)
                 .Where(r =>
@@ -622,19 +618,23 @@ private void RemoveDuplicatesFromChangeTracker()
                 .OrderByDescending(r =>
                     EF.Functions.TrigramsSimilarity(r.Title! + " " + r.Artist.Name, query))
                 .Take(FuzzyLimit)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             fuzzyAlbums = rawFuzzyAlbums.Select(r => r.ToResponse(_imageService)).ToList();
 
-            var rawFuzzyArtists = await _dbContext.Artists
+            var rawFuzzyArtists = await _dbContext.Artists.AsNoTracking()
                 .Where(a => !tier1ArtistIds.Contains(a.Id))
                 .Where(a => EF.Functions.TrigramsSimilarity(a.Name, query) > FuzzySimilarityThreshold)
                 .OrderByDescending(a => EF.Functions.TrigramsSimilarity(a.Name, query))
                 .Take(FuzzyLimit)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             fuzzyArtists = rawFuzzyArtists.Select(a => a.ToResponse()).ToList();
         }
+
+        var candidateRecordingIds = tier1Tracks.Select(recording => recording.Id)
+            .Concat(rawFuzzyTracks.Select(recording => recording.Id)).Distinct().ToArray();
+        var likedIds = await _libraryService.GetLikedRecordingIdsAsync(userId, candidateRecordingIds, cancellationToken);
 
         return new DbSearchResponse
         {
@@ -644,33 +644,30 @@ private void RemoveDuplicatesFromChangeTracker()
             Tracks = tier1Tracks.Select(r => r.ToResponse(_imageService, likedIds.Contains(r.Id))).ToList(),
             Albums = albums,
             Artists = artists,
-            FuzzyTracks = fuzzyTracks,
+            FuzzyTracks = rawFuzzyTracks.Select(recording => recording.ToResponse(_imageService, likedIds.Contains(recording.Id))).ToList(),
             FuzzyAlbums = fuzzyAlbums,
             FuzzyArtists = fuzzyArtists,
         };
     }
 
-    public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId)
+    public async Task<UniversalSearchResponse> GeneralSearch(string query, int limit, Guid userId, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var response = new UniversalSearchResponse();
-
-        var playlistsTask = _dbContext.Playlists
-            .Where(p => p.Name.ToLower().Contains(query.ToLower()))
-            .Take(limit)
-            .ToListAsync();
 
         var artistsTask = _externalMusicSearchService.SearchArtistsAsync(query);
         var recordingsTask = _externalMusicSearchService.SearchRecordingsAsync(query);
         var albumsTask = _externalMusicSearchService.SearchAlbumsAsync(query);
-        var likedRecordingIdsTask = _libraryService.GetLikedRecordingIdsAsync(userId, CancellationToken.None);
-
-        await Task.WhenAll(playlistsTask, artistsTask, recordingsTask, albumsTask, likedRecordingIdsTask);
-
-        var playlists = playlistsTask.Result;
-        var artists = artistsTask.Result ?? new List<ArtistDto>();
-        var recordings = recordingsTask.Result ?? new List<RecordingDto>();
-        var albums = albumsTask.Result ?? new List<ReleaseDto>();
-        var likedRecordingIds = likedRecordingIdsTask.Result;
+        var providerResults = Task.WhenAll((Task)artistsTask, recordingsTask, albumsTask);
+        var playlists = await _dbContext.Playlists.AsNoTracking()
+            .Where(playlist => playlist.Name.ToLower().Contains(query.ToLower()))
+            .Take(limit).ToListAsync(cancellationToken);
+        await providerResults.WaitAsync(cancellationToken);
+        var artists = await artistsTask ?? new List<ArtistDto>();
+        var recordings = await recordingsTask ?? new List<RecordingDto>();
+        var albums = await albumsTask ?? new List<ReleaseDto>();
+        var candidateRecordingIds = recordings.Take(limit).Select(recording => recording.Id).ToArray();
+        var likedRecordingIds = await _libraryService.GetLikedRecordingIdsAsync(userId, candidateRecordingIds, cancellationToken);
 
         response.Playlists = playlists;
         response.Artists = artists.Take(limit).Select(a => a.ToResponse()).ToList();

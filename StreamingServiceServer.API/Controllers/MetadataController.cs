@@ -26,7 +26,7 @@ public class MetadataController : ControllerBase
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
             return Unauthorized("Invalid or missing user ID in token.");
 
-        var response = await _metadataService.GeneralSearch(query, limit, userId);
+        var response = await _metadataService.GeneralSearch(query, limit, userId, HttpContext.RequestAborted);
         return Ok(response);
     }
 
@@ -44,7 +44,7 @@ public class MetadataController : ControllerBase
         if (string.IsNullOrWhiteSpace(query))
             return BadRequest("Query is required.");
 
-        var response = await _metadataService.DbSearch(query, page, pageSize, userId);
+        var response = await _metadataService.DbSearch(query, page, pageSize, userId, HttpContext.RequestAborted);
         return Ok(response);
     }
 

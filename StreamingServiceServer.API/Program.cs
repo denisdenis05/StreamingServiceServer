@@ -33,10 +33,14 @@ builder.Services.AddOptions<CoverAssetOptions>().Bind(builder.Configuration.GetS
         && options.MaximumPendingImports > 0 && options.MaximumStoredBytes > 0 && options.MinimumFreeBytes >= 0 && options.TemporaryFileRetention > TimeSpan.Zero,
         "Cover asset limits and intervals must be positive and dimensions must be ordered.").ValidateOnStart();
 builder.Services.AddSingleton<ICoverImageRenderer, FfmpegCoverImageRenderer>();
+builder.Services.AddSingleton<ICoverArchiveFallback>(services => new CoverArchiveFallback(
+    () => services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CoverAssetStore)),
+    new Uri(builder.Configuration["Music:External:MusicBrainz:BaseUrl"] ?? "https://musicbrainz.org/ws/2/"),
+    services.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<ICoverAssetStore>(services => new CoverAssetStore(
     () => services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CoverAssetStore)),
     services.GetRequiredService<ICoverImageRenderer>(), services.GetRequiredService<Microsoft.Extensions.Options.IOptions<CoverAssetOptions>>(),
-    services.GetRequiredService<TimeProvider>(), services.GetRequiredService<ILogger<CoverAssetStore>>()));
+    services.GetRequiredService<TimeProvider>(), services.GetRequiredService<ILogger<CoverAssetStore>>(), services.GetRequiredService<ICoverArchiveFallback>()));
 builder.Services.AddScoped<CoverJobInterceptor>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetJobService>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetMaintenanceService>();

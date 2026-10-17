@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace StreamingServiceServer.Business.Services.Images.Assets;
 
 public sealed class CoverAssetStore(Func<HttpClient> createClient, ICoverImageRenderer renderer,
-    IOptions<CoverAssetOptions> configuration, TimeProvider clock, ILogger<CoverAssetStore>? logger = null) : ICoverAssetStore, IDisposable
+    IOptions<CoverAssetOptions> configuration, TimeProvider clock, ILogger<CoverAssetStore>? logger = null, ICoverArchiveFallback? archiveFallback = null) : ICoverAssetStore, IDisposable
 {
     private const string AssetVersion = "-v1-";
     private const string ImageExtension = ".jpg";
@@ -57,7 +57,7 @@ public sealed class CoverAssetStore(Func<HttpClient> createClient, ICoverImageRe
         }
         var identity = Hash(Encoding.UTF8.GetBytes(source));
         ProtectIdentity(identity);
-        var operation = pending.GetOrAdd(identity, _ => new Lazy<Task<CoverAssetSet>>(() => BoundedAsync(token => DownloadAsync(address, identity, token))));
+        var operation = pending.GetOrAdd(identity, _ => new Lazy<Task<CoverAssetSet>>(() => BoundedAsync(token => DownloadWithFallbackAsync(address, identity, token))));
         var completion = operation.Value;
         _ = completion.ContinueWith(completed =>
         {
@@ -65,6 +65,20 @@ public sealed class CoverAssetStore(Func<HttpClient> createClient, ICoverImageRe
             pending.TryRemove(new KeyValuePair<string, Lazy<Task<CoverAssetSet>>>(identity, operation));
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         return await completion.WaitAsync(cancellationToken);
+    }
+    private async Task<CoverAssetSet> DownloadWithFallbackAsync(Uri address, string sourceIdentity, CancellationToken cancellationToken)
+    {
+        try { return await DownloadAsync(address, sourceIdentity, cancellationToken); }
+        catch (CoverSourceFailure failure) when (failure.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone && archiveFallback is not null)
+        {
+            var alternative = await archiveFallback.ResolveAsync(address, cancellationToken);
+            if (alternative is null) throw;
+            var result = await GetOrCreateAsync(alternative.AbsoluteUri, cancellationToken);
+            var original = new FileInfo(AssetPath(result.SourceIdentity + OriginalExtension));
+            await WriteJsonAsync(AssetPath(sourceIdentity + SourceExtension),
+                new SourceManifest(result.SourceIdentity, original.Length, clock.GetUtcNow()), cancellationToken);
+            return result;
+        }
     }
     private async Task<CoverAssetSet> DownloadAsync(Uri address, string sourceIdentity, CancellationToken cancellationToken)
     {

@@ -49,3 +49,7 @@ The user authorized committing these completed changes on 2026-10-17. Earlier no
 ## Transfer, logic and performance repairs
 
 The follow-up findings were implemented in three coordinated tracks. [Transfer repairs](IMAGE_TRANSFER_REPAIR_PROGRESS.md), [logic repairs](SERVER_IMAGE_LOGIC_PROGRESS.md) and [performance repairs](SERVER_IMAGE_PERFORMANCE_PROGRESS.md) record the current state. Final integrated suite: 91 server tests passed. The new additive scheduling/integrity/backfill migrations are required before deployment; local settings and IDE changes remain excluded. Native/mobile acceptance and actual NAS performance are separate gates.
+
+## Missing covers follow-up
+
+[MISSING_COVER_DIAGNOSIS.md](MISSING_COVER_DIAGNOSIS.md) records the screenshot investigation, strictly read-only database queries, the Android missing-destination regression and the release-to-group archive fallback. The non-PostgreSQL server suite passed 64 tests, including nine new recovery cases; Release publish passed. No production records or schema were changed. The inspected database does not yet have the cover-job tables, so automatic recovery requires deployment of the previously prepared migrations and updated server.

@@ -13,6 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\StreamingServiceServer.Business\StreamingServiceServer.Business.csproj" />
     <ProjectReference Include="..\StreamingServiceServer.Data\StreamingServiceServer.Data.csproj" />
   </ItemGroup>
 </Project>

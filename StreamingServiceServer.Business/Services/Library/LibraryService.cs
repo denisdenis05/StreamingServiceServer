@@ -1,3 +1,4 @@
+using StreamingServiceServer.Business.Services.Images;
 using System.Net.Http.Json;
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
@@ -13,12 +14,14 @@ public class LibraryService : ILibraryService
 {
     private readonly StreamingDbContext _dbContext;
     private readonly IExternalMusicSearchService _externalMusicSearchService;
+    private readonly IImageService? _images;
     const string DefaultPlaylistName = "New Playlist";
 
-    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService)
+    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService? images = null)
     {
         _dbContext = dbContext;
         _externalMusicSearchService = externalMusicSearchService;
+        _images = images;
     }
 
     public async Task<Playlist> CreatePlaylistAsync(Guid ownerId, CreatePlaylistRequest request, CancellationToken cancellationToken)
@@ -167,9 +170,9 @@ public class LibraryService : ILibraryService
             Id = x.Release.Id,
             Title = x.Release.Title,
             ArtistName = x.Release.Artist.Name,
-            Cover = !string.IsNullOrEmpty(x.Release.OptimizedCover) ? x.Release.OptimizedCover : x.Release.Cover,
-            SmallCover = !string.IsNullOrEmpty(x.Release.OptimizedSmallCover) ? x.Release.OptimizedSmallCover : x.Release.SmallCover,
-            VerySmallCover = !string.IsNullOrEmpty(x.Release.OptimizedVerySmallCover) ? x.Release.OptimizedVerySmallCover : x.Release.VerySmallCover,
+            Cover = _images?.GetPreferredCover(x.Release.LocalCover, x.Release.OptimizedCover, x.Release.Cover) ?? CoverPolicy.Select(x.Release.LocalCover, x.Release.OptimizedCover, x.Release.Cover),
+            SmallCover = _images?.GetPreferredCover(x.Release.LocalSmallCover, x.Release.OptimizedSmallCover, x.Release.SmallCover) ?? CoverPolicy.Select(x.Release.LocalSmallCover, x.Release.OptimizedSmallCover, x.Release.SmallCover),
+            VerySmallCover = _images?.GetPreferredCover(x.Release.LocalVerySmallCover, x.Release.OptimizedVerySmallCover, x.Release.VerySmallCover) ?? CoverPolicy.Select(x.Release.LocalVerySmallCover, x.Release.OptimizedVerySmallCover, x.Release.VerySmallCover),
             Type = "Album"
         }));
 

@@ -1,44 +1,24 @@
 using Microsoft.Extensions.Configuration;
 using StreamingServiceServer.Business.Models.MusicSearch;
-
 namespace StreamingServiceServer.Business.Services.Images;
 
 public class ImageService : IImageService
 {
-    private readonly string _baseCoverUrl;
-
+    private readonly Uri _archiveRoot;
+    private readonly string _domain;
+    private readonly string _imagePath;
     public ImageService(IConfiguration configuration)
     {
-        _baseCoverUrl = configuration["Music:External:AlbumCover:BaseUrl"];
+        _archiveRoot = CoverPolicy.ArchiveRoot(configuration["Music:External:AlbumCover:BaseUrl"]);
+        _domain = configuration["Domain"] ?? string.Empty;
+        _imagePath = configuration["Cover:DomainExtension"] ?? "/images/";
     }
-
-    public AlbumCoversDto GetAlbumCover(Guid releaseId, Guid? releaseGroupId = null)
+    public string GetPreferredCover(string? local, string? optimized, string? original)
     {
-        var albumCovers = new AlbumCoversDto();
-        var targetUrlPrefix = releaseGroupId.HasValue
-            ? $"{_baseCoverUrl}release-group/{releaseGroupId.Value}"
-            : $"{_baseCoverUrl}release/{releaseId}";
-
-        albumCovers.Cover = $"{targetUrlPrefix}/front";
-        albumCovers.SmallCover = $"{targetUrlPrefix}/front-500";
-        albumCovers.VerySmallCover = $"{targetUrlPrefix}/front-250";
-
-        return albumCovers;
+        if (!string.IsNullOrWhiteSpace(local)) local = CoverPolicy.LocalAddress(local, _domain, _imagePath);
+        return CoverPolicy.Select(local, optimized, original);
     }
-
-    public AlbumCoversDto GetAllAlbumCovers(Guid releaseGroupId)
-    {
-        var albumCovers = new AlbumCoversDto();
-
-        var frontCoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front";
-        albumCovers.Cover = frontCoverUrl;
-
-        var front500CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-500";
-        albumCovers.SmallCover = front500CoverUrl;
-
-        var front250CoverUrl = $"{_baseCoverUrl}release-group/{releaseGroupId}/front-250";
-        albumCovers.VerySmallCover = front250CoverUrl;
-
-        return albumCovers;
-    }
+    public AlbumCoversDto GetAlbumCover(Guid releaseId, Guid? releaseGroupId = null) =>
+        CoverPolicy.Build(_archiveRoot, releaseGroupId ?? releaseId, releaseGroupId.HasValue);
+    public AlbumCoversDto GetAllAlbumCovers(Guid releaseGroupId) => CoverPolicy.Build(_archiveRoot, releaseGroupId, true);
 }

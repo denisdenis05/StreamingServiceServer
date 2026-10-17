@@ -254,6 +254,55 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("ArtistTags");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.CoverAssetJob", b =>
+                {
+                    b.Property<int>("EntityKind")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("EntityIdentifier")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AssetManifest")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("EnqueuedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastFailure")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SourceAddress")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("EntityKind", "EntityIdentifier");
+
+                    b.HasIndex("CompletedAt", "NextAttemptAt");
+
+                    b.ToTable("CoverAssetJobs");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.DownloadProviderConfig", b =>
                 {
                     b.Property<Guid>("Id")

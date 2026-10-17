@@ -1,3 +1,4 @@
+using StreamingServiceServer.Business.Services.Images.Assets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ public class DashboardController : ControllerBase
     private readonly IExternalMusicSearchService _externalMusicSearchService;
     private readonly IImageService _imageService;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ICoverAssetStore _coverAssets;
 
     public DashboardController(
         StreamingDbContext dbContext,
@@ -38,7 +40,8 @@ public class DashboardController : ControllerBase
         SlskdHelper slskdHelper,
         IExternalMusicSearchService externalMusicSearchService,
         IImageService imageService,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        ICoverAssetStore coverAssets)
     {
         _dbContext = dbContext;
         _torrentHelper = torrentHelper;
@@ -50,6 +53,7 @@ public class DashboardController : ControllerBase
         _externalMusicSearchService = externalMusicSearchService;
         _imageService = imageService;
         _scopeFactory = scopeFactory;
+        _coverAssets = coverAssets;
     }
 
     [Authorize(Roles = "Admin")]
@@ -304,7 +308,7 @@ public class DashboardController : ControllerBase
                     id = r.Id,
                     title = r.Title ?? "Unknown Release",
                     artistName = r.Artist != null ? r.Artist.Name : "Unknown Artist",
-                    cover = string.IsNullOrEmpty(r.OptimizedCover) ? (string.IsNullOrEmpty(r.Cover) ? "/api/dashboard/placeholder-cover" : r.Cover) : r.OptimizedCover,
+                    cover = _imageService.GetPreferredCover(r.LocalCover, r.OptimizedCover, r.Cover),
                     recordingsCount = r.Recordings.Count,
                     dateAdded = r.DateAdded
                 })
@@ -362,7 +366,7 @@ public class DashboardController : ControllerBase
                 id = downloadedRelease.Id,
                 title = downloadedRelease.Title ?? "Unknown Release",
                 artist = downloadedRelease.Artist?.Name ?? "Unknown Artist",
-                cover = string.IsNullOrEmpty(downloadedRelease.OptimizedCover) ? (string.IsNullOrEmpty(downloadedRelease.Cover) ? "/api/dashboard/placeholder-cover" : downloadedRelease.Cover) : downloadedRelease.OptimizedCover,
+                cover = _imageService.GetPreferredCover(downloadedRelease.LocalCover, downloadedRelease.OptimizedCover, downloadedRelease.Cover),
                 dateAdded = downloadedRelease.DateAdded,
                 recordings = downloadedRelease.Recordings.OrderBy(rec => rec.PositionInAlbum).Select(rec => new
                 {
@@ -370,7 +374,7 @@ public class DashboardController : ControllerBase
                     title = rec.Title,
                     length = rec.Length,
                     position = rec.PositionInAlbum,
-                    cover = rec.Cover,
+                    cover = _imageService.GetPreferredCover(rec.LocalCover, rec.OptimizedCover, rec.Cover),
                     fileExists = existingFileIds.Contains(rec.Id.ToString())
                 })
             });
@@ -1512,49 +1516,35 @@ public class DashboardController : ControllerBase
         if (release == null)
             return NotFound(new { message = "Album not found." });
 
-        var coverPath = _configuration["Cover:Path"] ?? "/nas/media/Images/";
-        var domainExtension = _configuration["Cover:DomainExtension"] ?? "/images/";
-        var domain = _configuration["Domain"] ?? "";
-
-        var ext = _imageTypeToExt.TryGetValue(contentType, out var e) ? e : Path.GetExtension(file.FileName);
-        var fileName = $"{id}_cover{ext}";
-        var filePath = Path.Combine(coverPath, fileName);
-
-        Directory.CreateDirectory(coverPath);
-        using (var stream = new FileStream(filePath, FileMode.Create))
-            await file.CopyToAsync(stream, cancellationToken);
-
-        var publicUrl = $"{domain}{domainExtension}{fileName}";
-
-        release.Cover = publicUrl;
-        release.SmallCover = publicUrl;
-        release.VerySmallCover = publicUrl;
-        release.OptimizedCover = publicUrl;
-        release.OptimizedSmallCover = publicUrl;
-        release.OptimizedVerySmallCover = publicUrl;
-        release.LocalCover = publicUrl;
-        release.LocalSmallCover = publicUrl;
-        release.LocalVerySmallCover = publicUrl;
-
-        if (release.Recordings != null)
+        var previousCover = release.Cover;
+        CoverAssetSet assets;
+        try
         {
-            foreach (var rec in release.Recordings)
-            {
-                rec.Cover = publicUrl;
-                rec.SmallCover = publicUrl;
-                rec.VerySmallCover = publicUrl;
-                rec.OptimizedCover = publicUrl;
-                rec.OptimizedSmallCover = publicUrl;
-                rec.OptimizedVerySmallCover = publicUrl;
-                rec.LocalCover = publicUrl;
-                rec.LocalSmallCover = publicUrl;
-                rec.LocalVerySmallCover = publicUrl;
-            }
+            await using var input = file.OpenReadStream();
+            assets = await _coverAssets.ImportAsync(input, cancellationToken);
+        }
+        catch (IOException) { return BadRequest(new { message = "The cover could not be decoded or exceeds the configured image limits." }); }
+        var publicUrl = _coverAssets.PublicAddress(assets.Full);
+        var smallUrl = _coverAssets.PublicAddress(assets.Small);
+        var thumbnailUrl = _coverAssets.PublicAddress(assets.Thumbnail);
+        await using var publication = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var claimed = await _dbContext.Releases.Where(current => current.Id == id && current.Cover == previousCover)
+            .ExecuteUpdateAsync(update => update.SetProperty(current => current.Cover, publicUrl), cancellationToken);
+        if (claimed == 0) return Conflict(new { message = "The album cover changed while this upload was being processed. Reload and try again." });
+        release.Cover = release.OptimizedCover = release.LocalCover = publicUrl;
+        release.SmallCover = release.OptimizedSmallCover = release.LocalSmallCover = smallUrl;
+        release.VerySmallCover = release.OptimizedVerySmallCover = release.LocalVerySmallCover = thumbnailUrl;
+        foreach (var recording in release.Recordings)
+        {
+            recording.Cover = recording.OptimizedCover = recording.LocalCover = publicUrl;
+            recording.SmallCover = recording.OptimizedSmallCover = recording.LocalSmallCover = smallUrl;
+            recording.VerySmallCover = recording.OptimizedVerySmallCover = recording.LocalVerySmallCover = thumbnailUrl;
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await publication.CommitAsync(cancellationToken);
 
-        return Ok(new { message = "Cover updated.", coverUrl = publicUrl });
+        return Ok(new { message = "Cover updated.", coverUrl = publicUrl, smallCoverUrl = smallUrl, verySmallCoverUrl = thumbnailUrl });
     }
 
     [AllowAnonymous]

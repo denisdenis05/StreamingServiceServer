@@ -12,6 +12,8 @@ public class StreamingDbContext : DbContext
     {
     }
 
+    public DbSet<CoverAssetJob> CoverAssetJobs { get; set; }
+
     public DbSet<Artist> Artists { get; set; }
     public DbSet<Recording> Recordings { get; set; }
     public DbSet<ArtistAlias> ArtistAliases { get; set; }

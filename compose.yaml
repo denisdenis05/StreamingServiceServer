@@ -28,7 +28,7 @@ services:
       Music__DownloadPath: /data/downloads
       Music__External__MusicBrainz__BaseUrl: "${MUSICBRAINZ_BASE_URL:-https://musicbrainz.org/ws/2/}"
       Music__External__MusicBrainz__User-Agent: "${MUSICBRAINZ_USER_AGENT:?Set MUSICBRAINZ_USER_AGENT}"
-      Music__External__AlbumCover__BaseUrl: "${ALBUM_COVER_BASE_URL:-https://coverartarchive.org/release/}"
+      Music__External__AlbumCover__BaseUrl: "${ALBUM_COVER_BASE_URL:-https://coverartarchive.org/}"
       Music__DownloadSource__BaseUrl: "${DOWNLOAD_SOURCE_BASE_URL:-}"
       Music__DownloadSource__Parameters: "${DOWNLOAD_SOURCE_PARAMETERS:-}"
       Music__DownloadSource__RetryParameters: "${DOWNLOAD_SOURCE_RETRY_PARAMETERS:-}"

@@ -58,7 +58,7 @@ Additional optional variables:
 | SERVER_USER | `1654:1654`; host filesystem UID/GID used by the server container. |
 | TORRENT_MAX_DOWNLOADS | `3`. |
 | MUSICBRAINZ_BASE_URL | Public MusicBrainz API endpoint. |
-| ALBUM_COVER_BASE_URL | Public Cover Art Archive release endpoint. |
+| ALBUM_COVER_BASE_URL | Public Cover Art Archive root; the application adds release or release-group. |
 | PREVIEW_DOWNLOADER_ARGUMENTS | `-x --audio-format mp3 --no-playlist -o`. |
 | PREVIEW_DOWNLOADER_SEARCH_ARGUMENTS | `ytsearch1:`. |
 | LOG_LEVEL | `Information`. |

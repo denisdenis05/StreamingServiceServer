@@ -159,10 +159,23 @@ public class MetadataController : ControllerBase
     }
 
     [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
-    [HttpPost("refresh-all-album-covers")] public async Task<IActionResult> RefreshAllAlbumCovers()
+    [HttpPost("refresh-all-album-covers")] public async Task<IActionResult> RefreshAllAlbumCovers(CancellationToken cancellationToken)
     {
-        await _metadataService.RefreshAllAlbumCovers();
+        await _metadataService.RefreshAllAlbumCovers(cancellationToken);
 
-        return Ok();
+        return Accepted();
     }
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
+    [HttpGet("refresh-all-album-covers")]
+    public async Task<IActionResult> GetCoverMetadataRefresh(CancellationToken cancellationToken) =>
+        Ok(await _metadataService.GetCoverMetadataRefresh(cancellationToken));
+
+    [Authorize(AuthenticationSchemes = "Bearer", Roles = "Admin")]
+    [HttpDelete("refresh-all-album-covers")]
+    public async Task<IActionResult> CancelCoverMetadataRefresh(CancellationToken cancellationToken)
+    {
+        await _metadataService.CancelCoverMetadataRefresh(cancellationToken);
+        return NoContent();
+    }
+
 }

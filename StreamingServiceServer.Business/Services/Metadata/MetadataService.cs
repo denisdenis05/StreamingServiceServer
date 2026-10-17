@@ -501,50 +501,42 @@ private void RemoveDuplicatesFromChangeTracker()
         return queuedAlbum.Any();
     }
 
-    public async Task RefreshAllAlbumCovers()
+    public async Task RefreshAllAlbumCovers(CancellationToken cancellationToken = default)
     {
-        var allReleases = await _dbContext.Releases
-            .Include(r => r.Recordings)
-            .ToListAsync();
-
-        foreach (var release in allReleases)
+        var operation = await _dbContext.CoverMetadataRefreshes.SingleOrDefaultAsync(
+            refresh => refresh.Id == CoverMetadataRefresh.OperationKey, cancellationToken);
+        if (operation?.Pending == true) return;
+        if (operation is null)
         {
-            AlbumCoversDto? albumCovers = null;
-
-            var externalReleaseDtos = await _externalMusicSearchService.GetReleasesFromId(release.Id);
-            var externalReleaseDto = externalReleaseDtos.FirstOrDefault();
-
-            if (externalReleaseDto?.ReleaseGroup?.Id != null && externalReleaseDto.ReleaseGroup.Id != Guid.Empty)
-            {
-                var releaseGroupId = externalReleaseDto.ReleaseGroup.Id;
-                albumCovers = _imageService.GetAllAlbumCovers(releaseGroupId);
-            }
-            else
-            {
-                var singleCoverUrl = _imageService.GetAlbumCover(release.Id);
-                albumCovers = new AlbumCoversDto
-                {
-                    Cover = singleCoverUrl.Cover,
-                    SmallCover = singleCoverUrl.SmallCover,
-                    VerySmallCover = singleCoverUrl.VerySmallCover
-                };
-            }
-
-            if (albumCovers != null)
-            {
-                release.Cover = albumCovers.Cover;
-                release.SmallCover = albumCovers.SmallCover;
-                release.VerySmallCover = albumCovers.VerySmallCover;
-
-                foreach (var recording in release.Recordings)
-                {
-                    recording.Cover = albumCovers.Cover;
-                    recording.SmallCover = albumCovers.SmallCover;
-                    recording.VerySmallCover = albumCovers.VerySmallCover;
-                }
-            }
+            operation = new CoverMetadataRefresh();
+            _dbContext.CoverMetadataRefreshes.Add(operation);
         }
-        await _dbContext.SaveChangesAsync();
+        operation.Cursor = null;
+        operation.Pending = true;
+        operation.CompletedReleases = 0;
+        operation.RequestedAt = DateTimeOffset.UtcNow;
+        operation.CompletedAt = null;
+        operation.Version = Guid.NewGuid();
+        operation.LastFailure = string.Empty;
+        try { await _dbContext.SaveChangesAsync(cancellationToken); }
+        catch (DbUpdateConcurrencyException) { _dbContext.ChangeTracker.Clear(); }
+        catch (DbUpdateException)
+        {
+            _dbContext.ChangeTracker.Clear();
+            if (!await _dbContext.CoverMetadataRefreshes.AsNoTracking().AnyAsync(
+                refresh => refresh.Id == CoverMetadataRefresh.OperationKey && refresh.Pending, cancellationToken)) throw;
+        }
+    }
+
+    public Task<CoverMetadataRefresh?> GetCoverMetadataRefresh(CancellationToken cancellationToken = default) =>
+        _dbContext.CoverMetadataRefreshes.AsNoTracking().SingleOrDefaultAsync(
+            refresh => refresh.Id == CoverMetadataRefresh.OperationKey, cancellationToken);
+
+    public async Task CancelCoverMetadataRefresh(CancellationToken cancellationToken = default)
+    {
+        await _dbContext.CoverMetadataRefreshes.Where(refresh => refresh.Id == CoverMetadataRefresh.OperationKey && refresh.Pending)
+            .ExecuteUpdateAsync(update => update.SetProperty(refresh => refresh.Pending, false)
+                .SetProperty(refresh => refresh.Version, Guid.NewGuid()), cancellationToken);
     }
 
     private const double FuzzySimilarityThreshold = 0.25;

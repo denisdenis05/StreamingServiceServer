@@ -26,5 +26,7 @@ public interface IMetadataService
     Task QueueToDownloadByQuery(string albumQuery, string? artistQuery = null);
     Task QueueToDownloadById(Guid id);
 
-    Task RefreshAllAlbumCovers();
+    Task<CoverMetadataRefresh?> GetCoverMetadataRefresh(CancellationToken cancellationToken = default);
+    Task CancelCoverMetadataRefresh(CancellationToken cancellationToken = default);
+    Task RefreshAllAlbumCovers(CancellationToken cancellationToken = default);
 }

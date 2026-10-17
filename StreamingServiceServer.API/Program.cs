@@ -23,15 +23,24 @@ builder.Services.AddOptions<CoverAssetOptions>().Bind(builder.Configuration.GetS
         && options.MaximumOutputBytes > 0 && options.FullDimension >= options.SmallDimension
         && options.SmallDimension >= options.ThumbnailDimension && options.ThumbnailDimension > 0
         && options.JobPollInterval > TimeSpan.Zero && options.RepairInterval > TimeSpan.Zero
-        && options.RenderTimeout > TimeSpan.Zero && options.LeaseLifetime > options.RenderTimeout,
+        && options.RenderTimeout > TimeSpan.Zero && options.LeaseLifetime > options.OperationTimeout
+        && options.OperationTimeout > TimeSpan.Zero && options.BodyIdleTimeout > TimeSpan.Zero
+        && options.SourceLifetime > TimeSpan.Zero && options.UnreferencedAssetRetention > TimeSpan.Zero
+        && options.InitialRetryDelay > TimeSpan.Zero && options.MaximumRetryDelay >= options.InitialRetryDelay
+        && options.MaximumDecodedPixels > 0 && options.MaintenanceBatchSize > 0
+        && options.MaintenanceInterval > TimeSpan.Zero && options.IntegrityInterval > TimeSpan.Zero
+        && options.VerificationCacheEntries > 0 && options.CleanupBatchSize > 0
+        && options.MaximumPendingImports > 0 && options.MaximumStoredBytes > 0 && options.MinimumFreeBytes >= 0 && options.TemporaryFileRetention > TimeSpan.Zero,
         "Cover asset limits and intervals must be positive and dimensions must be ordered.").ValidateOnStart();
 builder.Services.AddSingleton<ICoverImageRenderer, FfmpegCoverImageRenderer>();
 builder.Services.AddSingleton<ICoverAssetStore>(services => new CoverAssetStore(
     () => services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CoverAssetStore)),
     services.GetRequiredService<ICoverImageRenderer>(), services.GetRequiredService<Microsoft.Extensions.Options.IOptions<CoverAssetOptions>>(),
-    services.GetRequiredService<TimeProvider>()));
+    services.GetRequiredService<TimeProvider>(), services.GetRequiredService<ILogger<CoverAssetStore>>()));
 builder.Services.AddScoped<CoverJobInterceptor>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetJobService>();
+builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetMaintenanceService>();
+builder.Services.AddHostedService<StreamingServiceServer.Background.CoverMetadataRefreshService>();
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();

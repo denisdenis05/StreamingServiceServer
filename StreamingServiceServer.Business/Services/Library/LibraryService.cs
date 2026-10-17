@@ -120,26 +120,46 @@ public class LibraryService : ILibraryService
             query = query.OrderBy(x => x.pr.Order);
         }
 
-        return await query
-            .Select(x => new RecordingResponse
-            {
-                Id = x.pr.RecordingId,
-                ReleaseId = x.r != null ? x.r.Release.Id : (Guid?)null,
-                Title = x.pr.Title,
-                ArtistName = x.pr.Artist,
-                ReleaseTitle = x.pr.Album,
-                Cover = x.r != null && !string.IsNullOrEmpty(x.r.Cover) ? x.r.Cover : x.pr.Cover,
-                PositionInAlbum = x.pr.Order,
-                IsLiked = likedRecordingIds.Contains(x.pr.RecordingId),
-                SuggestedRecordingId = x.pr.SuggestedRecordingId,
-                SuggestedTitle = x.s != null ? x.s.Title : null,
-                SuggestedArtist = x.s != null ? x.s.ArtistCredit.Select(ac => ac.Name ?? ac.Artist.Name).FirstOrDefault() : null,
-                SuggestedAlbum = x.s != null ? x.s.Release.Title : null
-            })
+        var recordings = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync(cancellationToken);
+            .Select(playlistRow => new
+            {
+                Response = new RecordingResponse
+                {
+                    Id = playlistRow.pr.RecordingId,
+                    ReleaseId = playlistRow.r != null ? playlistRow.r.Release.Id : (Guid?)null,
+                    Title = playlistRow.pr.Title,
+                    ArtistName = playlistRow.pr.Artist,
+                    ReleaseTitle = playlistRow.pr.Album,
+                    PositionInAlbum = playlistRow.pr.Order,
+                    IsLiked = likedRecordingIds.Contains(playlistRow.pr.RecordingId),
+                    SuggestedRecordingId = playlistRow.pr.SuggestedRecordingId,
+                    SuggestedTitle = playlistRow.s != null ? playlistRow.s.Title : null,
+                    SuggestedArtist = playlistRow.s != null ? playlistRow.s.ArtistCredit.Select(credit => credit.Name ?? credit.Artist.Name).FirstOrDefault() : null,
+                    SuggestedAlbum = playlistRow.s != null ? playlistRow.s.Release.Title : null
+                },
+                Original = playlistRow.r != null && playlistRow.r.Cover != null && playlistRow.r.Cover != string.Empty ? playlistRow.r.Cover : playlistRow.pr.Cover,
+                Small = playlistRow.r != null ? playlistRow.r.SmallCover : null,
+                Thumbnail = playlistRow.r != null ? playlistRow.r.VerySmallCover : null,
+                Local = playlistRow.r != null ? playlistRow.r.LocalCover : null,
+                LocalSmall = playlistRow.r != null ? playlistRow.r.LocalSmallCover : null,
+                LocalThumbnail = playlistRow.r != null ? playlistRow.r.LocalVerySmallCover : null,
+                Optimized = playlistRow.r != null ? playlistRow.r.OptimizedCover : null,
+                OptimizedSmall = playlistRow.r != null ? playlistRow.r.OptimizedSmallCover : null,
+                OptimizedThumbnail = playlistRow.r != null ? playlistRow.r.OptimizedVerySmallCover : null
+            }).ToListAsync(cancellationToken);
+        foreach (var recording in recordings)
+        {
+            recording.Response.Cover = SelectCover(recording.Local, recording.Optimized, recording.Original);
+            recording.Response.SmallCover = SelectCover(recording.LocalSmall, recording.OptimizedSmall, recording.Small);
+            recording.Response.VerySmallCover = SelectCover(recording.LocalThumbnail, recording.OptimizedThumbnail, recording.Thumbnail);
+        }
+        return recordings.Select(recording => recording.Response).ToList();
     }
+
+    private string SelectCover(string? local, string? optimized, string? source) =>
+        _images?.GetPreferredCover(local, optimized, source) ?? CoverPolicy.Select(local, optimized, source);
 
     public async Task<List<ReleaseResponse>> GetLibraryAsync(Guid userId, CancellationToken cancellationToken)
     {

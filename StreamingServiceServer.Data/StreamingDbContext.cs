@@ -12,6 +12,12 @@ public class StreamingDbContext : DbContext
     {
     }
 
+    public DbSet<CoverBackfillState> CoverBackfillStates { get; set; }
+
+    public DbSet<CoverAssetIntegrityState> CoverAssetIntegrityStates { get; set; }
+
+    public DbSet<CoverMetadataRefresh> CoverMetadataRefreshes { get; set; }
+
     public DbSet<CoverAssetJob> CoverAssetJobs { get; set; }
 
     public DbSet<Artist> Artists { get; set; }

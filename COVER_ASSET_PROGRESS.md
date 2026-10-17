@@ -41,3 +41,11 @@ The PostgreSQL cluster is a test fixture, not production. No deployed NAS path, 
 ## Commit authorization
 
 The user authorized committing these completed changes on 2026-10-17. Earlier no-commit statements record the implementation phase. No push, deployment or production migration is included. Local server appsettings files and IDE settings are excluded.
+
+## Follow-up performance and retention review
+
+[IMAGE_CACHE_REVIEW.md](IMAGE_CACHE_REVIEW.md) records the 2026-10-17 source review requested after the implementation commit. It identifies body-download deadlines, maintenance blocking new work, repeated per-recording hashing, startup manifest materialization, temporary-file leaks and incomplete disk/resource admission. It also traces mobile RNFS listener/native-job retention and iOS cancellation settlement. These findings remain open. This review changed documentation only and did not run tests or measure production performance.
+
+## Transfer, logic and performance repairs
+
+The follow-up findings were implemented in three coordinated tracks. [Transfer repairs](IMAGE_TRANSFER_REPAIR_PROGRESS.md), [logic repairs](SERVER_IMAGE_LOGIC_PROGRESS.md) and [performance repairs](SERVER_IMAGE_PERFORMANCE_PROGRESS.md) record the current state. Final integrated suite: 91 server tests passed. The new additive scheduling/integrity/backfill migrations are required before deployment; local settings and IDE changes remain excluded. Native/mobile acceptance and actual NAS performance are separate gates.

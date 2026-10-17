@@ -254,6 +254,21 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("ArtistTags");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.CoverAssetIntegrityState", b =>
+                {
+                    b.Property<string>("Identity")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("NextVerificationAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Identity");
+
+                    b.HasIndex("NextVerificationAt");
+
+                    b.ToTable("CoverAssetIntegrityStates");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.CoverAssetJob", b =>
                 {
                     b.Property<int>("EntityKind")
@@ -261,6 +276,10 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.Property<Guid>("EntityIdentifier")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AssetIdentity")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<string>("AssetManifest")
                         .IsRequired()
@@ -275,6 +294,10 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<DateTimeOffset>("EnqueuedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("InheritedSourceRevision")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("LastFailure")
                         .IsRequired()
                         .HasColumnType("text");
@@ -288,9 +311,23 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<DateTimeOffset>("NextAttemptAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("OriginalIdentity")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
                     b.Property<string>("SourceAddress")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("SourceRevision")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Suspended")
+                        .HasColumnType("boolean");
 
                     b.Property<Guid>("Version")
                         .IsConcurrencyToken()
@@ -298,9 +335,71 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasKey("EntityKind", "EntityIdentifier");
 
+                    b.HasIndex("AssetIdentity");
+
+                    b.HasIndex("OriginalIdentity");
+
                     b.HasIndex("CompletedAt", "NextAttemptAt");
 
+                    b.HasIndex("Suspended", "CompletedAt", "Priority", "NextAttemptAt");
+
                     b.ToTable("CoverAssetJobs");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.CoverBackfillState", b =>
+                {
+                    b.Property<int>("EntityKind")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("NextRestartAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PositionAddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PositionIdentifier")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("EntityKind");
+
+                    b.ToTable("CoverBackfillStates");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.CoverMetadataRefresh", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("CompletedReleases")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("Cursor")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("LastFailure")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Pending")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("CoverMetadataRefreshes");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.DownloadProviderConfig", b =>
@@ -644,6 +743,8 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasIndex("Title");
 
+                    b.HasIndex("DateAdded", "Id");
+
                     b.ToTable("Recordings");
                 });
 
@@ -723,6 +824,8 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ArtistId");
+
+                    b.HasIndex("DateAdded", "Id");
 
                     b.ToTable("Releases");
                 });

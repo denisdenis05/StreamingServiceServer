@@ -9,5 +9,6 @@ public class RecordingConfiguration: IEntityTypeConfiguration<Recording>
     public void Configure(EntityTypeBuilder<Recording> builder)
     {
         builder.HasIndex(a => a.Title);
+        builder.HasIndex(recording => new { recording.DateAdded, recording.Id });
     }
 }

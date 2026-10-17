@@ -90,19 +90,19 @@ public sealed class CoverAssetTests
     [Fact]
     public async Task InvalidDownloadedContentCannotCreateAnAssetManifest() {
         using var fixture = new AssetFixture(); fixture.Handler.Content = Encoding.UTF8.GetBytes("not an image");
-        await Assert.ThrowsAsync<IOException>(() => fixture.Store.GetOrCreateAsync(AssetFixture.Source, CancellationToken.None));
+        await Assert.ThrowsAnyAsync<IOException>(() => fixture.Store.GetOrCreateAsync(AssetFixture.Source, CancellationToken.None));
         Assert.Empty(System.IO.Directory.GetFiles(fixture.Directory, "*.asset.json"));
     }
     [Fact]
     public async Task OversizedDownloadsAreRejectedBeforePublication() {
         using var fixture = new AssetFixture(); fixture.Options.MaximumInputBytes = 1;
-        await Assert.ThrowsAsync<IOException>(() => fixture.Store.GetOrCreateAsync(AssetFixture.Source, CancellationToken.None));
+        await Assert.ThrowsAnyAsync<IOException>(() => fixture.Store.GetOrCreateAsync(AssetFixture.Source, CancellationToken.None));
         Assert.Empty(System.IO.Directory.GetFiles(fixture.Directory, "*.asset.json"));
     }
     [Fact]
     public async Task RendererFailureLeavesNoCompletedOrTemporaryAsset() {
         using var fixture = new AssetFixture(); fixture.Renderer.Fail = true;
-        await Assert.ThrowsAsync<IOException>(() => fixture.Store.GetOrCreateAsync(AssetFixture.Source, CancellationToken.None));
+        await Assert.ThrowsAnyAsync<IOException>(() => fixture.Store.GetOrCreateAsync(AssetFixture.Source, CancellationToken.None));
         Assert.Empty(System.IO.Directory.GetFiles(fixture.Directory, "*.asset.json"));
         Assert.Empty(System.IO.Directory.GetFiles(fixture.Directory, "*.partial"));
     }
@@ -143,7 +143,7 @@ internal sealed class AssetFixture : IDisposable
         Options = new CoverAssetOptions { Path = Directory, Domain = "https://app.invalid" };
         Store = new CoverAssetStore(() => new HttpClient(Handler, false), Renderer, Microsoft.Extensions.Options.Options.Create(Options), TimeProvider.System);
     }
-    public void Dispose() { if (System.IO.Directory.Exists(Directory)) System.IO.Directory.Delete(Directory, true); Handler.Dispose(); }
+    public void Dispose() { Store.Dispose(); if (System.IO.Directory.Exists(Directory)) System.IO.Directory.Delete(Directory, true); Handler.Dispose(); }
 }
 internal sealed class ImageHandler : HttpMessageHandler
 {

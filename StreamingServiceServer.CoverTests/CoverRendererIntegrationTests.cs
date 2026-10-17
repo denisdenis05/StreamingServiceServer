@@ -38,7 +38,7 @@ public sealed class CoverRendererIntegrationTests
     [Fact]
     public async Task RetentionRemovesOnlyExpiredOwnedAssetsAndPreservesReferencedAndLegacyFiles()
     {
-        using var fixture = new AssetFixture(); var assets = await fixture.Store.ImportAsync(new MemoryStream(AssetFixture.Image), CancellationToken.None);
+        using var fixture = new AssetFixture(); fixture.Options.LeaseLifetime = TimeSpan.Zero; var assets = await fixture.Store.ImportAsync(new MemoryStream(AssetFixture.Image), CancellationToken.None);
         var legacy = Path.Combine(fixture.Directory, "user-cover.jpg"); await File.WriteAllTextAsync(legacy, "legacy");
         foreach (var path in Directory.GetFiles(fixture.Directory)) File.SetLastWriteTimeUtc(path, DateTime.UtcNow - TimeSpan.FromDays(400));
         await fixture.Store.PruneAsync(new HashSet<string> { assets.Identity, assets.SourceIdentity }, CancellationToken.None);

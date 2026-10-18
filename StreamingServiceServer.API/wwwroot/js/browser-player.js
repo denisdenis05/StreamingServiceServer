@@ -1,8 +1,8 @@
 (function (root) {
   const Policy = Object.freeze({ streamPath: '/Stream', sessionPath: '/Stream/browser-session', emptyIdentifier: '00000000-0000-0000-0000-000000000000',
     completePercentage: 100, secondsPerMinute: 60 });
-  const Icons = Object.freeze({ play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>',
-    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zm6 0h4v14h-4z" fill="currentColor"/></svg>' });
+  const Icons = Object.freeze({ play: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>',
+    pause: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M7 5h4v14H7zm6 0h4v14h-4z" fill="currentColor"/></svg>' });
   function button(track, escapeHtml) {
     const available = track.available !== false && track.identifier && track.identifier !== Policy.emptyIdentifier;
     return '<button type="button" class="browser-track-play" data-browser-play="' + escapeHtml(track.identifier || '')
@@ -37,6 +37,7 @@
       const seekable = Number.isFinite(duration) && duration > 0 && audio?.seekable?.length > 0;
       elements.progress.disabled = !seekable || failure;
       elements.progress.value = Number.isFinite(duration) && duration > 0 ? Math.min(Policy.completePercentage, position / duration * Policy.completePercentage) : 0;
+      elements.progress.style?.setProperty('--playback-percentage', elements.progress.value + '%');
       elements.elapsed.textContent = formatTime(position); elements.duration.textContent = formatTime(duration);
       buttons();
     }

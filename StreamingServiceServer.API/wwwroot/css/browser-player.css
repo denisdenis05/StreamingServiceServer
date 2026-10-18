@@ -1,0 +1,110 @@
+.browser-track-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  border: 1px solid var(--border-light, #d6cbc0);
+  border-radius: 50%;
+  background: var(--bg-subtle, #f4efea);
+  color: var(--accent-olive, #3e5940);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.browser-track-play svg { display: block; flex: none; width: 16px; height: 16px; }
+.browser-track-play:hover:not(:disabled), .browser-track-play[aria-pressed="true"] {
+  background: var(--accent-olive, #3e5940);
+  border-color: var(--accent-olive, #3e5940);
+  color: var(--bg-subtle, #f4efea);
+}
+.browser-track-play:disabled { opacity: .35; cursor: not-allowed; }
+.browser-player[hidden] { display: none !important; }
+.browser-player {
+  position: fixed;
+  left: 50vw;
+  top: calc(100vh - 1.25rem);
+  top: calc(100dvh - 1.25rem);
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -100%);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-sizing: border-box;
+  width: calc(100vw - 2rem);
+  max-width: 620px;
+  margin: 0;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--border-light, #d6cbc0);
+  border-radius: 18px;
+  background: var(--bg-subtle, #f4efea);
+  color: var(--text-main, #2a2420);
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  box-shadow: 0 12px 40px #2a242029;
+}
+.browser-player-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  padding: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-olive, #3e5940);
+  color: var(--bg-subtle, #f4efea);
+  cursor: pointer;
+}
+.browser-player-toggle svg { display: block; flex: none; width: 20px; height: 20px; }
+.browser-player-content { flex: 1; min-width: 0; }
+.browser-player-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .6rem; }
+.browser-player-heading strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+.browser-player-heading span, .browser-player-status { color: var(--text-muted, #6e655f); font-size: .75rem; line-height: 1.4; }
+.browser-player-heading span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 100%; }
+.browser-player-status { min-height: 1.1rem; margin-top: .15rem; }
+.browser-player-timeline { display: flex; align-items: center; gap: .6rem; color: var(--text-muted, #6e655f); font-size: .7rem; font-variant-numeric: tabular-nums; }
+.browser-player-timeline span { flex: none; white-space: nowrap; }
+.browser-player-timeline input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 4px;
+  margin: 8px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: linear-gradient(to right, var(--accent-olive, #3e5940) var(--playback-percentage, 0%), var(--border-light, #d6cbc0) var(--playback-percentage, 0%));
+  cursor: pointer;
+}
+.browser-player-timeline input::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.browser-player-timeline input::-moz-range-track { height: 4px; background: transparent; }
+.browser-player-timeline input::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border: 0; border-radius: 50%; background: var(--accent-olive, #3e5940); }
+.browser-player-timeline input::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--accent-olive, #3e5940); }
+.browser-player-timeline input:disabled { opacity: .45; cursor: default; }
+.browser-player-close { align-self: flex-start; flex: 0 0 20px; padding: 0; border: 0; background: transparent; color: var(--text-muted, #6e655f); font: 24px/20px var(--font-sans, system-ui, sans-serif); cursor: pointer; }
+.has-browser-player { padding-bottom: 8rem; }
+.browser-track-play:focus-visible, .browser-player button:focus-visible, .browser-player input:focus-visible { outline: 2px solid var(--accent-ochre, #a86f28); outline-offset: 3px; }
+@media (max-width: 480px) {
+  .browser-player { gap: .65rem; padding: .8rem; }
+  .browser-player-heading { display: block; }
+  .browser-player-heading strong, .browser-player-heading span { display: block; }
+  .browser-player-heading strong { font-size: 1.1rem; }
+}

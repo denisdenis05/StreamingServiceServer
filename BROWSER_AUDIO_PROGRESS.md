@@ -33,3 +33,20 @@ Dedicated browser tests cover safe button markup, time labels, authentication-be
 Deploy the server/static assets together, sign into the dashboard and play an existing local recording through the normal external Nginx origin. Check seek/pause/resume, missing files and both album and playlist rows. Supported audio formats depend on the browser; this feature does not transcode unsupported files. An autoplay restriction displays a prompt to press play.
 
 No Nginx configuration, production database, local application settings or mobile/player code was changed for this chapter. No push or deployment is included.
+
+## Layout and asset-loading repair
+
+Updated 2026-10-18 after the user reported invisible icons and a player appearing after the footer.
+
+The previous HTML loaded unversioned dashboard assets and the player depended entirely on the recently extended stylesheet. Stale CSS is consistent with both symptoms, although the deployed browser cache was not inspected. The player now has its own versioned stylesheet; dashboard CSS and script URLs are versioned together. ASP.NET requires revalidation for HTML/CSS/JavaScript responses. Existing media cache policy is preserved.
+
+SVG icons now declare their namespace and intrinsic width/height, with explicit 16px row and 20px primary-control styles. Essential fixed positioning also exists on the player element, keeping it out of footer flow if stylesheet loading is delayed. Position and width use viewport units so a wide underlying page cannot move the control outside a narrow viewport. The independent stylesheet defines the cream/olive surface, spacing, typography, close control and seek-track appearance.
+
+Checks:
+
+- Browser/controller suites: 46 passed, including new intrinsic SVG dimensions, versioned asset links and fixed-position markup regressions.
+- Browser playback/cache-policy API cases: 20 passed. Revalidation tests cover HTML, both stylesheets, JavaScript and case-insensitive extensions; media policies are preserved.
+- Release publish, JavaScript syntax and diff checks passed. Existing build warnings remain.
+- Chromium measurements using actual styles/controller/render assets and local sample playback: desktop 1400px and mobile 390px layouts kept the player fixed during scrolling; row/main SVG sizes were 16/20px. The bar stayed within both viewports, with a measured 20px bottom offset at the check point. Narrow layout width was 358px with 16px side margins. Screenshots were also inspected. This was a local visual fixture, not a deployed Nginx or real-codec playback check.
+
+Deploy the updated HTML, CSS and scripts together, then reload the page. No database migration is required for this repair.

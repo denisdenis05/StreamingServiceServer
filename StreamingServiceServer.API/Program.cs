@@ -158,7 +158,10 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors("AllowFrontend");
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context => StreamingServiceServer.API.DashboardAssetCaching.Prepare(context.Context, context.File.Name)
+});
 
 var coverPath = app.Configuration["Cover:Path"];
 if (!string.IsNullOrWhiteSpace(coverPath))

@@ -111,3 +111,17 @@ test('actual album and playlist renderers add play controls and disable missing 
   assertion.match(album, /data-browser-play="missing"[^>]+ disabled/); assertion.match(playlist, /data-browser-play="unavailable"[^>]+ disabled/);
   assertion.ok(playlist.includes('<td><button type="button" class="browser-track-play"'));
 });
+test('playback icons have explicit dimensions without relying on cached stylesheets', () => {
+  const html = button(track, escape);
+  assertion.match(html, /<svg[^>]*width="20"[^>]*height="20"/);
+  assertion.ok(html.includes('xmlns="http://www.w3.org/2000/svg"'));
+});
+test('dashboard loads versioned player styles and scripts and has fixed-position fallback markup', () => {
+  const filesystem = require('node:fs');
+  const html = filesystem.readFileSync(require.resolve('../StreamingServiceServer.API/wwwroot/index.html'), 'utf8');
+  const assets = [...html.matchAll(/(?:href|src)="(\/(?:css|js)\/[^"?]+)([^\"]*)"/g)];
+  assertion.ok(assets.length >= 6);
+  assertion.ok(assets.some(match => match[1] === '/css/browser-player.css'));
+  assertion.ok(assets.every(match => match[2].startsWith('?v=')));
+  assertion.match(html, /id="browser-player-container"[^>]+style="position: fixed;[^>]+transform: translate\(-50%, -100%\);/);
+});

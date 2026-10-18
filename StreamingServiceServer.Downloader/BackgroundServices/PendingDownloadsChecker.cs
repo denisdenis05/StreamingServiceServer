@@ -25,6 +25,7 @@ public class PendingDownloadChecker : BackgroundService
 
     private sealed class StallTracker
     {
+        public Guid ImportIdentifier { get; init; }
         public double LastSeenProgress { get; set; } = -1;
         public DateTime LastProgressAt { get; set; } = DateTime.UtcNow;
         public bool HasSeenActiveTransfers { get; set; }
@@ -99,7 +100,7 @@ public class PendingDownloadChecker : BackgroundService
                     await ImportAlbumAsync(item, item.SavePath ?? string.Empty, dbContext, metadataService,
                         externalMusicSearchService, imageService,
                         providerEntry.provider is null ? () => CleanUpTorrentAndFilesAsync(item.SourceName)
-                            : () => providerEntry.provider.CleanUpAsync(item.SourceName, true), cancellationToken);
+                            : () => providerEntry.provider.CleanUpAsync(GetProviderSource(item), true), cancellationToken);
                     continue;
                 }
                 if (providerEntry.provider == null)
@@ -109,16 +110,19 @@ public class PendingDownloadChecker : BackgroundService
                 }
 
                 var progressInfo = await providerEntry.provider.CheckProgressAsync(
-                    item.SourceName, cancellationToken);
+                    GetProviderSource(item), cancellationToken);
 
                 if (progressInfo == null) continue;  // transient API error — skip this cycle
 
-                var tracker = _stallTrackers.GetOrAdd(item.Id, _ => new StallTracker());
+                var tracker = _stallTrackers.AddOrUpdate(item.Id,
+                    _ => new StallTracker { ImportIdentifier = item.ImportIdentifier },
+                    (_, existing) => existing.ImportIdentifier == item.ImportIdentifier ? existing
+                        : new StallTracker { ImportIdentifier = item.ImportIdentifier, RetryCount = existing.RetryCount });
 
                 if (progressInfo.State == "Failed")
                 {
                     Console.WriteLine($"[PendingDownloadChecker] All transfers failed/cancelled for {item.Id}. Requeueing (attempt {tracker.RetryCount + 1}/{MaxStallRetries})...");
-                    await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext);
+                    await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext, cancellationToken);
                     continue;
                 }
 
@@ -134,7 +138,7 @@ public class PendingDownloadChecker : BackgroundService
                     else if (DateTime.UtcNow - tracker.LastProgressAt > TimeSpan.FromMinutes(5))
                     {
                         Console.WriteLine($"[PendingDownloadChecker] No transfers ever seen for {item.Id} after 5min. Requeueing...");
-                        await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext);
+                        await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext, cancellationToken);
                     }
                     continue;
                 }
@@ -160,7 +164,7 @@ public class PendingDownloadChecker : BackgroundService
                     {
                         await ImportAlbumAsync(item, resolvedSavePath, dbContext, metadataService,
                             externalMusicSearchService, imageService,
-                            () => providerEntry.provider.CleanUpAsync(item.SourceName, true), cancellationToken);
+                            () => providerEntry.provider.CleanUpAsync(GetProviderSource(item), true), cancellationToken);
                     }
                 }
                 else
@@ -176,7 +180,7 @@ public class PendingDownloadChecker : BackgroundService
                     else if (DateTime.UtcNow - tracker.LastProgressAt > StallTimeout)
                     {
                         Console.WriteLine($"[PendingDownloadChecker] No progress for {(int)StallTimeout.TotalMinutes}min on {item.Id}. Requeueing (attempt {tracker.RetryCount + 1}/{MaxStallRetries})...");
-                        await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext);
+                        await HandleStalledDownloadAsync(item, tracker, providerEntry.provider, dbContext, cancellationToken);
                     }
                 }
             }
@@ -241,11 +245,15 @@ public class PendingDownloadChecker : BackgroundService
         StreamingServiceServer.Data.Models.PendingDownload item,
         StallTracker tracker,
         IDownloadProvider provider,
-        StreamingDbContext dbContext)
+        StreamingDbContext dbContext,
+        CancellationToken cancellationToken)
     {
+        await using var ownership = await CreateImportJournal(item).AcquireAsync(cancellationToken);
+        if (!await dbContext.PendingDownloads.AnyAsync(current => current.Id == item.Id
+            && current.ImportIdentifier == item.ImportIdentifier && current.SourceName == item.SourceName, cancellationToken)) return;
         tracker.RetryCount++;
 
-        try { await provider.CleanUpAsync(item.SourceName, false); } catch { }
+        try { await provider.CleanUpAsync(GetProviderSource(item), false); } catch { }
 
         if (tracker.RetryCount > MaxStallRetries)
         {
@@ -289,7 +297,7 @@ public class PendingDownloadChecker : BackgroundService
         if (string.IsNullOrWhiteSpace(resolvedPath)) return;
 
         await ImportAlbumAsync(item, resolvedPath, dbContext, metadataService, externalMusicSearchService,
-            imageService, () => provider.CleanUpAsync(item.SourceName, true), cancellationToken);
+            imageService, () => provider.CleanUpAsync(GetProviderSource(item), true), cancellationToken);
     }
 
     private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item,
@@ -304,6 +312,10 @@ public class PendingDownloadChecker : BackgroundService
             serviceProvider.GetRequiredService<IImageService>(),
             () => CleanUpTorrentAndFilesAsync(item.SourceName), cancellationToken);
     }
+
+    private static string GetProviderSource(StreamingServiceServer.Data.Models.PendingDownload item) =>
+        item.ProviderName == "Soulseek"
+            ? SlskdSourceIdentity.Parse(item.SourceName, item.SavePath)?.Encode() ?? item.SourceName : item.SourceName;
 
     private AudioImportJournal CreateImportJournal(StreamingServiceServer.Data.Models.PendingDownload item) =>
         new(_musicLocation, item.Id, System.Text.Json.JsonSerializer.Serialize(new[] { item.ProviderName ?? "Torrent", item.SourceName, item.ImportIdentifier.ToString() }));

@@ -2,6 +2,7 @@ namespace StreamingServiceServer.Business.Models.Dashboard;
 
 public class ChangeSlskdSourceRequest
 {
+    public Guid ExpectedImportIdentifier { get; set; }
     public string Username { get; set; } = string.Empty;
     public string DirectoryPath { get; set; } = string.Empty;
     public List<ChangeSlskdSourceFile> Files { get; set; } = new();

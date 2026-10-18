@@ -113,6 +113,14 @@ public class DashboardController : ControllerBase
             var failedIds = (await _dbContext.FailedDownloads.Select(f => f.Id).ToListAsync(cancellationToken)).ToHashSet();
 
             var pendingMap = pendingList.ToDictionary(p => p.Id, p => p);
+            List<StreamingServiceDownloader.Models.Slskd.SlskdTransferUser>? soulseekTransfers = null;
+            if (pendingList.Any(pending => pending.ProviderName == "Soulseek")
+                && await ConfigureDashboardSoulseekAsync(cancellationToken))
+            {
+                try { soulseekTransfers = await _slskdHelper.GetDownloadsAsync(cancellationToken); }
+                catch (Exception failure) when (!cancellationToken.IsCancellationRequested)
+                { _logger.LogWarning(failure, "Could not load Soulseek queue progress"); }
+            }
 
             foreach (var rel in releasesToDownload)
             {
@@ -134,6 +142,15 @@ public class DashboardController : ControllerBase
                     providerName = pendingItem.ProviderName;
                     status = "downloading";
                     state = "downloading";
+
+                    if (providerName == "Soulseek" && soulseekTransfers is not null
+                        && SlskdSourceIdentity.Parse(sourceName, pendingItem.SavePath) is { } source)
+                    {
+                        var info = SoulseekProvider.ReadProgress(source, soulseekTransfers);
+                        progress = info.Progress;
+                        state = info.State;
+                        size = source.Files.Sum(file => file.Size);
+                    }
 
                     if (providerName != "Soulseek")
                     {
@@ -160,7 +177,7 @@ public class DashboardController : ControllerBase
                     title = rel.Title,
                     artist = rel.Artist,
                     status = status,
-                    sourceName = sourceName,
+                    sourceName = sourceName is null ? null : SlskdSourceIdentity.DisplayName(sourceName),
                     providerName = providerName,
                     progress = Math.Min(1.0, Math.Max(0.0, progress)),
                     state = state,
@@ -390,7 +407,26 @@ public class DashboardController : ControllerBase
             double progress = 0;
             string state = isFailed ? "error" : (pending != null ? "active" : "queued");
 
-            if (pending != null)
+            if (pending?.ProviderName == "Soulseek")
+            {
+                if (await ConfigureDashboardSoulseekAsync(cancellationToken))
+                {
+                    try
+                    {
+                        var transfers = await _slskdHelper.GetDownloadsAsync(cancellationToken);
+                        var source = SlskdSourceIdentity.Parse(pending.SourceName, pending.SavePath);
+                        if (transfers is not null && source is not null)
+                        {
+                            var info = SoulseekProvider.ReadProgress(source, transfers);
+                            progress = info.Progress;
+                            state = info.State;
+                        }
+                    }
+                    catch (Exception failure) when (!cancellationToken.IsCancellationRequested)
+                    { _logger.LogWarning(failure, "Could not load Soulseek progress for album {AlbumId}", id); }
+                }
+            }
+            else if (pending != null)
             {
                 try
                 {
@@ -413,7 +449,7 @@ public class DashboardController : ControllerBase
                 status = status,
                 state = state,
                 progress = progress,
-                sourceName = pending?.SourceName
+                sourceName = pending is null ? null : SlskdSourceIdentity.DisplayName(pending.SourceName)
             });
         }
 
@@ -488,15 +524,22 @@ public class DashboardController : ControllerBase
         if (pending == null || !pending.SourceName.StartsWith("slskd:", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { message = "Album is not being downloaded via slskd." });
 
-        var parts = pending.SourceName.Split(':', 3);
-        if (parts.Length < 2 || !Guid.TryParse(parts[1], out var searchId))
-            return BadRequest(new { message = "Invalid slskd source identifier." });
-
-        var currentUsername = parts.Length >= 3 ? parts[2] : "";
-
-        var searchResult = await _slskdHelper.GetSearchResultsAsync(searchId, cancellationToken);
-        if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
-            return Ok(new { sources = Array.Empty<object>(), currentUsername });
+        var currentSource = SlskdSourceIdentity.Parse(pending.SourceName, pending.SavePath);
+        if (currentSource is null) return BadRequest(new { message = "Invalid slskd source identifier." });
+        if (!await ConfigureDashboardSoulseekAsync(cancellationToken))
+            return BadRequest(new { message = "Soulseek provider is not configured or is disabled." });
+        var currentUsername = currentSource.Username;
+        StreamingServiceDownloader.Models.Slskd.SlskdSearchResult? searchResult;
+        try { searchResult = await _slskdHelper.GetSearchResultsAsync(currentSource.SearchId, cancellationToken); }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(failure, "Could not load slskd source choices for album {AlbumId}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = "Could not contact slskd. Check the Soulseek provider connection settings." });
+        }
+        if (searchResult is null)
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = "slskd search is unavailable, expired, or access was rejected. Requeue the album if its search was removed." });
+        if (searchResult.Responses == null || searchResult.Responses.Count == 0)
+            return Ok(new { sources = Array.Empty<object>(), currentUsername, importIdentifier = pending.ImportIdentifier });
 
         var rows = new List<(bool hasFreeSlots, long uploadSpeedBps, object dto)>();
         foreach (var response in searchResult.Responses)
@@ -537,7 +580,8 @@ public class DashboardController : ControllerBase
                     uploadSpeedBps = response.UploadSpeed,
                     hasFreeSlots = response.FreeUploadSlots > 0,
                     freeUploadSlots = response.FreeUploadSlots,
-                    isCurrentSource = response.Username.Equals(currentUsername, StringComparison.OrdinalIgnoreCase),
+                    isCurrentSource = response.Username == currentUsername
+                        && SlskdSourceIdentity.NormalizePath(group.Key) == SlskdSourceIdentity.NormalizePath(currentSource.DirectoryPath),
                     files = audioFiles.Select(f => new { filename = f.Filename, size = f.Size }).ToList()
                 };
                 rows.Add((response.FreeUploadSlots > 0, response.UploadSpeed, dto));
@@ -550,47 +594,98 @@ public class DashboardController : ControllerBase
             .Select(r => r.dto)
             .ToList();
 
-        return Ok(new { sources, currentUsername });
+        return Ok(new { sources, currentUsername, importIdentifier = pending.ImportIdentifier });
+    }
+
+    private async Task<bool> ConfigureDashboardSoulseekAsync(CancellationToken cancellationToken)
+    {
+        var configuration = await _dbContext.DownloadProviderConfigs.AsNoTracking()
+            .FirstOrDefaultAsync(provider => provider.ProviderName == "Soulseek" && provider.IsEnabled, cancellationToken);
+        if (configuration is null || string.IsNullOrWhiteSpace(configuration.ApiUrl)) return false;
+        _slskdHelper.Configure(configuration.ApiUrl, configuration.ApiKey ?? string.Empty,
+            configuration.Username ?? string.Empty, configuration.Password ?? string.Empty);
+        return true;
     }
 
     [Authorize(Roles = "Admin")]
     [HttpPost("album/{id:guid}/change-slskd-source")]
     public async Task<IActionResult> ChangeSlskdSource(Guid id, [FromBody] ChangeSlskdSourceRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Username) || request.Files == null || request.Files.Count == 0)
-            return BadRequest(new { message = "Username and files are required." });
+        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.DirectoryPath)
+            || request.Files is null || request.Files.Count == 0 || request.Files.Count > 1000)
+            return BadRequest(new { message = "A source username, directory and up to 1000 files are required." });
+        var snapshot = await _dbContext.PendingDownloads.AsNoTracking().SingleOrDefaultAsync(pending => pending.Id == id, cancellationToken);
+        var previousSource = snapshot is null ? null : SlskdSourceIdentity.Parse(snapshot.SourceName, snapshot.SavePath);
+        if (snapshot is null || snapshot.ProviderName != "Soulseek" || previousSource is null)
+            return BadRequest(new { message = "Album is not pending through Soulseek." });
+        if (request.ExpectedImportIdentifier != snapshot.ImportIdentifier)
+            return Conflict(new { message = "The album source changed. Reload the source choices and try again." });
+        if (!await ConfigureDashboardSoulseekAsync(cancellationToken))
+            return BadRequest(new { message = "Soulseek provider is not configured or is disabled." });
 
-        var pending = await _dbContext.PendingDownloads.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
-        if (pending == null)
-            return BadRequest(new { message = "Album is not in pending downloads." });
-
-        var parts = pending.SourceName.Split(':', 3);
-        var searchIdStr = parts.Length >= 2 ? parts[1] : "";
-        var oldUsername = parts.Length >= 3 ? parts[2] : "";
-
-        if (!string.IsNullOrWhiteSpace(oldUsername))
+        IAsyncDisposable ownership;
+        try
         {
-            try { await _slskdHelper.RemoveCompletedTransfersAsync(oldUsername, cancellationToken); }
-            catch { }
+            var root = _configuration["Music:Path"] ?? throw new InvalidOperationException("Music storage path is not configured.");
+            ownership = await new StreamingServiceDownloader.Importing.AudioImportJournal(root, id, "source-switch").AcquireAsync(cancellationToken);
         }
+        catch (IOException)
+        {
+            return Conflict(new { message = "This album is being imported or its source is being changed. Try again shortly." });
+        }
+        await using var albumOwnership = ownership;
+        try
+        {
+            var search = await _slskdHelper.GetSearchResultsAsync(previousSource.SearchId, cancellationToken);
+            if (search?.Responses is null)
+                return StatusCode(StatusCodes.Status502BadGateway, new { message = "slskd search is unavailable. No source was changed." });
+            var selected = search.Responses.Where(response => response.Username == request.Username)
+                .SelectMany(response => response.Files ?? [])
+                .Where(file => !file.IsLocked && file.Filename is not null
+                    && SlskdSourceIdentity.DirectoryOf(file.Filename) == SlskdSourceIdentity.NormalizePath(request.DirectoryPath)
+                    && _audioExtensions.Contains(Path.GetExtension(file.Filename)))
+                .GroupBy(file => file.Filename).Select(group => group.First())
+                .Select(file => new StreamingServiceDownloader.Models.Slskd.SlskdFileDownloadRequest
+                    { Filename = file.Filename!, Size = file.Size }).ToArray();
+            if (selected.Length == 0 || selected.Length != request.Files.Count
+                || request.Files.Select(file => file.Filename).Distinct(StringComparer.Ordinal).Count() != selected.Length
+                || request.Files.Any(file => !selected.Any(expected => expected.Filename == file.Filename && expected.Size == file.Size)))
+                return BadRequest(new { message = "The selected files no longer match the slskd search. Reload the source choices." });
 
-        var fileRequests = request.Files
-            .Select(f => new StreamingServiceDownloader.Models.Slskd.SlskdFileDownloadRequest
+            var nextSource = new SlskdSourceIdentity(previousSource.SearchId, request.Username, request.DirectoryPath, selected);
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            var pending = await _dbContext.PendingDownloads.FromSqlInterpolated(
+                $"SELECT * FROM \"PendingDownloads\" WHERE \"Id\" = {id} FOR UPDATE")
+                .SingleOrDefaultAsync(cancellationToken);
+            if (pending is null || pending.ImportIdentifier != snapshot.ImportIdentifier || pending.SourceName != snapshot.SourceName)
+                return Conflict(new { message = "The pending album changed. Reload the source choices." });
+            await _slskdHelper.EnsureSelectedFilesEnqueuedAsync(nextSource, cancellationToken);
+            pending.SourceName = nextSource.Encode();
+            pending.SavePath = request.DirectoryPath;
+            pending.ImportIdentifier = Guid.NewGuid();
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            string? warning = null;
+            try
             {
-                Filename = f.Filename,
-                Size = f.Size
-            })
-            .ToList();
-
-        var enqueued = await _slskdHelper.EnqueueDirectoryDownloadAsync(request.Username, fileRequests, cancellationToken);
-        if (enqueued == 0)
-            return BadRequest(new { message = "Failed to enqueue any files from the new source." });
-
-        pending.SourceName = $"slskd:{searchIdStr}:{request.Username}";
-        pending.SavePath = request.DirectoryPath;
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(new { message = $"Source changed to {request.Username}. {enqueued} file(s) enqueued." });
+                var retained = nextSource.Username == previousSource.Username
+                    ? selected.Select(file => SlskdSourceIdentity.NormalizePath(file.Filename)).ToHashSet(StringComparer.Ordinal) : null;
+                await _slskdHelper.RemoveSelectedTransfersAsync(previousSource, cancellationToken, retained);
+            }
+            catch (Exception failure) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(failure, "Source changed for album {AlbumId}, but old slskd transfers could not all be removed", id);
+                warning = "The new source is active, but some previous transfers could not be removed.";
+            }
+            return Ok(new { message = $"Source changed to {request.Username}. All {selected.Length} files verified in slskd.", warning });
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(failure, "Could not change slskd source for album {AlbumId}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = failure is HttpRequestException
+                ? failure.Message : "slskd timed out. Reload the source choices before retrying." });
+        }
     }
 
     // ─── Recording Redownload ───

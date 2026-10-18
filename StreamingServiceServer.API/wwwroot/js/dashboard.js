@@ -471,7 +471,7 @@ function renderQueueTable() {
             ${item.status} ${item.status === 'downloading' ? `(${Math.round(item.progress * 100)}%)` : ''}
           </span>
         </td>
-        <td>${item.sourceName || '—'}</td>
+        <td>${escapeHtml(item.sourceName || '—')}</td>
         <td onclick="event.stopPropagation()">
           <button onclick="handleRequeue('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;">requeue</button>
           <button onclick="handleSetDownloaded('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">set downloaded</button>
@@ -2562,6 +2562,9 @@ function pollRedownloadStatus(albumId, recordingId) {
 
 let _slskdSourcesAlbumId = null;
 let _slskdSourcesData = [];
+let _slskdSourcesImportIdentifier = null;
+let _slskdSourcesGeneration = 0;
+let _slskdSourceChanging = false;
 
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -2572,6 +2575,9 @@ function formatBytes(bytes) {
 }
 
 function openSlskdSourcesModal(albumId) {
+  _slskdSourcesGeneration++;
+  _slskdSourceChanging = false;
+  _slskdSourcesImportIdentifier = null;
   _slskdSourcesAlbumId = albumId;
   _slskdSourcesData = [];
 
@@ -2592,6 +2598,9 @@ function openSlskdSourcesModal(albumId) {
 }
 
 function closeSlskdSourcesModal() {
+  _slskdSourcesGeneration++;
+  _slskdSourceChanging = false;
+  _slskdSourcesImportIdentifier = null;
   const modal = document.getElementById('slskd-sources-modal');
   if (modal) modal.style.display = 'none';
   _slskdSourcesAlbumId = null;
@@ -2599,6 +2608,7 @@ function closeSlskdSourcesModal() {
 }
 
 async function loadSlskdSources(albumId) {
+  const generation = _slskdSourcesGeneration;
   const loading = document.getElementById('slskd-sources-loading');
   const container = document.getElementById('slskd-sources-container');
   const empty = document.getElementById('slskd-sources-empty');
@@ -2607,15 +2617,21 @@ async function loadSlskdSources(albumId) {
   try {
     const res = await authFetch(`${API_BASE}/album/${albumId}/slskd-sources`);
     const data = await parseJsonResponse(res);
+    if (_slskdSourcesAlbumId !== albumId || _slskdSourcesGeneration !== generation) return;
+    if (!res.ok) throw new Error(data.message || `Could not load sources (HTTP ${res.status}).`);
+    _slskdSourcesImportIdentifier = data.importIdentifier;
 
     loading.style.display = 'none';
 
     if (!res.ok || !data.sources || data.sources.length === 0) {
+      container.style.display = 'none';
+      empty.textContent = 'No sources are available in the stored slskd search.';
       empty.style.display = 'block';
       return;
     }
 
     _slskdSourcesData = data.sources;
+    empty.style.display = 'none';
     container.style.display = 'block';
 
     tbody.innerHTML = data.sources.map((src, idx) => {
@@ -2645,6 +2661,10 @@ async function loadSlskdSources(albumId) {
     }).join('');
 
   } catch (err) {
+    if (_slskdSourcesAlbumId !== albumId || _slskdSourcesGeneration !== generation) return;
+    _slskdSourcesData = [];
+    _slskdSourcesImportIdentifier = null;
+    container.style.display = 'none';
     loading.style.display = 'none';
     empty.style.display = 'block';
     empty.textContent = `error loading sources: ${err.message}`;
@@ -2653,36 +2673,50 @@ async function loadSlskdSources(albumId) {
 
 async function selectSlskdSource(idx) {
   const src = _slskdSourcesData[idx];
-  if (!src || !_slskdSourcesAlbumId) return;
-
+  const albumId = _slskdSourcesAlbumId;
+  const generation = _slskdSourcesGeneration;
+  const importIdentifier = _slskdSourcesImportIdentifier;
+  if (!src || !albumId || !importIdentifier || _slskdSourceChanging) return;
+  _slskdSourceChanging = true;
+  const container = document.getElementById('slskd-sources-container');
+  container.querySelectorAll('button').forEach(button => { button.disabled = true; });
   const status = document.getElementById('slskd-sources-status');
   status.textContent = 'switching source…';
   status.style.color = 'var(--text-muted)';
 
   try {
-    const res = await authFetch(`${API_BASE}/album/${_slskdSourcesAlbumId}/change-slskd-source`, {
+    const res = await authFetch(`${API_BASE}/album/${albumId}/change-slskd-source`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: src.username,
         directoryPath: src.directoryPath,
-        files: src.files
+        files: src.files,
+        expectedImportIdentifier: importIdentifier
       })
     });
     const data = await parseJsonResponse(res);
-
+    if (_slskdSourcesAlbumId !== albumId || _slskdSourcesGeneration !== generation) return;
     if (res.ok) {
-      status.textContent = data.message || 'source changed successfully.';
-      status.style.color = '#388e3c';
+      status.textContent = [data.message || 'source changed successfully.', data.warning].filter(Boolean).join(' ');
+      status.style.color = data.warning ? 'var(--accent-terracotta)' : '#388e3c';
       await fetchQueued();
-      await loadSlskdSources(_slskdSourcesAlbumId);
+      if (_slskdSourcesAlbumId === albumId && _slskdSourcesGeneration === generation) await loadSlskdSources(albumId);
     } else {
       status.textContent = data.message || `error: HTTP ${res.status}`;
       status.style.color = '#c62828';
+      if (res.status === 409) await loadSlskdSources(albumId);
     }
   } catch (err) {
-    status.textContent = `error: ${err.message}`;
-    status.style.color = '#c62828';
+    if (_slskdSourcesAlbumId === albumId && _slskdSourcesGeneration === generation) {
+      status.textContent = `error: ${err.message}`;
+      status.style.color = '#c62828';
+    }
+  } finally {
+    if (_slskdSourcesAlbumId === albumId && _slskdSourcesGeneration === generation) {
+      _slskdSourceChanging = false;
+      container.querySelectorAll('button').forEach(button => { button.disabled = false; });
+    }
   }
 }
 

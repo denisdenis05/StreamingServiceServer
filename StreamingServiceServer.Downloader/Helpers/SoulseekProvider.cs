@@ -83,21 +83,23 @@ public class SoulseekProvider : IDownloadProvider
                     {
                         Console.WriteLine($"[Soulseek] Trying {format} candidate user='{candidate.Username}' dir='{candidate.DirectoryPath}' score={candidate.Score} freeSlots={candidate.HasFreeSlots} ({candidate.Files.Count} tracks)...");
 
-                        var enqueued = await _slskdHelper.EnqueueDirectoryDownloadAsync(
-                            candidate.Username, candidate.Files, cancellationToken);
-
-                        if (enqueued > 0)
+                        var selectedSource = new SlskdSourceIdentity(searchId.Value, candidate.Username,
+                            candidate.DirectoryPath, candidate.Files);
+                        try
                         {
+                            await _slskdHelper.EnsureSelectedFilesEnqueuedAsync(selectedSource, cancellationToken);
                             downloadEnqueued = true;
                             return new DownloadSearchResult
                             {
                                 Success = true,
-                                SourceIdentifier = $"slskd:{searchId.Value}:{candidate.Username}",
+                                SourceIdentifier = selectedSource.Encode(),
                                 SavePath = candidate.DirectoryPath
                             };
                         }
-
-                        Console.WriteLine($"[Soulseek] Enqueue failed for '{candidate.Username}', trying next candidate...");
+                        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+                        {
+                            Console.WriteLine($"[Soulseek] Enqueue could not be verified for '{candidate.Username}': {failure.Message}");
+                        }
                     }
                 }
 
@@ -117,71 +119,49 @@ public class SoulseekProvider : IDownloadProvider
     public async Task<DownloadProgressInfo?> CheckProgressAsync(
         string sourceIdentifier, CancellationToken cancellationToken)
     {
-        var parts = sourceIdentifier.Split(':');
-        if (parts.Length < 3) return null;
-
-        var username = parts[2];
+        var source = SlskdSourceIdentity.Parse(sourceIdentifier);
+        if (source is null) return null;
         var downloads = await _slskdHelper.GetDownloadsAsync(cancellationToken);
-        if (downloads == null) return null;  // transient API error — caller should skip this cycle
-
-        var userTransfers = downloads.FirstOrDefault(d =>
-            d.Username?.Equals(username, StringComparison.OrdinalIgnoreCase) == true);
-
-        if (userTransfers?.Directories == null || userTransfers.Directories.Count == 0)
-        {
-            // slskd has no record for this user — could be post-cleanup or a silent enqueue failure
-            return new DownloadProgressInfo { Progress = 0, SavePath = "", State = "NoTransfersFound" };
-        }
-
-        double totalProgress = 0;
-        int fileCount = 0;
-        string savePath = "";
-
-        foreach (var dir in userTransfers.Directories)
-        {
-            if (dir.Files == null) continue;
-            if (string.IsNullOrWhiteSpace(savePath) && !string.IsNullOrWhiteSpace(dir.Directory))
-                savePath = dir.Directory;
-
-            foreach (var file in dir.Files)
-            {
-                fileCount++;
-                totalProgress += file.PercentComplete ?? 0;
-            }
-        }
-
-        var allFiles = userTransfers.Directories
-            .SelectMany(d => d.Files ?? new List<SlskdTransferItem>())
-            .ToList();
-
-        var avgProgress = fileCount > 0 ? totalProgress / fileCount / 100.0 : 0;
-
-        var allComplete = fileCount > 0 && allFiles.All(f =>
-            f.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true);
-
-        var allTerminallyFailed = fileCount > 0 && allFiles.All(f =>
-            (f.State?.Contains("Errored", StringComparison.OrdinalIgnoreCase) == true) ||
-            (f.State?.Contains("Cancelled", StringComparison.OrdinalIgnoreCase) == true) ||
-            (f.State?.Contains("Canceled", StringComparison.OrdinalIgnoreCase) == true));
-
-        if (allComplete)
-            return new DownloadProgressInfo { Progress = 1.0, SavePath = savePath, State = "Completed" };
-
-        if (allTerminallyFailed)
-            return new DownloadProgressInfo { Progress = 0, SavePath = savePath, State = "Failed" };
-
-        return new DownloadProgressInfo { Progress = avgProgress, SavePath = savePath, State = "Downloading" };
+        if (downloads is null) return null;
+        return ReadProgress(source, downloads);
     }
+
+    public static DownloadProgressInfo ReadProgress(SlskdSourceIdentity source, IReadOnlyList<SlskdTransferUser> downloads)
+    {
+        var user = downloads.FirstOrDefault(candidate => candidate.Username == source.Username);
+        var matches = (user?.Directories ?? []).SelectMany(directory => (directory.Files ?? [])
+            .Where(file => source.Matches(directory, file)).Select(file => (Directory: directory, File: file))).ToArray();
+        if (matches.Length == 0)
+            return new DownloadProgressInfo { Progress = 0, SavePath = source.DirectoryPath, State = "NoTransfersFound" };
+
+        var savePath = matches.Select(match => match.Directory.Directory).FirstOrDefault(directory => !string.IsNullOrWhiteSpace(directory))
+            ?? source.DirectoryPath;
+        var expectedMatches = source.Files.Count > 0
+            ? source.Files.Select(expected => matches.Where(match =>
+                (source with { Files = new[] { expected } }).Matches(match.Directory, match.File))
+                .Select(match => match.File).ToArray()).ToArray()
+            : matches.Select(match => new[] { match.File }).ToArray();
+        var allComplete = expectedMatches.All(files => files.Any(IsCompletedTransfer));
+        var allFailed = expectedMatches.All(files => files.Length > 0 && files.All(SlskdSourceIdentity.IsFailed));
+        var progress = expectedMatches.Average(files => files.Where(file => !SlskdSourceIdentity.IsFailed(file))
+            .Select(file => Math.Clamp(file.PercentComplete ?? 0, 0, 100)).DefaultIfEmpty(0).Max()) / 100;
+        return new DownloadProgressInfo
+        {
+            Progress = allComplete ? 1 : Math.Min(progress, 0.999), SavePath = savePath,
+            State = allComplete ? "Completed" : allFailed ? "Failed" : "Downloading"
+        };
+    }
+
+    private static bool IsCompletedTransfer(SlskdTransferItem file) =>
+        file.State?.Contains("Completed", StringComparison.OrdinalIgnoreCase) == true && !SlskdSourceIdentity.IsFailed(file);
 
     public async Task CleanUpAsync(string sourceIdentifier, bool deleteFiles)
     {
-        var parts = sourceIdentifier.Split(':');
-        if (parts.Length < 3) return;
-
-        var username = parts[2];
-        await _slskdHelper.RemoveCompletedTransfersAsync(username);
+        var source = SlskdSourceIdentity.Parse(sourceIdentifier);
+        if (source is null || string.IsNullOrWhiteSpace(source.DirectoryPath))
+            throw new InvalidOperationException("Cannot clean up Soulseek transfers without an album directory.");
+        await _slskdHelper.RemoveSelectedTransfersAsync(source, CancellationToken.None);
     }
-
 
     private static async Task ThrottleSearchAsync(CancellationToken cancellationToken)
     {

@@ -137,9 +137,9 @@ public class SlskdHelper
 
     public async Task<SlskdSearchResult?> GetSearchResultsAsync(Guid searchId, CancellationToken cancellationToken = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}");
 
-        var response = await SendAuthenticatedAsync(request, cancellationToken);
+        using var response = await SendAuthenticatedAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode) return null;
 
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -152,8 +152,8 @@ public class SlskdHelper
         {
             try
             {
-                var respRequest = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}/responses");
-                var respResponse = await SendAuthenticatedAsync(respRequest, cancellationToken);
+                using var respRequest = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/searches/{searchId}/responses");
+                using var respResponse = await SendAuthenticatedAsync(respRequest, cancellationToken);
                 if (respResponse.IsSuccessStatusCode)
                 {
                     var respJson = await respResponse.Content.ReadAsStringAsync(cancellationToken);
@@ -287,12 +287,64 @@ public class SlskdHelper
         return enqueued;
     }
 
+    public async Task EnqueueSelectedFilesAsync(string username, IReadOnlyList<SlskdFileDownloadRequest> files,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            $"{_baseUrl}/api/v0/transfers/downloads/{Uri.EscapeDataString(username)}")
+        {
+            Content = new StringContent(JsonSerializer.Serialize(files.Select(file =>
+                new { filename = file.Filename, size = file.Size })), Encoding.UTF8, "application/json")
+        };
+        using var response = await SendAuthenticatedAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"slskd rejected the download request (HTTP {(int)response.StatusCode}).",
+                null, response.StatusCode);
+    }
+
+    public async Task RemoveSelectedTransfersAsync(SlskdSourceIdentity source, CancellationToken cancellationToken,
+        IReadOnlySet<string>? retainedFiles = null)
+    {
+        var downloads = await GetDownloadsAsync(cancellationToken)
+            ?? throw new HttpRequestException("Could not read slskd transfers; no transfers were removed.");
+        var user = downloads.FirstOrDefault(candidate => candidate.Username == source.Username);
+        foreach (var directory in user?.Directories ?? [])
+        foreach (var file in directory.Files ?? [])
+        {
+            var filename = SlskdSourceIdentity.NormalizePath(file.Filename ?? string.Empty);
+            var scopedFilename = filename.Contains('/') ? filename
+                : SlskdSourceIdentity.NormalizePath(source.DirectoryPath) + "/" + filename;
+            if (!source.Matches(directory, file) || string.IsNullOrWhiteSpace(file.Id)
+                || retainedFiles?.Contains(filename) == true || retainedFiles?.Contains(scopedFilename) == true) continue;
+            using var request = new HttpRequestMessage(HttpMethod.Delete,
+                $"{_baseUrl}/api/v0/transfers/downloads/{Uri.EscapeDataString(source.Username)}/{Uri.EscapeDataString(file.Id)}");
+            using var response = await SendAuthenticatedAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.NotFound)
+                throw new HttpRequestException($"slskd could not remove a selected transfer (HTTP {(int)response.StatusCode}).",
+                    null, response.StatusCode);
+        }
+    }
+
+    public async Task EnsureSelectedFilesEnqueuedAsync(SlskdSourceIdentity source, CancellationToken cancellationToken)
+    {
+        var before = await GetDownloadsAsync(cancellationToken)
+            ?? throw new HttpRequestException("Could not read slskd transfers before changing source.");
+        var missing = source.MissingFiles(before);
+        if (missing.Count == 0) return;
+        await EnqueueSelectedFilesAsync(source.Username, missing, cancellationToken);
+        var after = await GetDownloadsAsync(cancellationToken)
+            ?? throw new HttpRequestException("slskd accepted the request, but its transfers could not be verified. The previous source is retained.");
+        var remaining = source.MissingFiles(after);
+        if (remaining.Count > 0)
+            throw new HttpRequestException($"slskd has not queued {remaining.Count} of {source.Files.Count} selected files. The previous source is retained; retry the selection.");
+    }
+
 
     public async Task<List<SlskdTransferUser>?> GetDownloadsAsync(CancellationToken cancellationToken = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/transfers/downloads");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/api/v0/transfers/downloads");
 
-        var response = await SendAuthenticatedAsync(request, cancellationToken);
+        using var response = await SendAuthenticatedAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode) return null;
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);

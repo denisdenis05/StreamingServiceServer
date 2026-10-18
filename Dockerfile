@@ -19,6 +19,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS migrations
 WORKDIR /app
 COPY --from=build /migrations .
 USER $APP_UID
+RUN dotnet StreamingServiceServer.Migrations.dll --verify-migrations
 ENTRYPOINT ["dotnet", "StreamingServiceServer.Migrations.dll"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-bookworm-slim AS runtime

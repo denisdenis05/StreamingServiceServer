@@ -121,6 +121,7 @@ builder.Services.AddAuthentication(options =>
 {
     options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
     options.SaveToken = true;
+    options.Events = new JwtBearerEvents { OnMessageReceived = StreamingServiceServer.API.BrowserStreamingAuthentication.ReadCookieAsync };
     
     options.TokenValidationParameters = new TokenValidationParameters
     {

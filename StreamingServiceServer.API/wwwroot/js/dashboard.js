@@ -5,6 +5,7 @@
 
 const API_BASE = '/api/dashboard';
 let coverDownloadProgress = null;
+let browserPlayer = null;
 let dashboardPolling = null;
 let downloadedSearch = '';
 let pollingAuthenticationIdentity = null;
@@ -45,6 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initApp() {
+  browserPlayer = DashboardBrowserPlayer.createController({ document, request: authFetch, authentication: () => state.authToken,
+    clearSession: () => fetch('/Stream/browser-session', { method: 'DELETE' }) });
   coverDownloadProgress = CoverDownloadProgress.createController({ document, request: authFetch, isAuthorized: isAdmin, escapeHtml,
     onAlbumSelected(identifier) { window.location.hash = '#album?id=' + encodeURIComponent(identifier); } });
   setupDashboardPolling();
@@ -89,6 +92,7 @@ function parseJwtRole(token) {
 }
 
 function setAuthToken(token, username, role) {
+  if (state.authToken !== (token || '')) browserPlayer?.authenticationChanged();
   state.authToken = token || '';
   state.username = username || '';
   state.userRole = role || parseJwtRole(token) || '';
@@ -610,6 +614,7 @@ function renderAlbumDetail(album) {
               </span>
               <span style="font-size: 0.85rem; color: var(--text-muted);">${dur}</span>
               <span class="track-redownload-area" style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
+                ${DashboardBrowserPlayer.button({ identifier: track.id, title: track.title, artist: album.artist, available: !isMissing }, escapeHtml)}
                 <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="${isMissing ? 'Download missing track' : 'Re-download this track'}" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">↻</button>
                 <span id="rdc-${track.id}" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem;">
                   <span style="color:var(--text-muted);">${isMissing ? 'download?' : 'redownload?'}</span>
@@ -702,6 +707,7 @@ function renderAlbumDetail(album) {
   `;
 
   setupDropzone(album.id);
+  browserPlayer?.refreshButtons();
 }
 
 function setupDropzone(albumId) {
@@ -2020,7 +2026,7 @@ async function openPlaylistDetail(playlistId, playlistName) {
 function renderPlaylistTrackTable(tracks) {
   const tbody = document.getElementById('playlist-track-body');
   if (!tracks.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-muted);">no tracks</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:1.5rem; color:var(--text-muted);">no tracks</td></tr>';
     return;
   }
   const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
@@ -2088,8 +2094,10 @@ function renderPlaylistTrackTable(tracks) {
       <td>${matchedColumnHtml}</td>
       <td>${statusBadge}</td>
       <td style="white-space:nowrap;">${actionsHtml}</td>
+      <td>${DashboardBrowserPlayer.button({ identifier: t.id, title: t.title, artist: t.artistName, available: !isUnavailable }, escapeHtml)}</td>
     </tr>`;
   }).join('');
+  browserPlayer?.refreshButtons();
 }
 
 function filterPlaylistTracks() {

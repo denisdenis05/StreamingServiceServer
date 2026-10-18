@@ -28,7 +28,7 @@ public class StreamController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> StreamAudio([FromQuery] Guid id, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> StreamAudio([FromQuery] Guid id, CancellationToken cancellationToken = default, [FromQuery] bool allowPreview = true)
     {
         string trackPath;
         try 
@@ -37,6 +37,7 @@ public class StreamController : ControllerBase
         }
         catch (RecordingAudioUnavailableException)
         {
+            if (!allowPreview) return NotFound("Audio file is missing.");
             var recording = await _metadataService.SearchRecordingByIdAsync(id).WaitAsync(cancellationToken);
             if (recording == null)
             {
@@ -67,5 +68,25 @@ public class StreamController : ControllerBase
         Response.Headers["Content-Type"] = _streamingService.GetContentType(trackPath);
         return new EmptyResult();
 
+    }
+    [HttpPost("browser-session")]
+    public IActionResult CreateBrowserSession()
+    {
+        const string bearerPrefix = "Bearer ";
+        var authorization = Request.Headers.Authorization.ToString();
+        if (!authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)) return Unauthorized();
+        Response.Cookies.Append(BrowserStreamingAuthentication.CookieName, authorization[bearerPrefix.Length..].Trim(),
+            BrowserStreamingAuthentication.CookieOptions(Request));
+        Response.Headers.CacheControl = "no-store";
+        return NoContent();
+    }
+
+    [AllowAnonymous]
+    [HttpDelete("browser-session")]
+    public IActionResult ClearBrowserSession()
+    {
+        Response.Cookies.Delete(BrowserStreamingAuthentication.CookieName, BrowserStreamingAuthentication.CookieOptions(Request));
+        Response.Headers.CacheControl = "no-store";
+        return NoContent();
     }
 }

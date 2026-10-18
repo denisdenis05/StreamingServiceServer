@@ -1005,3 +1005,23 @@ input:checked + .toggle-slider:before {
   .cover-progress-controls label { flex-direction: column; align-items: stretch; }
   .cover-progress-pagination { justify-content: space-between; }
 }
+
+.browser-track-play { display: inline-flex; align-items: center; justify-content: center; width: 1.8rem; height: 1.8rem; padding: .3rem; border: 1px solid var(--border-light); border-radius: 50%; background: var(--bg-subtle); color: var(--accent-olive); cursor: pointer; }
+.browser-track-play svg, .browser-player-toggle svg { width: 100%; height: 100%; }
+.browser-track-play:hover:not(:disabled) { background: var(--accent-olive); border-color: var(--accent-olive); color: var(--bg-subtle); }
+.browser-track-play[aria-pressed="true"] { background: var(--accent-olive); color: var(--bg-subtle); }
+.browser-track-play:disabled { opacity: .3; cursor: not-allowed; }
+.browser-player[hidden] { display: none; }
+.browser-player { position: fixed; z-index: 90; bottom: 1.5rem; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 1rem; width: min(620px, calc(100% - 2rem)); padding: 1rem 1.2rem; border: 1px solid var(--border-light); border-radius: 1.1rem; background: var(--bg-subtle); color: var(--text-main); box-shadow: 0 12px 40px #2a242029; }
+.browser-player-toggle { flex: 0 0 2.8rem; width: 2.8rem; height: 2.8rem; padding: .65rem; border: none; border-radius: 50%; background: var(--accent-olive); color: var(--bg-subtle); cursor: pointer; }
+.browser-player-content { flex: 1; min-width: 0; }
+.browser-player-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .6rem; }
+.browser-player-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; font-family: var(--font-serif); font-size: 1.25rem; font-weight: 500; }
+.browser-player-heading span, .browser-player-status { color: var(--text-muted); font-size: .75rem; }
+.browser-player-status { min-height: 1.1rem; margin-top: .15rem; }
+.browser-player-timeline { display: flex; align-items: center; gap: .6rem; color: var(--text-muted); font-size: .7rem; font-variant-numeric: tabular-nums; }
+.browser-player-timeline input { flex: 1; min-width: 0; height: .3rem; accent-color: var(--accent-olive); cursor: pointer; }
+.browser-player-close { align-self: flex-start; flex: 0 0 auto; border: none; background: transparent; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; }
+.has-browser-player { padding-bottom: 8rem; }
+.browser-track-play:focus-visible, .browser-player button:focus-visible, .browser-player input:focus-visible { outline: 2px solid var(--accent-ochre); outline-offset: 3px; }
+@media (max-width: 480px) { .browser-player { bottom: .75rem; gap: .65rem; padding: .8rem; } .browser-player-heading { display: block; } .browser-player-heading strong, .browser-player-heading span { display: block; } }

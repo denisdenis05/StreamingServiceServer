@@ -334,24 +334,22 @@ public class DashboardController : ControllerBase
 
         if (downloadedRelease != null)
         {
-            var baseMusicPath = _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
+            var baseMusicPath = _configuration["Music:Path"] ?? _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
             var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
             {
                 ReleaseTitle = downloadedRelease.Title ?? "",
                 ArtistName = downloadedRelease.Artist?.Name ?? ""
             };
-            var relFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse);
-            var folderPath = Path.Combine(baseMusicPath, relFolder);
-
+            System.IO.File.GetAttributes(baseMusicPath);
             var existingFileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (Directory.Exists(folderPath))
+            if (Directory.Exists(baseMusicPath))
             {
                 var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma"
                 };
 
-                foreach (var file in Directory.EnumerateFiles(folderPath))
+                foreach (var file in MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath, recResponse))
                 {
                     if (allowedExtensions.Contains(Path.GetExtension(file)))
                     {
@@ -1087,9 +1085,8 @@ public class DashboardController : ControllerBase
             var artistName = release?.Artist?.Name ?? "Unknown Artist";
             var releaseTitle = release?.Title ?? "Unknown Release";
 
-            var artistFolder = StreamingServiceServer.Business.Helpers.MusicLocationHelper.SanitizeFolderName(artistName).ToUpper();
-            var albumFolder = StreamingServiceServer.Business.Helpers.MusicLocationHelper.SanitizeFolderName(releaseTitle).ToUpper();
-            var destinationDir = Path.Combine(baseMusicPath, artistFolder, albumFolder);
+            var destinationDir = Path.Combine(baseMusicPath,
+                MusicLocationHelper.GetRelativeFolderPathForRecording(artistName, releaseTitle));
             Directory.CreateDirectory(destinationDir);
 
             var officialRecordings = release?.Recordings.OrderBy(r => r.PositionInAlbum).ToList() ?? new List<Recording>();
@@ -1404,18 +1401,15 @@ public class DashboardController : ControllerBase
         if (recording == null)
             return NotFound(new { message = "Recording not found on this album." });
 
-        var baseMusicPath = _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
+        var baseMusicPath = _configuration["Music:Path"] ?? _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
         var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
         {
             ReleaseTitle = recording.Release?.Title ?? "",
             ArtistName = recording.Release?.Artist?.Name ?? ""
         };
-        var relFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse);
-        var folderPath = Path.Combine(baseMusicPath, relFolder);
-
-        if (Directory.Exists(folderPath))
+        if (Directory.Exists(baseMusicPath))
         {
-            var audioFile = Directory.EnumerateFiles(folderPath)
+            var audioFile = MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath, recResponse)
                 .FirstOrDefault(f => string.Equals(
                     Path.GetFileNameWithoutExtension(f), recordingId.ToString(), StringComparison.OrdinalIgnoreCase));
             if (audioFile != null)
@@ -1447,21 +1441,19 @@ public class DashboardController : ControllerBase
         if (release == null)
             return NotFound(new { message = "Album not found." });
 
-        var baseMusicPath = _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
+        var baseMusicPath = _configuration["Music:Path"] ?? _configuration["MusicDirectory"] ?? "/nas/media/AudioFiles/";
         var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
         {
             ReleaseTitle = release.Title ?? "",
             ArtistName = release.Artist?.Name ?? ""
         };
-        var relFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse);
-        var folderPath = Path.Combine(baseMusicPath, relFolder);
-
+        System.IO.File.GetAttributes(baseMusicPath);
         var existingFileIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (Directory.Exists(folderPath))
+        if (Directory.Exists(baseMusicPath))
         {
             var audioExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma" };
-            foreach (var file in Directory.EnumerateFiles(folderPath))
+            foreach (var file in MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath, recResponse))
                 if (audioExts.Contains(Path.GetExtension(file)))
                     existingFileIds.Add(Path.GetFileNameWithoutExtension(file));
         }
@@ -2191,16 +2183,14 @@ public class DashboardController : ControllerBase
             ReleaseTitle = release.Title ?? "",
             ArtistName   = release.Artist?.Name ?? ""
         };
-        var folderPath = Path.Combine(baseMusicPath, MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse));
-
         var filesByRecId = new Dictionary<Guid, string>();
-        if (Directory.Exists(folderPath))
+        if (Directory.Exists(baseMusicPath))
         {
-            foreach (var file in Directory.EnumerateFiles(folderPath))
+            foreach (var file in MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath, recResponse))
             {
                 if (!_audioExtsCheck.Contains(Path.GetExtension(file))) continue;
                 if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out var rid))
-                    filesByRecId[rid] = file;
+                    filesByRecId.TryAdd(rid, file);
             }
         }
 
@@ -2267,16 +2257,14 @@ public class DashboardController : ControllerBase
                 ReleaseTitle = release.Title ?? "",
                 ArtistName   = release.Artist?.Name ?? ""
             };
-            var folderPath = Path.Combine(baseMusicPath, MusicLocationHelper.GetRelativeFolderPathForRecording(recResponse));
-
             var filesByRecId = new Dictionary<Guid, string>();
-            if (Directory.Exists(folderPath))
+            if (Directory.Exists(baseMusicPath))
             {
-                foreach (var file in Directory.EnumerateFiles(folderPath))
+                foreach (var file in MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath, recResponse))
                 {
                     if (!_audioExtsCheck.Contains(Path.GetExtension(file))) continue;
                     if (Guid.TryParse(Path.GetFileNameWithoutExtension(file), out var rid))
-                        filesByRecId[rid] = file;
+                        filesByRecId.TryAdd(rid, file);
                 }
             }
 
@@ -2343,20 +2331,18 @@ public class DashboardController : ControllerBase
 
         foreach (var release in releases)
         {
-            var relativePath = StreamingServiceServer.Business.Helpers.MusicLocationHelper.GetRelativeFolderPathForRecording(new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+            var recResponse = new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
             {
                 ArtistName = release.Artist?.Name ?? "",
                 ReleaseTitle = release.Title ?? ""
-            });
-
-            var folderPath = Path.Combine(baseMusicPath, relativePath);
+            };
             int total = release.Recordings.Count;
             int present = 0;
             var missingIds = new List<Guid>();
 
-            if (Directory.Exists(folderPath))
+            if (Directory.Exists(baseMusicPath))
             {
-                var existingBasenames = Directory.EnumerateFiles(folderPath)
+                var existingBasenames = MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath, recResponse)
                     .Select(Path.GetFileNameWithoutExtension)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -2458,7 +2444,12 @@ public class DashboardController : ControllerBase
             var destinationDir = Path.Combine(baseMusicPath, relativePath);
             Directory.CreateDirectory(destinationDir);
 
-            var existingBasenames = Directory.EnumerateFiles(destinationDir)
+            var existingBasenames = MusicLocationHelper.EnumerateRecordingFiles(baseMusicPath,
+                    new StreamingServiceServer.Business.Models.MusicSearch.RecordingResponse
+                    {
+                        ArtistName = artistName,
+                        ReleaseTitle = releaseTitle
+                    })
                 .Select(Path.GetFileNameWithoutExtension)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 

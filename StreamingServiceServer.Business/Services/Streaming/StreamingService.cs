@@ -27,18 +27,14 @@ public class StreamingService : IStreamingService
         var musicRoot = _configuration["Music:Path"]
             ?? throw new InvalidOperationException("Music storage path is not configured.");
         File.GetAttributes(musicRoot);
-        var relativeFolder = record == null
-            ? "TEMP"
-            : MusicLocationHelper.GetRelativeFolderPathForRecording(record);
-        var fullFolder = Path.GetFullPath(Path.Combine(musicRoot, relativeFolder));
-        var fullRoot = Path.GetFullPath(musicRoot);
-        if (!Path.EndsInDirectorySeparator(fullRoot)) fullRoot += Path.DirectorySeparatorChar;
-        if (!fullFolder.StartsWith(fullRoot, StringComparison.Ordinal))
-            throw new InvalidOperationException("Recording folder is outside music storage.");
         try
         {
-            var matchingFile = Directory.EnumerateFiles(fullFolder, songId + ".*")
-                .FirstOrDefault(path => AudioFileExtensions.Contains(Path.GetExtension(path)));
+            var candidates = record == null
+                ? Directory.EnumerateFiles(Path.Combine(musicRoot, "TEMP"), songId + ".*")
+                : MusicLocationHelper.EnumerateRecordingFiles(musicRoot, record);
+            var matchingFile = candidates.FirstOrDefault(path =>
+                string.Equals(Path.GetFileNameWithoutExtension(path), songId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && AudioFileExtensions.Contains(Path.GetExtension(path)));
             cancellationToken.ThrowIfCancellationRequested();
             if (matchingFile != null)
                 return Path.GetRelativePath(musicRoot, matchingFile).Replace(Path.DirectorySeparatorChar, '/');

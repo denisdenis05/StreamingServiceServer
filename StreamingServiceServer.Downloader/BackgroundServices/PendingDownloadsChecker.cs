@@ -12,6 +12,7 @@ using StreamingServiceServer.Business.Models.MusicSearch;
 using StreamingServiceServer.Business.Services.Images;
 using StreamingServiceServer.Business.Services.MusicSearch;
 using StreamingServiceServer.Data;
+using StreamingServiceDownloader.Importing;
 
 namespace StreamingServiceDownloader.BackgroundServices;
 
@@ -74,7 +75,7 @@ public class PendingDownloadChecker : BackgroundService
         var externalMusicSearchService = scope.ServiceProvider.GetRequiredService<IExternalMusicSearchService>();
         var imageService = scope.ServiceProvider.GetRequiredService<IImageService>();
 
-        var pending = dbContext.PendingDownloads.ToList();
+        var pending = await dbContext.PendingDownloads.ToListAsync(cancellationToken);
 
 
         var providers = await configService.GetActiveProvidersOrderedAsync();
@@ -87,9 +88,23 @@ public class PendingDownloadChecker : BackgroundService
                 var providerEntry = providers.FirstOrDefault(p =>
                     p.provider.ProviderName.Equals(providerName, StringComparison.OrdinalIgnoreCase));
 
+                if (providerEntry.provider is null && providerName != "Torrent")
+                {
+                    Console.WriteLine($"[PendingDownloadChecker] Provider {providerName} is unavailable for {item.Id}; source is retained.");
+                    continue;
+                }
+                var journal = CreateImportJournal(item);
+                if (await journal.ReadAsync(cancellationToken) is not null)
+                {
+                    await ImportAlbumAsync(item, item.SavePath ?? string.Empty, dbContext, metadataService,
+                        externalMusicSearchService, imageService,
+                        providerEntry.provider is null ? () => CleanUpTorrentAndFilesAsync(item.SourceName)
+                            : () => providerEntry.provider.CleanUpAsync(item.SourceName, true), cancellationToken);
+                    continue;
+                }
                 if (providerEntry.provider == null)
                 {
-                    await CheckTorrentPendingAsync(item, scope.ServiceProvider);
+                    await CheckTorrentPendingAsync(item, scope.ServiceProvider, cancellationToken);
                     continue;
                 }
 
@@ -114,7 +129,7 @@ public class PendingDownloadChecker : BackgroundService
                         // Transfers were active and are now gone — slskd likely auto-cleaned after completion.
                         // Attempt disk recovery using the last known save path.
                         await TryDiskRecoveryAsync(item, tracker, providerEntry.provider, dbContext,
-                            metadataService, externalMusicSearchService, imageService);
+                            metadataService, externalMusicSearchService, imageService, cancellationToken);
                     }
                     else if (DateTime.UtcNow - tracker.LastProgressAt > TimeSpan.FromMinutes(5))
                     {
@@ -143,27 +158,9 @@ public class PendingDownloadChecker : BackgroundService
                     var resolvedSavePath = ResolveSavePath(rawSavePath);
                     if (!string.IsNullOrWhiteSpace(resolvedSavePath))
                     {
-                        var files = GetMusicFilesInSavePath(resolvedSavePath);
-                        if (files.Count == 0)
-                        {
-                            Console.WriteLine($"[PendingDownloadChecker] WARNING: No music files at '{resolvedSavePath}' (raw: '{rawSavePath}') for {item.Id}. Will retry...");
-                            continue;
-                        }
-
-                        var matches = await MatchSongsWithMetadataAsync(item.Id, files, externalMusicSearchService, imageService);
-                        var movedCount = MoveMatchedFiles(matches);
-
-                        if (movedCount > 0)
-                        {
-                            await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-                            await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
-                            await providerEntry.provider.CleanUpAsync(item.SourceName, true);
-                            _stallTrackers.TryRemove(item.Id, out _);
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[PendingDownloadChecker] WARNING: 0 files moved for {item.Id} at '{resolvedSavePath}'. Will retry...");
-                        }
+                        await ImportAlbumAsync(item, resolvedSavePath, dbContext, metadataService,
+                            externalMusicSearchService, imageService,
+                            () => providerEntry.provider.CleanUpAsync(item.SourceName, true), cancellationToken);
                     }
                 }
                 else
@@ -285,55 +282,62 @@ public class PendingDownloadChecker : BackgroundService
         StreamingDbContext dbContext,
         IMetadataService metadataService,
         IExternalMusicSearchService externalMusicSearchService,
-        IImageService imageService)
+        IImageService imageService,
+        CancellationToken cancellationToken)
     {
         var resolvedPath = ResolveSavePath(item.SavePath ?? "");
         if (string.IsNullOrWhiteSpace(resolvedPath)) return;
 
-        var files = GetMusicFilesInSavePath(resolvedPath);
-        if (files.Count == 0) return;
-
-        Console.WriteLine($"[PendingDownloadChecker] Disk recovery: {files.Count} file(s) found for {item.Id} at '{resolvedPath}'.");
-        var matches = await MatchSongsWithMetadataAsync(item.Id, files, externalMusicSearchService, imageService);
-        var movedCount = MoveMatchedFiles(matches);
-
-        if (movedCount > 0)
-        {
-            await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-            await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
-            await provider.CleanUpAsync(item.SourceName, true);
-            _stallTrackers.TryRemove(item.Id, out _);
-        }
+        await ImportAlbumAsync(item, resolvedPath, dbContext, metadataService, externalMusicSearchService,
+            imageService, () => provider.CleanUpAsync(item.SourceName, true), cancellationToken);
     }
 
-    private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item, IServiceProvider serviceProvider)
+    private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item,
+        IServiceProvider serviceProvider, CancellationToken cancellationToken)
     {
-        var dbContext = serviceProvider.GetRequiredService<StreamingDbContext>();
-        var metadataService = serviceProvider.GetRequiredService<IMetadataService>();
-        var externalMusicSearchService = serviceProvider.GetRequiredService<IExternalMusicSearchService>();
-        var imageService = serviceProvider.GetRequiredService<IImageService>();
-
         var info = await _torrentHelper.GetTorrentInfoAsync(item.SourceName);
-        if (info != null && info.Progress >= 1.0)
+        if (info is null || info.Progress < 1.0) return;
+        await ImportAlbumAsync(item, ResolveSavePath(info.SavePath),
+            serviceProvider.GetRequiredService<StreamingDbContext>(),
+            serviceProvider.GetRequiredService<IMetadataService>(),
+            serviceProvider.GetRequiredService<IExternalMusicSearchService>(),
+            serviceProvider.GetRequiredService<IImageService>(),
+            () => CleanUpTorrentAndFilesAsync(item.SourceName), cancellationToken);
+    }
+
+    private AudioImportJournal CreateImportJournal(StreamingServiceServer.Data.Models.PendingDownload item) =>
+        new(_musicLocation, item.Id, System.Text.Json.JsonSerializer.Serialize(new[] { item.ProviderName ?? "Torrent", item.SourceName, item.ImportIdentifier.ToString() }));
+
+    private async Task ImportAlbumAsync(StreamingServiceServer.Data.Models.PendingDownload item, string sourceDirectory,
+        StreamingDbContext database, IMetadataService metadataService, IExternalMusicSearchService metadataSource,
+        IImageService images, Func<Task> cleanup, CancellationToken cancellationToken)
+    {
+        var coordinator = new AudioAlbumImport(CreateImportJournal(item), new AudioImportFiles(_musicLocation),
+            (identifier, failure) => Console.WriteLine($"[PendingDownloadChecker] Import failed for {identifier}: {failure.Message}"));
+        async Task RequireCurrent(CancellationToken token)
         {
-            var resolvedSavePath = ResolveSavePath(info.SavePath);
-            var files = GetMusicFilesInSavePath(resolvedSavePath);
-            if (files.Count == 0)
-            {
-                Console.WriteLine($"[PendingDownloadChecker] WARNING: Torrent complete but 0 files found at '{resolvedSavePath}'. Will retry...");
-                return;
-            }
-
-            var matches = await MatchSongsWithMetadataAsync(item.Id, files, externalMusicSearchService, imageService);
-            var movedCount = MoveMatchedFiles(matches);
-
-            if (movedCount > 0)
-            {
-                await CleanUpTorrentAndFilesAsync(item.SourceName);
-                await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
-                await RemoveAlbumFromDatabaseQueues(item.Id, dbContext);
-            }
+            if (!await database.PendingDownloads.AnyAsync(current => current.Id == item.Id
+                && current.SourceName == item.SourceName && current.ProviderName == item.ProviderName
+                && current.ImportIdentifier == item.ImportIdentifier, token))
+                throw new IOException("The pending import source changed.");
         }
+        var result = await coordinator.RunAsync(sourceDirectory,
+            async token => (await metadataSource.SearchAlbumRecordingsByIdAsync(item.Id).WaitAsync(token))
+                .Select(recording => AudioImportCatalog.CreateExpected(recording, images)).ToArray(),
+            (directory, token) => { token.ThrowIfCancellationRequested(); return Task.FromResult(GetMusicFilesInSavePath(directory)); },
+            async (expected, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                await metadataService.SearchAndSaveAlbumRecordingsByIdAsync(item.Id);
+                var saved = await database.Recordings.Where(recording => recording.Release.Id == item.Id)
+                    .Select(recording => new RecordingResponse { Id = recording.Id, ArtistName = recording.Release.Artist.Name,
+                        ReleaseTitle = recording.Release.Title }).ToListAsync(token);
+                AudioImportCatalog.RequireMatchingDestinations(expected, saved);
+            },
+            async token => { await RequireCurrent(token); await cleanup(); token.ThrowIfCancellationRequested(); },
+            token => RemoveAlbumFromDatabaseQueues(item, database, token), cancellationToken, RequireCurrent);
+        if (result.Complete) _stallTrackers.TryRemove(item.Id, out _);
+        else Console.WriteLine($"[PendingDownloadChecker] {result.PublishedTracks}/{result.ExpectedTracks} tracks published for {item.Id}; source and queue retained.");
     }
 
     private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath)
@@ -372,85 +376,21 @@ public class PendingDownloadChecker : BackgroundService
         return result;
     }
 
-    private Task<ICollection<MusicFileMatch>> MatchSongsWithMetadataAsync(
-        Guid albumId,
-        List<(string fileName, string fullPath)> files,
-        IExternalMusicSearchService externalMusicSearchService,
-        IImageService imageService)
-    {
-        return SoulseekMatchingHelper.MatchSongsWithMetadataAsync(albumId, files, externalMusicSearchService, imageService);
-    }
-
-    private int MoveMatchedFiles(ICollection<MusicFileMatch> matches)
-    {
-        var baseMusicPath = _musicLocation;
-        int movedCount = 0;
-
-        foreach (var match in matches)
-        {
-            if (match.Score == 0 || string.IsNullOrWhiteSpace(match.FullPath))
-                continue;
-
-            var recording = match.Recording;
-            var relativePath = MusicLocationHelper.GetRelativeFolderPathForRecording(recording);
-
-            var destinationDir = Path.Combine(baseMusicPath, relativePath);
-            Directory.CreateDirectory(destinationDir);
-
-            var extension = Path.GetExtension(match.FullPath);
-            var newFileName = recording.Id + extension;
-            var destinationPath = Path.Combine(destinationDir, newFileName);
-
-            try
-            {
-                File.Move(match.FullPath, destinationPath, overwrite: true);
-                movedCount++;
-            }
-            catch (Exception)
-            {
-                try
-                {
-                    File.Copy(match.FullPath, destinationPath, overwrite: true);
-                    try { File.Delete(match.FullPath); } catch { }
-                    movedCount++;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Failed to move {match.FileName}: {ex.Message}");
-                }
-            }
-        }
-
-        return movedCount;
-    }
-
     private async Task CleanUpTorrentAndFilesAsync(string torrentName)
     {
         var shouldTorrentClientCleanFiles = true;
         await _torrentHelper.RemoveTorrentAsync(torrentName, shouldTorrentClientCleanFiles);
     }
 
-    private async Task RemoveAlbumFromDatabaseQueues(Guid albumId, StreamingDbContext dbContext)
+    private async Task RemoveAlbumFromDatabaseQueues(StreamingServiceServer.Data.Models.PendingDownload item,
+        StreamingDbContext database, CancellationToken cancellationToken)
     {
-        var releaseToDownload = await dbContext.ReleasesToDownload
-            .FirstOrDefaultAsync(r => r.Id == albumId);
-        if (releaseToDownload != null)
-        {
-            dbContext.ReleasesToDownload.Remove(releaseToDownload);
-        }
-
-        var pendingDownload = await dbContext.PendingDownloads
-            .FirstOrDefaultAsync(p => p.Id == albumId);
-        if (pendingDownload != null)
-        {
-            dbContext.PendingDownloads.Remove(pendingDownload);
-        }
-
-        await dbContext.SaveChangesAsync();
-    }
-
-    private AudioMetadata? GetAudioMetadata(string filePath)
-    {
-        return AudioMetadataHelper.GetAudioMetadata(filePath);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var removed = await database.PendingDownloads.Where(current => current.Id == item.Id
+            && current.SourceName == item.SourceName && current.ProviderName == item.ProviderName
+            && current.ImportIdentifier == item.ImportIdentifier).ExecuteDeleteAsync(cancellationToken);
+        if (removed != 1) throw new IOException("The pending import source changed before queue removal.");
+        await database.ReleasesToDownload.Where(release => release.Id == item.Id).ExecuteDeleteAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 }

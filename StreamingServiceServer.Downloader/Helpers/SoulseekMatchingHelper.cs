@@ -25,13 +25,22 @@ public static class SoulseekMatchingHelper
 
     public static ICollection<MusicFileMatch> MatchSongsWithRecordings(
         IEnumerable<RecordingResponse> recordings,
-        List<(string fileName, string fullPath)> files)
+        List<(string fileName, string fullPath)> files,
+        Func<string, AudioMetadata?>? readMetadata = null,
+        CancellationToken cancellationToken = default)
     {
         var matches = new List<MusicFileMatch>();
-        var unmatchedFiles = new List<(string fileName, string fullPath)>(files);
+        var unmatchedFiles = files.DistinctBy(file => Path.GetFullPath(file.fullPath), StringComparer.Ordinal).ToList();
+        var metadataByPath = new Dictionary<string, AudioMetadata?>(StringComparer.Ordinal);
+        foreach (var candidate in unmatchedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            metadataByPath[candidate.fullPath] = (readMetadata ?? AudioMetadataHelper.GetAudioMetadata)(candidate.fullPath);
+        }
 
         foreach (var recording in recordings.OrderBy(r => r.PositionInAlbum))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string targetTitle = recording.Title ?? "";
             string sanitizedTargetTitle = StringSanitizers.SanitizeTitle(targetTitle).ToLowerInvariant();
             string targetPosTitle = $"{recording.PositionInAlbum} {targetTitle}";
@@ -42,7 +51,7 @@ public static class SoulseekMatchingHelper
 
             foreach (var (fileName, fullPath) in unmatchedFiles)
             {
-                var metadata = AudioMetadataHelper.GetAudioMetadata(fullPath);
+                var metadata = metadataByPath[fullPath];
 
                 int combinedScore = 0;
 

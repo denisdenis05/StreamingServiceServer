@@ -665,6 +665,11 @@ namespace StreamingServiceServer.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("ImportIdentifier")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
                     b.Property<string>("ProviderName")
                         .IsRequired()
                         .HasColumnType("text");

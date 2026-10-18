@@ -14,6 +14,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.Back
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.CoverTests", "StreamingServiceServer.CoverTests\StreamingServiceServer.CoverTests.csproj", "{3FCBF9EA-2F5A-4DC4-8165-782139910DA1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StreamingServiceServer.Migrations", "StreamingServiceServer.Migrations\StreamingServiceServer.Migrations.csproj", "{834D5411-836F-482A-A0FC-8339CDB3BFAB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -108,6 +110,18 @@ Global
 		{3FCBF9EA-2F5A-4DC4-8165-782139910DA1}.Release|x64.Build.0 = Release|Any CPU
 		{3FCBF9EA-2F5A-4DC4-8165-782139910DA1}.Release|x86.ActiveCfg = Release|Any CPU
 		{3FCBF9EA-2F5A-4DC4-8165-782139910DA1}.Release|x86.Build.0 = Release|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Debug|x64.Build.0 = Debug|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Debug|x86.Build.0 = Debug|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Release|x64.ActiveCfg = Release|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Release|x64.Build.0 = Release|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Release|x86.ActiveCfg = Release|Any CPU
+		{834D5411-836F-482A-A0FC-8339CDB3BFAB}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

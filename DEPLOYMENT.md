@@ -19,7 +19,17 @@ docker compose ps
 
 The service is available at `http://localhost:3003`. Compose publishes the API directly as host port 3003 to container port 8080. Your existing external Nginx proxies to this endpoint; Compose does not start an Nginx container. The Dockerfile publishes the API with `dotnet publish --configuration Release` and runs with both .NET environment names set to Production. Swagger remains disabled under the existing production behavior.
 
-The stack expects an existing PostgreSQL database with the application's schema and existing download-provider services. It does not provision a database, apply migrations, or start torrent/Soulseek services. Apply the project's existing EF migrations before using a new database.
+The stack expects an existing PostgreSQL database and existing download-provider services. It does not provision PostgreSQL or start torrent/Soulseek services. Compose runs the `migrations` service before starting the server. This service applies pending Entity Framework migrations from `StreamingServiceServer.Data` using the same `DATABASE_CONNECTION_STRING`. A failed migration exits with an error and prevents the dependent server from starting. An already running server is not automatically stopped if a later deployment migration fails.
+
+The migration image contains a small console runner and the Data assembly; it does not start background workers, read development settings, or mount the NAS. Database credentials are provided only at runtime. The database account must have permissions for the pending schema changes, including extension creation when required by the existing migrations. Existing installations must have their EF migration history intact; this runner does not baseline an existing schema.
+
+To inspect migration results:
+
+```sh
+docker compose logs migrations
+```
+
+`docker compose up --build -d` builds and runs the migration service before starting the updated server. `docker compose restart` only restarts containers; use `up` to deploy schema changes. To explicitly rerun the migration step, use `docker compose run --rm migrations`; already applied migrations are skipped. Back up the database before deploying schema changes.
 
 ## Required environment values
 

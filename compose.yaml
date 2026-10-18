@@ -1,10 +1,30 @@
 name: streaming-service
 
 services:
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrations
+    restart: "no"
+    init: true
+    user: "${SERVER_USER:-1654:1654}"
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__DefaultConnection: "${DATABASE_CONNECTION_STRING:?Set DATABASE_CONNECTION_STRING}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   server:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
     restart: unless-stopped
     init: true
     ports:

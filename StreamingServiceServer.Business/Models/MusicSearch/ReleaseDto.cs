@@ -10,6 +10,18 @@ public class ReleaseDto
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 
+    [JsonPropertyName("date")]
+    public string? Date { get; set; }
+
+    [JsonPropertyName("country")]
+    public string? Country { get; set; }
+
+    [JsonPropertyName("disambiguation")]
+    public string? Disambiguation { get; set; }
+
+    [JsonPropertyName("track-count")]
+    public int? TrackCount { get; set; }
+
     [JsonPropertyName("artist-credit")]
     public ICollection<ArtistCreditDto>? ArtistCredit { get; set; } = new  List<ArtistCreditDto>();
 

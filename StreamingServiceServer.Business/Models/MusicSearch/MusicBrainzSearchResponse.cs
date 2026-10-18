@@ -19,6 +19,12 @@ public class MusicBrainzSearchResponse
     [JsonPropertyName("recordings")]
     public List<RecordingDto>? Recordings { get; set; }
 
+    [JsonPropertyName("releases")]
+    public List<ReleaseDto>? Releases { get; set; }
+
+    [JsonPropertyName("release-count")]
+    public int? ReleaseCount { get; set; }
+
 
     [JsonPropertyName("release-groups")]
     public List<ReleaseGroup>? ReleaseGroups { get; set; }

@@ -436,6 +436,39 @@ public class DashboardController : ControllerBase
         }));
     }
 
+    [Authorize(Roles = "Admin")]
+    [HttpGet("mb-search/groups")]
+    public async Task<IActionResult> SearchMusicBrainzReleaseGroups([FromQuery] string? title,
+        [FromQuery] string? artist, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return Ok(Array.Empty<object>());
+        if (title.Length > 512 || artist?.Length > 512) return BadRequest("Search text is too long.");
+        try
+        {
+            return Ok(await _externalMusicSearchService.SearchReleaseSelectionsAsync(title, artist, cancellationToken));
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = "MusicBrainz search is unavailable. Try again shortly." });
+        }
+    }
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("mb-search/groups/{groupId:guid}/releases")]
+    public async Task<IActionResult> BrowseMusicBrainzReleaseGroup(Guid groupId, [FromQuery] int offset,
+        CancellationToken cancellationToken)
+    {
+        if (groupId == Guid.Empty || offset < 0 || offset % 100 != 0) return BadRequest("Invalid release page.");
+        try
+        {
+            return Ok(await _externalMusicSearchService.BrowseReleaseSelectionsAsync(groupId, offset, cancellationToken));
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { message = "MusicBrainz releases are unavailable. Try again shortly." });
+        }
+    }
+
     private static readonly HashSet<string> _audioExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".alac", ".wma", ".opus"

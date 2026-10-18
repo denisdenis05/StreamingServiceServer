@@ -8,7 +8,7 @@ using StreamingServiceServer.Data.Models;
 
 namespace StreamingServiceServer.Business.Services.MusicSearch;
 
-public class MusicBrainzService : IExternalMusicSearchService
+public partial class MusicBrainzService : IExternalMusicSearchService
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
@@ -35,15 +35,15 @@ public class MusicBrainzService : IExternalMusicSearchService
         }
     }
 
-    private async Task<T?> GetJsonAsync<T>(string url)
+    private async Task<T?> GetJsonAsync<T>(string url, CancellationToken cancellationToken = default)
     {
-        await RateLimiter.WaitAsync();
+        await RateLimiter.WaitAsync(cancellationToken);
         try
         {
             var elapsed = DateTime.UtcNow - _lastRequestTime;
             if (elapsed < MinRequestDelay)
             {
-                await Task.Delay(MinRequestDelay - elapsed);
+                await Task.Delay(MinRequestDelay - elapsed, cancellationToken);
             }
             _lastRequestTime = DateTime.UtcNow;
         }
@@ -56,26 +56,26 @@ public class MusicBrainzService : IExternalMusicSearchService
         {
             try
             {
-                var response = await _httpClient.GetAsync(url);
+                using var response = await _httpClient.GetAsync(url, cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
-                    var json = await response.Content.ReadAsStringAsync();
+                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
                     return JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 }
 
                 if ((int)response.StatusCode == 503 || (int)response.StatusCode == 429)
                 {
                     Console.WriteLine($"[MusicBrainz] Rate limit {response.StatusCode} on attempt {attempt}/4 for {url}. Delaying {attempt * 2}s...");
-                    await Task.Delay(attempt * 2000);
+                    await Task.Delay(attempt * 2000, cancellationToken);
                     continue;
                 }
 
                 return default;
             }
-            catch (Exception ex) when (attempt < 4)
+            catch (Exception ex) when (attempt < 4 && !cancellationToken.IsCancellationRequested)
             {
                 Console.WriteLine($"[MusicBrainz] Transient error on attempt {attempt}/4 for {url}: {ex.Message}");
-                await Task.Delay(attempt * 1500);
+                await Task.Delay(attempt * 1500, cancellationToken);
             }
         }
 

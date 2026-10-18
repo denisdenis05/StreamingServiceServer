@@ -10,6 +10,8 @@ public interface IExternalMusicSearchService
     Task<RecordingDto> SearchRecordingByIdAsync(Guid id);
     Task<List<RecordingDto>> SearchAlbumRecordingsAsync(string query);
     Task<List<ReleaseDto>> SearchAlbumsAsync(string albumQuery, string? artistQuery = null);
+    Task<IReadOnlyList<ReleaseGroupSelection>> SearchReleaseSelectionsAsync(string title, string? artist, CancellationToken cancellationToken);
+    Task<ReleaseSelectionPage> BrowseReleaseSelectionsAsync(Guid groupId, int offset, CancellationToken cancellationToken);
     Task<List<ReleaseDto>> SearchReleaseGroupsAsync(string query);
     Task<List<RecordingDto>> SearchAlbumRecordingsByIdAsync(Guid albumId);
     Task<ReleaseResponse> GetAlbumDetails(Guid albumId);

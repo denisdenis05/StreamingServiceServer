@@ -2429,6 +2429,7 @@ async function confirmQueueAlbum() {
 const _mbSelectedId = { add: null, queue: null };
 
 function clearMbSearch(ctx) {
+  DashboardMusicBrainzSearch.clear(ctx);
   _mbSelectedId[ctx] = null;
   const results  = document.getElementById(ctx === 'add' ? 'add-mb-search-results'  : 'queue-mb-search-results');
   const idDisplay = document.getElementById(ctx === 'add' ? 'add-mb-id-display'      : 'queue-mb-id-display');
@@ -2454,47 +2455,15 @@ async function triggerMbSearch(ctx) {
     return;
   }
 
-  container.style.display = 'block';
-  container.innerHTML = '<div style="padding:0.8rem; color:var(--text-muted); font-size:0.85rem;">searching MusicBrainz…</div>';
   clearMbSearch(ctx);
   container.style.display = 'block';
 
-  try {
-    const params = `title=${encodeURIComponent(title)}${artist ? `&artist=${encodeURIComponent(artist)}` : ''}`;
-    const res    = await authFetch(`${API_BASE}/mb-search?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const albums = await res.json();
-
-    if (!albums.length) {
-      container.innerHTML = '<div style="padding:0.8rem; color:var(--text-muted); font-size:0.85rem;">no results found</div>';
-      return;
-    }
-
-    container.innerHTML = albums.map(r => {
-      const titleDisplay  = escapeHtml(r.title  || '');
-      const artistDisplay = escapeHtml(r.artist || '');
-      const idAttr        = escapeHtml(r.id     || '');
-      const titleAttr     = (r.title  || '').replace(/"/g, '&quot;');
-      const artistAttr    = (r.artist || '').replace(/"/g, '&quot;');
-      return `<div class="mb-result-row"
-          data-title="${titleAttr}" data-artist="${artistAttr}" data-id="${idAttr}"
-          style="padding:0.65rem 1rem; cursor:pointer; border-bottom:1px solid var(--border-light); font-size:0.88rem; transition:background 0.12s;"
-          onmouseenter="this.style.background='var(--bg-card)'"
-          onmouseleave="this.style.background=''">
-        <div style="font-weight:500;">${titleDisplay}</div>
-        <div style="font-size:0.78rem; color:var(--text-muted);">${artistDisplay}</div>
-      </div>`;
-    }).join('');
-
-    container.querySelectorAll('.mb-result-row').forEach(row => {
-      row.addEventListener('click', () => selectMbAlbum(ctx, row.dataset.title, row.dataset.artist, row.dataset.id));
-    });
-  } catch (e) {
-    container.innerHTML = `<div style="padding:0.8rem; color:#c62828; font-size:0.82rem;">${escapeHtml(e.message)}</div>`;
-  }
+  await DashboardMusicBrainzSearch.search(ctx, container, API_BASE, title, artist,
+    (selectedTitle, selectedArtist, identifier) => selectMbAlbum(ctx, selectedTitle, selectedArtist, identifier));
 }
 
 function selectMbAlbum(ctx, title, artist, id) {
+  DashboardMusicBrainzSearch.clear(ctx);
   if (ctx === 'add') {
     document.getElementById('input-album-title').value  = title;
     document.getElementById('input-album-artist').value = artist;

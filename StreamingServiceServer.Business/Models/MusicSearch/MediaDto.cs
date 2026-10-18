@@ -4,6 +4,9 @@ namespace StreamingServiceServer.Business.Models.MusicSearch;
 
 public class MediaDto
 {
+    [JsonPropertyName("format")]
+    public string? Format { get; set; }
+
     [JsonPropertyName("id")]
     public Guid Id { get; set; }
 

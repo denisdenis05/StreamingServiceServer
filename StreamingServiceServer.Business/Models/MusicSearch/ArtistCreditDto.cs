@@ -7,6 +7,9 @@ public class ArtistCreditDto
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
+    [JsonPropertyName("joinphrase")]
+    public string? JoinPhrase { get; set; }
+
     [JsonPropertyName("artist")]
     public ArtistDto? Artist { get; set; }
 }

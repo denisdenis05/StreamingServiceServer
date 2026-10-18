@@ -1,0 +1,95 @@
+.mb-release-group {
+  margin: 0.55rem;
+  overflow: hidden;
+  border: 1px solid var(--border-light, #dcd6ca);
+  border-radius: 8px;
+  background: var(--bg-card, #f7f3eb);
+}
+
+.mb-release-choice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 0.7rem;
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-main, #302d28);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mb-release-choice:hover,
+.mb-release-choice:focus-visible {
+  background: rgba(82, 105, 72, 0.08);
+}
+
+.mb-release-choice:focus-visible,
+.mb-release-expand:focus-visible {
+  outline: 2px solid var(--accent-olive, #526948);
+  outline-offset: -2px;
+}
+
+.mb-release-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mb-release-count {
+  align-self: start;
+  color: var(--accent-olive, #526948);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mb-release-artist,
+.mb-release-details,
+.mb-release-identifier {
+  grid-column: 1 / -1;
+  color: var(--text-muted, #787268);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.mb-release-identifier {
+  font-size: 0.66rem;
+}
+
+.mb-release-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.9rem 0.65rem;
+}
+
+.mb-release-expand {
+  padding: 0.15rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent-olive, #526948);
+  font: inherit;
+  font-size: 0.76rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.mb-release-expand:hover {
+  background: transparent;
+  color: var(--text-main, #302d28);
+}
+
+.mb-release-editions {
+  margin: 0 0.6rem 0.5rem;
+  border-left: 2px solid var(--border-light, #dcd6ca);
+}
+
+.mb-release-editions[hidden] { display: none; }
+.mb-release-editions > .mb-release-choice { border-top: 1px solid var(--border-light, #dcd6ca); }
+.mb-release-message { padding: 0.8rem; font-size: 0.82rem; color: var(--text-muted, #787268); }
+.mb-release-error { color: var(--accent-terracotta, #a34e3b); }

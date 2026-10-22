@@ -6,11 +6,13 @@ using StreamingServiceServer.Business.Services.LastFm;
 using StreamingServiceServer.Business.Services.MusicSearch;
 using StreamingServiceServer.Business.Services.Recommendation;
 using StreamingServiceServer.PreviewDownloader;
+using StreamingServiceServer.Business.Services.SpotifyCatalog;
 
 public static class ServiceExtensions
 {
     public static void AddApplicationServices(this IServiceCollection services)
     {
+        services.AddScoped<IRecordingCatalogQuery, RecordingCatalogQuery>();
         services.AddScoped<IExternalMusicSearchService, MusicBrainzService>();
         services.AddScoped<IMetadataService, MetadataService>();
         services.AddScoped<IStreamingService, StreamingService>();

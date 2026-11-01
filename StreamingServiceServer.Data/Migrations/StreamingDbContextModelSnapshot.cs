@@ -636,6 +636,9 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("SourceAlbumId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("StartTime")
                         .HasColumnType("timestamp with time zone");
 
@@ -654,7 +657,9 @@ namespace StreamingServiceServer.Data.Migrations
 
                     b.HasKey("ListenId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "PlaylistId", "StartTime");
+
+                    b.HasIndex("UserId", "SourceAlbumId", "StartTime");
 
                     b.ToTable("Listens");
                 });

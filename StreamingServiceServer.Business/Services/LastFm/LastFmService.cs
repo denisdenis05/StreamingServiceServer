@@ -133,6 +133,7 @@ public class LastFmService : ILastFmService
     {
         try
         {
+            var collectionContext = await PlaybackCollectionContext.ResolveAsync(_dbContext, userId, request);
             var sessionId = Guid.NewGuid();
             var startTime = DateTime.UtcNow;
 
@@ -144,6 +145,8 @@ public class LastFmService : ILastFmService
                 TrackName = request.Track,
                 Album = request.Album,
                 RecordingId = request.TrackId,
+                SourceAlbumId = collectionContext.SourceAlbumId,
+                PlaylistId = collectionContext.PlaylistId,
                 SessionId = sessionId,
                 StartTime = startTime,
                 TrackDurationSeconds = request.DurationSeconds,
@@ -167,7 +170,7 @@ public class LastFmService : ILastFmService
         }
         catch (Exception exception)
         {
-            throw new Exception($"Error starting playback session for user {userId}: {exception.Message}", exception);
+            throw new Exception("Playback session could not be recorded.", exception);
         }
     }
 

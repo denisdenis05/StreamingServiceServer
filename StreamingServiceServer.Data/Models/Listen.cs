@@ -15,6 +15,7 @@ public class Listen
 
     public Guid RecordingId { get; set; }
     public Guid? PlaylistId { get; set; }
+    public Guid? SourceAlbumId { get; set; }
 
     public DateTime StartTime { get; set; }
     public DateTime? EndTime { get; set; }

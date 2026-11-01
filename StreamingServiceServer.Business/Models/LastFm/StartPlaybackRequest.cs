@@ -3,6 +3,8 @@ namespace StreamingServiceServer.Business.Models.LastFm;
 public class StartPlaybackRequest
 {
     public Guid TrackId { get; set; }
+    public Guid? SourceAlbumId { get; set; }
+    public Guid? PlaylistId { get; set; }
     public string Artist { get; set; }
     public string Track { get; set; }
     public string Album { get; set; }

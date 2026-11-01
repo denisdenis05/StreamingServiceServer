@@ -2,6 +2,7 @@ namespace StreamingServiceServer.Business.Models.MusicSearch;
 
 public class ReleaseResponse
 {
+    public bool CanEdit { get; set; }
     public Guid Id { get; set; } 
     public string? Title { get; set; }
     public string? ArtistName { get; set; }

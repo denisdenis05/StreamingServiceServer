@@ -7,6 +7,8 @@ namespace StreamingServiceServer.Business.Services.MusicSearch;
 
 public interface ILibraryService
 {
+    Task<LikedSongsPlaylistSetting> GetLikedSongsPlaylistAsync(Guid userId, CancellationToken cancellationToken);
+    Task<LikedSongsPlaylistSetting> SetLikedSongsPlaylistAsync(Guid userId, Guid? playlistId, CancellationToken cancellationToken);
     Task<Playlist> CreatePlaylistAsync(Guid ownerId, CreatePlaylistRequest request, CancellationToken cancellationToken);
     Task<List<RecordingResponse>> GetPlaylistRecordingsAsync(Guid playlistId, Guid userId, int page, int pageSize, CancellationToken cancellationToken);
     Task<List<PlaylistResponse>> GetUserPlaylistsAsync(Guid userId, CancellationToken cancellationToken);

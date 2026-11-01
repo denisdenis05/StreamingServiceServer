@@ -1,3 +1,4 @@
+using System.Data;
 using StreamingServiceServer.Business.Services.Images;
 using System.Net.Http.Json;
 using Npgsql;
@@ -23,6 +24,33 @@ public class LibraryService : ILibraryService
         _externalMusicSearchService = externalMusicSearchService;
         _images = images;
     }
+
+    public async Task<LikedSongsPlaylistSetting> GetLikedSongsPlaylistAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var playlistId = await SelectedLikedPlaylists(userId)
+            .Select(playlist => (Guid?)playlist.Id).FirstOrDefaultAsync(cancellationToken);
+        return new LikedSongsPlaylistSetting(playlistId);
+    }
+
+    public async Task<LikedSongsPlaylistSetting> SetLikedSongsPlaylistAsync(Guid userId, Guid? playlistId, CancellationToken cancellationToken)
+    {
+        if (playlistId == Guid.Empty)
+            throw new ArgumentException(LikedSongsPlaylistPolicy.InvalidPlaylistMessage, nameof(playlistId));
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var playlists = await _dbContext.Playlists
+            .Where(playlist => playlist.OwnerId == userId && (playlist.IsSystem || playlist.Id == playlistId))
+            .ToListAsync(cancellationToken);
+        LikedSongsPlaylistSelection.Apply(playlists, playlistId);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new LikedSongsPlaylistSetting(playlistId);
+    }
+
+    private IOrderedQueryable<Playlist> SelectedLikedPlaylists(Guid userId) => _dbContext.Playlists
+        .Where(playlist => playlist.OwnerId == userId && playlist.IsSystem)
+        .OrderBy(playlist => playlist.CreatedAt).ThenBy(playlist => playlist.Id);
 
     public async Task<Playlist> CreatePlaylistAsync(Guid ownerId, CreatePlaylistRequest request, CancellationToken cancellationToken)
     {
@@ -256,11 +284,6 @@ public class LibraryService : ILibraryService
             throw new InvalidOperationException("Playlist not found or user is not the owner.");
         }
 
-        if (playlist.IsSystem)
-        {
-            throw new InvalidOperationException("Cannot modify system playlists.");
-        }
-
         playlist.Name = name;
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -300,23 +323,22 @@ public class LibraryService : ILibraryService
 
     public async Task ToggleLikeAsync(Guid userId, Guid recordingId, AddSongToPlaylistRequest songDetails, CancellationToken cancellationToken)
     {
-        var likedPlaylist = await _dbContext.Playlists
-            .Include(p => p.PlaylistRecordings)
-            .FirstOrDefaultAsync(p => p.OwnerId == userId && p.IsSystem, cancellationToken);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var likedPlaylist = await SelectedLikedPlaylists(userId)
+            .Include(playlist => playlist.PlaylistRecordings)
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (likedPlaylist == null)
         {
             likedPlaylist = new Playlist
             {
                 Id = Guid.NewGuid(),
-                Name = "Liked Songs",
+                Name = LikedSongsPlaylistPolicy.DefaultPlaylistName,
                 OwnerId = userId,
                 IsSystem = true,
                 Cover = string.Empty
             };
             _dbContext.Playlists.Add(likedPlaylist);
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         var existingRecording = likedPlaylist.PlaylistRecordings
@@ -328,9 +350,9 @@ public class LibraryService : ILibraryService
         }
         else
         {
-            var maxOrder = likedPlaylist.PlaylistRecordings.Any() 
-                ? likedPlaylist.PlaylistRecordings.Max(pr => pr.Order) 
-                : -1;
+            var maxOrder = likedPlaylist.PlaylistRecordings.Any()
+                ? likedPlaylist.PlaylistRecordings.Max(recording => recording.Order)
+                : LikedSongsPlaylistPolicy.EmptyPlaylistOrder;
 
             likedPlaylist.PlaylistRecordings.Add(new PlaylistRecording
             {
@@ -340,17 +362,17 @@ public class LibraryService : ILibraryService
                 Artist = songDetails.Artist,
                 Album = songDetails.Album,
                 Cover = songDetails.Cover,
-                Order = maxOrder + 1,
+                Order = maxOrder + LikedSongsPlaylistPolicy.OrderIncrement,
                 AddedById = userId
             });
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private IQueryable<Guid> LikedRecordingIds(Guid userId) => _dbContext.PlaylistRecordings.AsNoTracking()
-        .Where(recording => recording.PlaylistId == _dbContext.Playlists
-            .Where(playlist => playlist.OwnerId == userId && playlist.IsSystem)
+        .Where(recording => recording.PlaylistId == SelectedLikedPlaylists(userId)
             .Select(playlist => (Guid?)playlist.Id).FirstOrDefault())
         .Select(recording => recording.RecordingId);
 

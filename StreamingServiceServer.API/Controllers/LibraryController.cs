@@ -18,6 +18,33 @@ public class LibraryController : ControllerBase
         _libraryService = libraryService;
     }
 
+    [HttpGet(LikedSongsPlaylistPolicy.Route)]
+    public async Task<IActionResult> GetLikedSongsPlaylist(CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId == Guid.Empty)
+            return Unauthorized(LikedSongsPlaylistPolicy.InvalidAccountMessage);
+
+        return Ok(await _libraryService.GetLikedSongsPlaylistAsync(userId, cancellationToken));
+    }
+
+    [HttpPut(LikedSongsPlaylistPolicy.Route)]
+    public async Task<IActionResult> SetLikedSongsPlaylist([FromBody] LikedSongsPlaylistSetting setting, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId == Guid.Empty)
+            return Unauthorized(LikedSongsPlaylistPolicy.InvalidAccountMessage);
+        if (setting.PlaylistId == Guid.Empty)
+            return BadRequest(LikedSongsPlaylistPolicy.InvalidPlaylistMessage);
+
+        try
+        {
+            return Ok(await _libraryService.SetLikedSongsPlaylistAsync(userId, setting.PlaylistId, cancellationToken));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(LikedSongsPlaylistPolicy.MissingPlaylistMessage);
+        }
+    }
+
     [HttpPost("playlists")]
     public async Task<IActionResult> CreatePlaylist([FromBody] CreatePlaylistRequest request, CancellationToken cancellationToken)
     {
@@ -115,7 +142,19 @@ public class LibraryController : ControllerBase
         await _libraryService.AddRecordingsToPlaylistAsync(userId, playlistId, songs, cancellationToken);
         return Ok();
     }
-    [HttpPost("likes/{recordingId}")]
+    [HttpGet(LikedSongsPlaylistPolicy.RecordingLikeRoute)]
+    public async Task<IActionResult> GetRecordingLike(Guid recordingId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId == Guid.Empty)
+            return Unauthorized(LikedSongsPlaylistPolicy.InvalidAccountMessage);
+        if (recordingId == Guid.Empty)
+            return BadRequest(LikedSongsPlaylistPolicy.InvalidRecordingMessage);
+
+        var likedRecordingIds = await _libraryService.GetLikedRecordingIdsAsync(userId, [recordingId], cancellationToken);
+        return Ok(new RecordingLikeStatus(likedRecordingIds.Contains(recordingId)));
+    }
+
+    [HttpPost(LikedSongsPlaylistPolicy.RecordingLikeRoute)]
     public async Task<IActionResult> ToggleLike(Guid recordingId, [FromBody] AddSongToPlaylistRequest songDetails, CancellationToken cancellationToken)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -125,8 +164,12 @@ public class LibraryController : ControllerBase
             return Unauthorized("Invalid or missing user ID in token.");
         }
 
+        if (recordingId == Guid.Empty)
+            return BadRequest(LikedSongsPlaylistPolicy.InvalidRecordingMessage);
+
         await _libraryService.ToggleLikeAsync(userId, recordingId, songDetails, cancellationToken);
-        return Ok();
+        var likedRecordingIds = await _libraryService.GetLikedRecordingIdsAsync(userId, [recordingId], cancellationToken);
+        return Ok(new RecordingLikeStatus(likedRecordingIds.Contains(recordingId)));
     }
 
     [HttpPost("playlists/{playlistId}/recordings/fuzzy")]

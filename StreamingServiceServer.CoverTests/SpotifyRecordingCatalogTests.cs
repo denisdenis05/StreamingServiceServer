@@ -39,6 +39,43 @@ public sealed class SpotifyRecordingCatalogTests
     }
 
     [Fact]
+    public void ProjectionUsesCanonicalRecordingArtistsInsteadOfCreditedAliases()
+    {
+        var recording = Recording();
+        recording.ArtistCredit = [new RecordingArtistCredit { Id = Guid.Parse(Fixture.FirstCreditIdentifier), Name = Fixture.CreditedArtist,
+            Artist = new Artist { Id = Guid.Parse(Fixture.OtherArtistIdentifier), Name = Fixture.OtherArtist } }];
+        var result = RecordingCatalogQuery.Map(RecordingCatalogQuery.Project(new[] { recording }.AsQueryable()).Single());
+        Assert.Equal(new[] { Fixture.OtherArtist }, result.ArtistNames);
+        Assert.Equal(Fixture.OtherArtist, result.Author);
+        Assert.Equal(RecordingCatalogPolicy.RecordingCreditSource, result.ArtistCreditSource);
+    }
+
+    [Fact]
+    public void ProjectionRetainsCreditedNameWhenTheCanonicalArtistNameIsBlank()
+    {
+        var recording = Recording();
+        recording.ArtistCredit = [new RecordingArtistCredit { Id = Guid.Parse(Fixture.FirstCreditIdentifier), Name = Fixture.CreditedArtist,
+            Artist = new Artist { Id = Guid.Parse(Fixture.OtherArtistIdentifier), Name = Fixture.Whitespace } }];
+        var result = RecordingCatalogQuery.Map(RecordingCatalogQuery.Project(new[] { recording }.AsQueryable()).Single());
+        Assert.Equal(new[] { Fixture.CreditedArtist }, result.ArtistNames);
+        Assert.Equal(RecordingCatalogPolicy.RecordingCreditSource, result.ArtistCreditSource);
+    }
+
+    [Fact]
+    public void ProjectionDeduplicatesDifferentCreditAliasesForTheSameCanonicalArtist()
+    {
+        var recording = Recording();
+        var artist = new Artist { Id = Guid.Parse(Fixture.OtherArtistIdentifier), Name = Fixture.OtherArtist };
+        recording.ArtistCredit = [
+            new RecordingArtistCredit { Id = Guid.Parse(Fixture.FirstCreditIdentifier), Name = Fixture.CreditedArtist, Artist = artist },
+            new RecordingArtistCredit { Id = Guid.Parse(Fixture.SecondCreditIdentifier), Name = Fixture.MultipleArtists, Artist = artist }
+        ];
+        var result = RecordingCatalogQuery.Map(RecordingCatalogQuery.Project(new[] { recording }.AsQueryable()).Single());
+        Assert.Equal(new[] { Fixture.OtherArtist }, result.ArtistNames);
+        Assert.Equal(RecordingCatalogPolicy.RecordingCreditSource, result.ArtistCreditSource);
+    }
+
+    [Fact]
     public void ProjectionRemovesDuplicateCreditsWithoutReturningMutableLists()
     {
         var projected = new RecordingCatalogProjection { Identifier = Guid.Parse(Fixture.RecordingIdentifier),
@@ -154,6 +191,29 @@ public sealed class SpotifyRecordingCatalogTests
         Assert.Equal(Fixture.Title, result.Title);
         Assert.Equal(Fixture.ReleaseArtist, result.Author);
         Assert.Null(await query.Lookup(Guid.Parse(Fixture.OtherRecordingIdentifier), CancellationToken.None));
+        Assert.Empty(database.ChangeTracker.Entries());
+    }
+
+    [PostgresFact]
+    [Trait(Fixture.CategoryName, Fixture.PostgresCategory)]
+    public async Task PostgreSqlSearchFindsCanonicalArtistsAndCreditedAliasesButProjectsCanonicalNames()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        using var scope = fixture.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        var recording = Recording();
+        recording.ArtistCredit = [new RecordingArtistCredit { Id = Guid.Parse(Fixture.FirstCreditIdentifier), Name = Fixture.CreditedArtist,
+            Artist = new Artist { Id = Guid.Parse(Fixture.OtherArtistIdentifier), Name = Fixture.OtherArtist } }];
+        database.Recordings.Add(recording);
+        await database.SaveChangesAsync();
+        database.ChangeTracker.Clear();
+        var query = new RecordingCatalogQuery(database);
+        foreach (var author in new[] { Fixture.CreditedArtist, Fixture.OtherArtist })
+        {
+            var result = Assert.Single(await query.Search(Fixture.Title, author, Fixture.SingleResultLimit, CancellationToken.None));
+            Assert.Equal(Fixture.RecordingIdentifier, result.Identifier);
+            Assert.Equal(new[] { Fixture.OtherArtist }, result.ArtistNames);
+        }
         Assert.Empty(database.ChangeTracker.Entries());
     }
 

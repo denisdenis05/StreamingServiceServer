@@ -1,3 +1,11 @@
+# Current commit authorization — 2026-11-03
+
+The user authorized commits at the current time without backdating. Earlier
+no-commit notes below are historical. Canonical recording-credit projection and
+search passed all 16 catalog tests, including three isolated PostgreSQL cases.
+This chapter remains undeployed. User-owned appsettings and .idea changes are
+excluded from the commit and preserved.
+
 # Spotify recording catalog
 
 Implemented on 2026-10-21 under the workspace streaming-service-quality rules.
@@ -31,3 +39,23 @@ suite. Existing assembly/nullability warnings remain.
 User-owned appsettings changes and the untracked .idea directory were preserved
 and excluded from this chapter's staging. Query result bounds are verified;
 database scan cost and latency were not benchmarked.
+
+## Canonical recording artists — 2026-11-03
+
+The Spotify catalog projection now prefers the canonical linked Artist.Name for
+recording credits. A release-specific credited alias no longer hides that name.
+Credited text remains the fallback when the canonical artist is missing or blank;
+release-only fallback still retains its explicit provenance. Search accepts both
+credited text and the linked canonical artist, preserving lookups by either form.
+No schema migration, metadata writes, cover loading or app display changes were
+introduced. This is a generic metadata correction, not a hardcoded artist alias.
+
+All 16 SpotifyRecordingCatalogTests pass, including three actual disposable
+PostgreSQL cases and new canonical/credited alias projection/search and canonical deduplication regressions.
+Command: dotnet test StreamingServiceServer.CoverTests/StreamingServiceServer.CoverTests.csproj
+--filter FullyQualifiedName~SpotifyRecordingCatalogTests --no-restore with
+COVER_TEST_POSTGRES set to an isolated /tmp Unix socket. PostgreSQL was stopped
+after the run. Log: /tmp/jam-canonical-server-postgres-tests.log. No production
+server deployment or live catalog response is established by these tests.
+The user's no-commit override applies; changes remain uncommitted. Preexisting
+appsettings and .idea changes were preserved and were not used for this test.

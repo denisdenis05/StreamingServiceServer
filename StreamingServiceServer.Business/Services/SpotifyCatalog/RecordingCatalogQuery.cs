@@ -35,9 +35,8 @@ public sealed class RecordingCatalogQuery(StreamingDbContext database) : IRecord
         return recordings.Where(recording => recording.Title.ToLower().Contains(normalizedTitle)
                 || EF.Functions.TrigramsSimilarity(recording.Title.ToLower(), normalizedTitle) >= RecordingCatalogPolicy.MinimumTitleSimilarity)
             .Where(recording => recording.ArtistCredit.Any(credit =>
-                    credit.Name != null && credit.Name.Trim() != RecordingCatalogPolicy.EmptyText
-                        ? authorTerms.Any(authorTerm => credit.Name.ToLower().Contains(authorTerm))
-                        : credit.Artist != null && authorTerms.Any(authorTerm => credit.Artist.Name.ToLower().Contains(authorTerm)))
+                    credit.Name != null && authorTerms.Any(authorTerm => credit.Name.ToLower().Contains(authorTerm))
+                        || credit.Artist != null && authorTerms.Any(authorTerm => credit.Artist.Name.ToLower().Contains(authorTerm)))
                 || recording.Release != null && recording.Release.Artist != null
                     && authorTerms.Any(authorTerm => recording.Release.Artist.Name.ToLower().Contains(authorTerm)))
             .OrderByDescending(recording => recording.Title.ToLower() == normalizedTitle)
@@ -54,8 +53,8 @@ public sealed class RecordingCatalogQuery(StreamingDbContext database) : IRecord
             Title = recording.Title,
             DurationMilliseconds = recording.Length,
             ArtistNames = recording.ArtistCredit.OrderBy(credit => credit.Id)
-                .Select(credit => credit.Name != null && credit.Name.Trim() != RecordingCatalogPolicy.EmptyText
-                    ? credit.Name : credit.Artist != null ? credit.Artist.Name : RecordingCatalogPolicy.EmptyText)
+                .Select(credit => credit.Artist != null && credit.Artist.Name.Trim() != RecordingCatalogPolicy.EmptyText
+                    ? credit.Artist.Name : credit.Name ?? RecordingCatalogPolicy.EmptyText)
                 .Where(name => name.Trim() != RecordingCatalogPolicy.EmptyText).ToList(),
             ReleaseArtistName = recording.Release != null && recording.Release.Artist != null
                 ? recording.Release.Artist.Name : null

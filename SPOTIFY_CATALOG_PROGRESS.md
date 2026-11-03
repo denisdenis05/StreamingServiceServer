@@ -1,3 +1,12 @@
+# Server README — 2026-11-03
+
+Added a root README through Sol planning/review and the user-approved Codex Luna
+writer. It covers the implemented projects, external PostgreSQL/downloader/proxy
+requirements, Compose and migration startup, app-authenticated Spotify catalog,
+source build/test commands and operational documentation. Relative file links and
+whitespace checks pass; no em dashes occur in the README. No deployment, database
+mutation, source edit or new source test run belongs to this documentation chapter.
+
 # Current commit authorization — 2026-11-03
 
 The user authorized commits at the current time without backdating. Earlier

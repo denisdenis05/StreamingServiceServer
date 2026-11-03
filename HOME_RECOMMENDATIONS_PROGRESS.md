@@ -1,3 +1,18 @@
+# Recommendation research and design
+
+Added [RECOMMENDATION_DESIGN_ANALYSIS.md](RECOMMENDATION_DESIGN_ANALYSIS.md), based on
+a two-agent source/provider review and parent synthesis. It distinguishes current
+Home navigation and uniformly random continuation from proposed seeded radio and
+personal mixes. The report covers retained metadata, additive schema, background
+enrichment/rate limits, provenance/licensing, availability, authenticated outcomes,
+ranking/variety, queue/Jam ownership, evaluation and phased rollout.
+
+This chapter is analysis only. No implementation, provider catalog calls, private
+database queries, app/device operations, migrations or tests were performed. Existing
+source authentication and metadata-membership issues are findings, not fixes. All
+relative file references resolve, the report contains no em dashes, and whitespace
+checks pass. Actual metadata coverage, score weights and quality gains remain unknown.
+
 # Home recommendations and collection history
 
 Implemented 2026-11-01 under the workspace streaming-service-quality skill.

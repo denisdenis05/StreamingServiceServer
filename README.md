@@ -70,6 +70,7 @@ PostgreSQL tests marked with `PostgresFact` are skipped unless `COVER_TEST_POSTG
 - [COVER_ASSET_PROGRESS.md](COVER_ASSET_PROGRESS.md): cover storage and asset processing
 - [BROWSER_AUDIO_PROGRESS.md](BROWSER_AUDIO_PROGRESS.md): dashboard player, authenticated stream session, and remaining deployment checks
 - [LIKED_SONGS_PLAYLIST_PROGRESS.md](LIKED_SONGS_PLAYLIST_PROGRESS.md): playlist-backed liked recordings
+- [Recommendation design analysis](RECOMMENDATION_DESIGN_ANALYSIS.md): metadata sources, database enrichment, track radio, personal mixes, and rollout proposal
 - [HOME_RECOMMENDATIONS_PROGRESS.md](HOME_RECOMMENDATIONS_PROGRESS.md): Home recommendation APIs
 - [HISTORY_CONTEXT_PROGRESS.md](HISTORY_CONTEXT_PROGRESS.md): collection context in listening history
 - [SPOTIFY_CATALOG_PROGRESS.md](SPOTIFY_CATALOG_PROGRESS.md): read-only recording catalog projection

@@ -43,6 +43,7 @@ services:
       LastFm__ApiSecret: "${LASTFM_API_SECRET:-}"
       LastFm__Redirect: "${LASTFM_REDIRECT:-}"
       Domain: "${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}"
+      AudioAnalysis__KeyDirectory: /data/audio-analysis-keys
       Music__Path: /data/music
       MusicDirectory: /data/music
       Music__DownloadPath: /data/downloads
@@ -63,6 +64,7 @@ services:
       Logging__LogLevel__Default: "${LOG_LEVEL:-Information}"
       Logging__LogLevel__Microsoft.AspNetCore: "${ASPNETCORE_LOG_LEVEL:-Warning}"
     volumes:
+      - audio-analysis-keys:/data/audio-analysis-keys
       - type: bind
         source: "${MUSIC_HOST_PATH:?Set MUSIC_HOST_PATH}"
         target: /data/music
@@ -93,3 +95,6 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+volumes:
+  audio-analysis-keys:

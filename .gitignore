@@ -9,3 +9,5 @@ StreamingServiceServer.PreviewDownloader/Tools/preview-downloader
 !.env.example
 secrets/
 deployment/nginx.external.local.conf
+
+.audio-analysis-keys/

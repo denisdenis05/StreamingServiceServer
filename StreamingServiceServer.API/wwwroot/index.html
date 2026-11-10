@@ -279,8 +279,8 @@
     <!-- ==================== SETTINGS VIEW ==================== -->
     <section id="view-settings" class="page-view">
       <div style="padding: var(--spacing-md) 0 1rem;">
-        <h1>download <i>settings</i></h1>
-        <p style="color: var(--text-muted); margin-top: 0.5rem;">configure download providers, set priority order, and manage credentials. the dashboard is the source of truth.</p>
+        <h1>server <i>settings</i></h1>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;">configure download providers and local audio processing. settings are managed by administrators.</p>
       </div>
 
       <!-- Provider Priority Order -->
@@ -327,6 +327,37 @@
       </div>
 
       <div id="settings-status" style="margin-bottom: 2rem;"></div>
+      <div class="settings-section">
+        <h3>local audio <i>analysis</i></h3>
+        <p>Analyze available library audio through your local AudioMuse service. Processing runs one track at a time in the background.</p>
+        <p>Profile: <strong>musicnn-v1</strong>. Turning processing off stops new work and retains completed results. The current analysis may finish.</p>
+        <div class="form-group">
+          <label><input id="audio-analysis-enabled" type="checkbox" disabled> enable background processing</label>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="audio-analysis-endpoint">AudioMuse bridge URL reachable from this server</label>
+          <input id="audio-analysis-endpoint" class="form-input" type="url" placeholder="http://audiomuse:8786" autocomplete="off" disabled>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="audio-analysis-token">API bearer token</label>
+          <input id="audio-analysis-token" class="form-input" type="password" autocomplete="new-password" disabled>
+          <p id="audio-analysis-token-status"></p>
+          <label><input id="audio-analysis-clear-token" type="checkbox" disabled> remove the saved token</label>
+        </div>
+        <dl style="display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1.5rem; margin-top: 1rem;">
+          <dt>pending</dt><dd id="audio-analysis-pending">Not loaded</dd>
+          <dt>processing</dt><dd id="audio-analysis-processing">Not loaded</dd>
+          <dt>completed</dt><dd id="audio-analysis-completed">Not loaded</dd>
+          <dt>audio unavailable</dt><dd id="audio-analysis-unavailable">Not loaded</dd>
+          <dt>failed</dt><dd id="audio-analysis-failed">Not loaded</dd>
+        </dl>
+        <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem;">
+          <button id="audio-analysis-save" class="btn-cta" disabled>save audio analysis settings</button>
+          <button id="audio-analysis-refresh" class="btn-secondary" disabled>refresh settings and counts</button>
+          <button id="audio-analysis-test" class="btn-secondary" disabled>test saved connection</button>
+        </div>
+        <p id="audio-analysis-status" role="status" aria-live="polite">Sign in as an admin to manage local audio analysis.</p>
+      </div>
     </section>
 
     <!-- ==================== ANALYSIS VIEW ==================== -->
@@ -752,6 +783,7 @@
   <script src="/js/cover-progress.js?v=20261018-slskd-source-switch"></script>
   <script src="/js/dashboard-polling.js?v=20261018-slskd-source-switch"></script>
   <script src="/js/musicbrainz-search.js?v=20261018-slskd-source-switch"></script>
+  <script src="/js/audio-analysis-settings.js?v=20261110-local-analysis"></script>
   <script src="/js/dashboard.js?v=20261018-slskd-source-switch"></script>
 </body>
 </html>

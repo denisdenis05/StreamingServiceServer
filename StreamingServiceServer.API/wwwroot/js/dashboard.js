@@ -6,6 +6,7 @@
 const API_BASE = '/api/dashboard';
 let coverDownloadProgress = null;
 let browserPlayer = null;
+let audioAnalysisSettings = null;
 let dashboardPolling = null;
 let downloadedSearch = '';
 let pollingAuthenticationIdentity = null;
@@ -50,6 +51,7 @@ async function initApp() {
     clearSession: () => fetch('/Stream/browser-session', { method: 'DELETE' }) });
   coverDownloadProgress = CoverDownloadProgress.createController({ document, request: authFetch, isAuthorized: isAdmin, escapeHtml,
     onAlbumSelected(identifier) { window.location.hash = '#album?id=' + encodeURIComponent(identifier); } });
+  audioAnalysisSettings = AudioAnalysisSettings.createController({ document, request: authFetch, isAuthorized: isAdmin, endpointBase: API_BASE });
   setupDashboardPolling();
   document.addEventListener('visibilitychange', synchronizeDashboardPolling);
   setupNavigation();
@@ -92,10 +94,12 @@ function parseJwtRole(token) {
 }
 
 function setAuthToken(token, username, role) {
-  if (state.authToken !== (token || '')) browserPlayer?.authenticationChanged();
+  const authenticationChanged = state.authToken !== (token || '');
+  if (authenticationChanged) browserPlayer?.authenticationChanged();
   state.authToken = token || '';
   state.username = username || '';
   state.userRole = role || parseJwtRole(token) || '';
+  if (authenticationChanged) audioAnalysisSettings?.authenticationChanged();
 
   if (token) {
     localStorage.setItem('resonance_token', token);
@@ -260,6 +264,7 @@ function handleRoute() {
     document.getElementById('view-settings').classList.add('active');
     document.querySelector('.nav-link[href="#settings"]')?.classList.add('active');
     loadProviderSettings();
+    void audioAnalysisSettings?.load();
   } else if (hash === '#login') {
     document.getElementById('view-login').classList.add('active');
     document.querySelector('.nav-link[href="#login"]')?.classList.add('active');

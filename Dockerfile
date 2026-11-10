@@ -33,13 +33,14 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /publish .
 COPY deployment/settings.json /app/appsettings.json
-RUN mkdir -p /app/Tools /data/music /data/covers /data/downloads \
+RUN mkdir -p /app/Tools /data/music /data/covers /data/downloads /data/audio-analysis-keys \
     && ln -s /opt/preview-downloader/bin/yt-dlp /app/Tools/preview-downloader \
     && chown -R app:app /data
 
 ENV ASPNETCORE_ENVIRONMENT=Production \
     ASPNETCORE_HTTP_PORTS=8080 \
-    XDG_CACHE_HOME=/tmp/streaming-service-cache
+    XDG_CACHE_HOME=/tmp/streaming-service-cache \
+    AudioAnalysis__KeyDirectory=/data/audio-analysis-keys
 USER $APP_UID
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "StreamingServiceServer.API.dll"]

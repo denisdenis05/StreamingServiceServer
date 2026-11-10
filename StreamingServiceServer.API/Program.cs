@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using StreamingServiceServer.API.AudioAnalysis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ builder.Services.RegisterHelpers();
 builder.Services.AddHostedService<MusicDownloader>();
 builder.Services.AddHostedService<PendingDownloadChecker>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddLocalAudioAnalysis(builder.Configuration, builder.Environment);
 builder.Services.AddOptions<CoverAssetOptions>().Bind(builder.Configuration.GetSection(CoverAssetOptions.Section))
     .PostConfigure(options => options.Domain = builder.Configuration["Domain"] ?? string.Empty)
     .Validate(options => options.ParallelJobs > 0 && options.BatchSize > 0 && options.MaximumInputBytes > 0

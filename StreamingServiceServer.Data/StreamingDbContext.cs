@@ -12,6 +12,10 @@ public class StreamingDbContext : DbContext
     {
     }
 
+    public DbSet<AudioAnalysisSettings> AudioAnalysisSettings { get; set; }
+    public DbSet<AudioAnalysisJob> AudioAnalysisJobs { get; set; }
+    public DbSet<RecordingAudioAnalysis> RecordingAudioAnalyses { get; set; }
+
     public DbSet<CoverBackfillState> CoverBackfillStates { get; set; }
 
     public DbSet<CoverAssetIntegrityState> CoverAssetIntegrityStates { get; set; }

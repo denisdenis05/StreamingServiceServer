@@ -254,6 +254,109 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("ArtistTags");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.AudioAnalysisJob", b =>
+                {
+                    b.Property<Guid>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("EnqueuedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastFailure")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SourceVersion")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("RecordingId");
+
+                    b.HasIndex("NextAttemptAt", "RecordingId");
+
+                    b.HasIndex("State", "LeaseUntil");
+
+                    b.HasIndex("State", "NextAttemptAt");
+
+                    b.ToTable("AudioAnalysisJobs");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.AudioAnalysisSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("EndpointUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("Profile")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ProtectedApiToken")
+                        .IsRequired()
+                        .HasMaxLength(8192)
+                        .HasColumnType("character varying(8192)");
+
+                    b.Property<Guid>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AudioAnalysisSettings", t =>
+                        {
+                            t.HasCheckConstraint("CK_AudioAnalysisSettings_Singleton", "\"Id\" = 1");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Enabled = false,
+                            EndpointUrl = "",
+                            Profile = "musicnn-v1",
+                            ProtectedApiToken = "",
+                            Revision = new Guid("4980d5bd-497a-4eea-9ce2-2cdba3dfe2ec"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(1970, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.CoverAssetIntegrityState", b =>
                 {
                     b.Property<string>("Identity")
@@ -782,6 +885,84 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("RecordingArtistCredits");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecordingAudioAnalysis", b =>
+                {
+                    b.Property<Guid>("RecordingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AnalyzedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AudioSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<double>("DurationSeconds")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("EmbeddingDimensions")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EmbeddingJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<double?>("Energy")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("EngineName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("EngineVersion")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("FeatureSchemaVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FeaturesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("ModelsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("MusicalKey")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Profile")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("ProtocolVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Scale")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SourceVersion")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<double?>("Tempo")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("RecordingId");
+
+                    b.HasIndex("Profile", "AnalyzedAt");
+
+                    b.ToTable("RecordingAudioAnalyses");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Release", b =>
                 {
                     b.Property<Guid>("Id")
@@ -903,6 +1084,15 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Navigation("Artist");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.AudioAnalysisJob", b =>
+                {
+                    b.HasOne("StreamingServiceServer.Data.Models.Recording", null)
+                        .WithOne()
+                        .HasForeignKey("StreamingServiceServer.Data.Models.AudioAnalysisJob", "RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Library.Playlist", b =>
                 {
                     b.HasOne("SocialMedia.Data.Models.User", "Owner")
@@ -980,6 +1170,15 @@ namespace StreamingServiceServer.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Artist");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecordingAudioAnalysis", b =>
+                {
+                    b.HasOne("StreamingServiceServer.Data.Models.Recording", null)
+                        .WithOne()
+                        .HasForeignKey("StreamingServiceServer.Data.Models.RecordingAudioAnalysis", "RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Release", b =>

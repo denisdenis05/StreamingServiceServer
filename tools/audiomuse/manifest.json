@@ -1,0 +1,16 @@
+{
+  "engineCommit": "ac65c469d288a45092db77cc76c1e347a9e14f48",
+  "profile": "musicnn-v1",
+  "models": [
+    {
+      "name": "embedding",
+      "url": "https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v5.0.0-model/musicnn_embedding.onnx",
+      "sha256": "a48ad887950a557aefbb4dcddf58ad4802213ff5fc6fb51eda3507cd797bb9b0"
+    },
+    {
+      "name": "prediction",
+      "url": "https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v5.0.0-model/musicnn_prediction.onnx",
+      "sha256": "0d4e78dd43c610aec88c099e41f4a8969797da5ac2612ea6ca21faa9e1a428f3"
+    }
+  ]
+}

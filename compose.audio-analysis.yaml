@@ -1,0 +1,54 @@
+services:
+  server:
+    networks:
+      default: {}
+      audio-analysis: {}
+
+  audiomuse:
+    profiles:
+      - audio-analysis
+    build:
+      context: ./tools/audiomuse
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    environment:
+      AUDIOMUSE_BRIDGE_TOKEN: "${AUDIOMUSE_BRIDGE_TOKEN:?Set AUDIOMUSE_BRIDGE_TOKEN}"
+      AUDIOMUSE_BIND: "0.0.0.0"
+      AUDIOMUSE_PORT: "8786"
+      AUDIOMUSE_MAX_UPLOAD_BYTES: "${AUDIOMUSE_MAX_UPLOAD_BYTES:-536936448}"
+      AUDIOMUSE_READ_TIMEOUT_SECONDS: "${AUDIOMUSE_READ_TIMEOUT_SECONDS:-120}"
+      AUDIOMUSE_MODEL_DIRECTORY: /models
+      AUDIOMUSE_MODEL_MANIFEST: /models/manifest.json
+      HOME: /tmp
+      NUMBA_CACHE_DIR: /tmp/numba
+      MPLCONFIGDIR: /tmp/matplotlib
+    volumes:
+      - type: bind
+        source: "${AUDIOMUSE_MODELS_HOST_PATH:?Set AUDIOMUSE_MODELS_HOST_PATH}"
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:size=1073741824,mode=1777,nosuid,nodev
+    mem_limit: "${AUDIOMUSE_MEMORY_LIMIT:-8g}"
+    cpus: "${AUDIOMUSE_CPU_LIMIT:-2.0}"
+    pids_limit: 256
+    networks:
+      - audio-analysis
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  audio-analysis:
+    internal: true

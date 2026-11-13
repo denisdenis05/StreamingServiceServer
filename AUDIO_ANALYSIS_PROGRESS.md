@@ -78,3 +78,9 @@ Commands run from the server repository unless noted:
 - `git diff --check`: passed.
 
 Implementation and source verification are complete. Models have not been downloaded, no analyzer image has been built and no real track has been analyzed. No production database migration or deployment was performed. Before bulk processing, verify one actual downloaded track, the emitted model/features, measured CPU/memory/disk use, and recovery after switching processing off or restarting the service. Real throughput and the total time for 14,280 tracks remain unmeasured. Recommendation/radio consumers are a separate implementation step; this service populates their source data.
+
+## 2026-11-13: read-only evaluation of deployed results
+
+The user deployed the analyzer and enabled processing after fixing key-volume ownership for container UID 1000. The earlier deployment/inference gaps above describe the 2026-11-10 source checkpoint. A user-authorized read-only database snapshot now confirms 11,741 persisted analyses while the live worker continues. No processing settings, jobs or results were changed during evaluation.
+
+[Audio recommendation evaluation](AUDIO_RECOMMENDATION_EVALUATION.md) records measured coverage/quality, duplicate hashes, pinned-upstream descriptor score compression, similarity baselines, local timings, a diverse radio prototype and concrete API/player integration steps. The evaluation exporter and local ranking tool are in `tools/audio-recommendations`; twelve dedicated offline tests and exporter compilation pass. No recommendation endpoints or player changes are deployed by this evaluation chapter.

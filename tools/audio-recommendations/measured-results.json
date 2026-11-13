@@ -1,0 +1,164 @@
+{
+  "rows": 11741,
+  "unique_audio": 10412,
+  "repeated_audio_rows": 1329,
+  "seed_count": 256,
+  "neighbour_count": 10,
+  "labels": [
+    "00s",
+    "60s",
+    "70s",
+    "80s",
+    "90s",
+    "Hip-Hop",
+    "House",
+    "Mellow",
+    "Progressive rock",
+    "acoustic",
+    "alternative",
+    "alternative rock",
+    "ambient",
+    "beautiful",
+    "blues",
+    "catchy",
+    "chill",
+    "chillout",
+    "classic rock",
+    "country",
+    "dance",
+    "easy listening",
+    "electro",
+    "electronic",
+    "electronica",
+    "experimental",
+    "female vocalist",
+    "female vocalists",
+    "folk",
+    "funk",
+    "guitar",
+    "happy",
+    "hard rock",
+    "heavy metal",
+    "indie",
+    "indie pop",
+    "indie rock",
+    "instrumental",
+    "jazz",
+    "male vocalists",
+    "metal",
+    "oldies",
+    "party",
+    "pop",
+    "punk",
+    "rnb",
+    "rock",
+    "sad",
+    "sexy",
+    "soul"
+  ],
+  "embedding_dimensions": 200,
+  "float32_embedding_bytes": 9392800,
+  "zero_embeddings": 0,
+  "scalar_quality": {
+    "tempo": {
+      "finite": true,
+      "minimum": 40.76086956521739,
+      "median": 117.1875,
+      "maximum": 187.5
+    },
+    "energy": {
+      "finite": true,
+      "minimum": 0.20554625988006592,
+      "median": 0.7383683919906616,
+      "maximum": 0.926845133304596
+    },
+    "durationSeconds": {
+      "finite": true,
+      "minimum": 4.2114375,
+      "median": 212.2666875,
+      "maximum": 600.0
+    }
+  },
+  "methods": {
+    "random": {
+      "album_hit": 0.00390625,
+      "artist_hit": 0.03125,
+      "cross_album_artist_hit": 0.03954802259887006,
+      "unique_artists": 9.87109375,
+      "score_milliseconds": 0.7690859133617778,
+      "score_p95_milliseconds": 0.7798347578500398,
+      "cross_album_eligible_seeds": 177
+    },
+    "cosine": {
+      "album_hit": 0.50390625,
+      "artist_hit": 0.6328125,
+      "cross_album_artist_hit": 0.4576271186440678,
+      "unique_artists": 7.078125,
+      "score_milliseconds": 2.043841784484357,
+      "score_p95_milliseconds": 2.0581194839905947,
+      "cross_album_eligible_seeds": 177
+    },
+    "centered_cosine": {
+      "album_hit": 0.50390625,
+      "artist_hit": 0.62109375,
+      "cross_album_artist_hit": 0.4745762711864407,
+      "unique_artists": 6.95703125,
+      "score_milliseconds": 2.0369576554912783,
+      "score_p95_milliseconds": 2.0546059968182817,
+      "cross_album_eligible_seeds": 177
+    },
+    "descriptors": {
+      "album_hit": 0.32421875,
+      "artist_hit": 0.44921875,
+      "cross_album_artist_hit": 0.3559322033898305,
+      "unique_artists": 7.921875,
+      "score_milliseconds": 0.9545708130644925,
+      "score_p95_milliseconds": 0.9621707504265942,
+      "cross_album_eligible_seeds": 177
+    },
+    "restored_descriptors": {
+      "album_hit": 0.3203125,
+      "artist_hit": 0.45703125,
+      "cross_album_artist_hit": 0.3672316384180791,
+      "unique_artists": 7.74609375,
+      "score_milliseconds": 0.9538063868603786,
+      "score_p95_milliseconds": 0.9622739889891818,
+      "cross_album_eligible_seeds": 177
+    },
+    "hybrid": {
+      "album_hit": 0.51171875,
+      "artist_hit": 0.6171875,
+      "cross_album_artist_hit": 0.4576271186440678,
+      "unique_artists": 6.96875,
+      "score_milliseconds": 0.6996826526801669,
+      "score_p95_milliseconds": 0.7079632487148046,
+      "cross_album_eligible_seeds": 177
+    }
+  },
+  "radio": {
+    "lengths": {
+      "minimum": 20.0,
+      "mean": 20.0
+    },
+    "unique_artists": {
+      "minimum": 14.0,
+      "mean": 17.95703125
+    },
+    "unique_albums": {
+      "minimum": 20.0,
+      "mean": 20.0
+    },
+    "seed_album_excluded": {
+      "minimum": 1.0,
+      "mean": 1.0
+    },
+    "contents_unique": {
+      "minimum": 1.0,
+      "mean": 1.0
+    },
+    "selection_milliseconds": {
+      "minimum": 11.875926982611418,
+      "mean": 13.58923022212366
+    }
+  }
+}

@@ -1,4 +1,5 @@
 using System.Data;
+using StreamingServiceServer.Business.Services.Images.Playlists;
 using StreamingServiceServer.Business.Services.Images;
 using System.Net.Http.Json;
 using Npgsql;
@@ -16,13 +17,23 @@ public class LibraryService : ILibraryService
     private readonly StreamingDbContext _dbContext;
     private readonly IExternalMusicSearchService _externalMusicSearchService;
     private readonly IImageService? _images;
+    private readonly IPlaylistArtworkService? _playlistArtwork;
+    private readonly PlaylistArtworkQueue? _artworkQueue;
     const string DefaultPlaylistName = "New Playlist";
 
-    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService? images = null)
+    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService? images = null, IPlaylistArtworkService? playlistArtwork = null, PlaylistArtworkQueue? artworkQueue = null)
     {
         _dbContext = dbContext;
         _externalMusicSearchService = externalMusicSearchService;
         _images = images;
+        _playlistArtwork = playlistArtwork;
+        _artworkQueue = artworkQueue;
+    }
+
+    private async Task<string> RefreshArtworkAsync(Guid userId, Guid playlistId, CancellationToken cancellationToken)
+    {
+        try { return await _playlistArtwork!.RefreshAsync(userId, playlistId, cancellationToken); }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException) { return string.Empty; }
     }
 
     public async Task<LikedSongsPlaylistSetting> GetLikedSongsPlaylistAsync(Guid userId, CancellationToken cancellationToken)
@@ -95,7 +106,8 @@ public class LibraryService : ILibraryService
         };
 
         int order = 0;
-        foreach (var recording in recordings)
+        var recordingsByIdentifier = recordings.ToDictionary(recording => recording.Id);
+        foreach (var recording in request.RecordingIds.Distinct().Where(recordingsByIdentifier.ContainsKey).Select(identifier => recordingsByIdentifier[identifier]))
         {
             playlist.PlaylistRecordings.Add(new PlaylistRecording
             {
@@ -109,11 +121,17 @@ public class LibraryService : ILibraryService
         _dbContext.Playlists.Add(playlist);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        if (_playlistArtwork is not null) playlist.Cover = await RefreshArtworkAsync(ownerId, playlist.Id, cancellationToken);
         return playlist;
     }
 
     public async Task<List<PlaylistResponse>> GetUserPlaylistsAsync(Guid userId, CancellationToken cancellationToken)
     {
+        if (_playlistArtwork is not null)
+        {
+            var identifiers = await _dbContext.Playlists.AsNoTracking().Where(playlist => playlist.OwnerId == userId).Select(playlist => playlist.Id).ToArrayAsync(cancellationToken);
+            foreach (var identifier in identifiers) _artworkQueue?.Enqueue(userId, identifier);
+        }
         return await _dbContext.Playlists
             .Include(playlist => playlist.Owner )
             .Include(p => p.PlaylistRecordings)
@@ -195,6 +213,8 @@ public class LibraryService : ILibraryService
             .Include(p => p.Owner)
             .Where(p => p.OwnerId == userId)
             .ToListAsync(cancellationToken);
+
+        foreach (var playlist in playlists) _artworkQueue?.Enqueue(userId, playlist.Id);
 
         var savedAlbums = await _dbContext.UserSavedAlbums
             .Include(x => x.Release).ThenInclude(r => r.Artist)

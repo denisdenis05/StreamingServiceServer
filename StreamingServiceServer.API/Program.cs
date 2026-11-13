@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using StreamingServiceServer.API.Recommendations;
 using StreamingServiceServer.API.AudioAnalysis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +20,7 @@ builder.Services.AddHostedService<MusicDownloader>();
 builder.Services.AddHostedService<PendingDownloadChecker>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddLocalAudioAnalysis(builder.Configuration, builder.Environment);
+builder.Services.AddAudioRecommendations();
 builder.Services.AddOptions<CoverAssetOptions>().Bind(builder.Configuration.GetSection(CoverAssetOptions.Section))
     .PostConfigure(options => options.Domain = builder.Configuration["Domain"] ?? string.Empty)
     .Validate(options => options.ParallelJobs > 0 && options.BatchSize > 0 && options.MaximumInputBytes > 0
@@ -81,7 +83,8 @@ builder.Services.AddDbContext<StreamingDbContext>((services, options) =>
         connStr = "Host=localhost;Database=streaming_db;Username=postgres;Password=postgres";
     }
     options.UseNpgsql(connStr);
-    options.AddInterceptors(services.GetRequiredService<CoverJobInterceptor>());
+    options.AddInterceptors(services.GetRequiredService<CoverJobInterceptor>(),
+        services.GetRequiredService<StreamingServiceServer.Business.Services.Images.Playlists.PlaylistArtworkInterceptor>());
     options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 

@@ -7,6 +7,7 @@ public class Playlist
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string Cover { get; set; } = string.Empty;
+    public Guid ArtworkVersion { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Guid OwnerId { get; set; }

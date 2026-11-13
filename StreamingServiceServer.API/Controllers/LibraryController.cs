@@ -74,6 +74,15 @@ public class LibraryController : ControllerBase
         return Ok(playlists);
     }
 
+    [HttpGet("playlists/{id:guid}/artwork")]
+    public async Task<IActionResult> GetPlaylistArtwork(Guid id, [FromServices] StreamingServiceServer.Business.Services.Images.Playlists.IPlaylistArtworkService artwork, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        try { return Ok(new { cover = await artwork.RefreshAsync(userId, id, cancellationToken) }); }
+        catch (KeyNotFoundException) { return NotFound(); }
+        catch (IOException) { return StatusCode(StatusCodes.Status503ServiceUnavailable); }
+    }
+
     [HttpGet("playlists/{id:guid}/recordings")]
     public async Task<IActionResult> GetPlaylistRecordings(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
     {

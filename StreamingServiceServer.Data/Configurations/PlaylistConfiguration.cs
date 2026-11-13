@@ -10,6 +10,7 @@ public class PlaylistConfiguration : IEntityTypeConfiguration<Playlist>
     public void Configure(EntityTypeBuilder<Playlist> builder)
     {
         builder.HasKey(p => p.Id);
+        builder.Property(playlist => playlist.ArtworkVersion).HasDefaultValue(Guid.Empty).IsConcurrencyToken();
 
         builder.Property(p => p.Name)
             .IsRequired()

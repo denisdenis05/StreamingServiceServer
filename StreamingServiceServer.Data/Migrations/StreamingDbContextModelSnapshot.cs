@@ -587,6 +587,12 @@ namespace StreamingServiceServer.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid>("ArtworkVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
+
                     b.Property<string>("Cover")
                         .IsRequired()
                         .HasColumnType("text");
@@ -792,6 +798,35 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("PendingDownloads");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecommendationDailyMix", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<Guid[]>("RecordingIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<Guid?>("SavedPlaylistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.HasKey("UserId", "Day");
+
+                    b.HasIndex("SavedPlaylistId");
+
+                    b.ToTable("RecommendationDailyMixes");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>
@@ -1143,6 +1178,20 @@ namespace StreamingServiceServer.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecommendationDailyMix", b =>
+                {
+                    b.HasOne("StreamingServiceServer.Data.Models.Library.Playlist", null)
+                        .WithMany()
+                        .HasForeignKey("SavedPlaylistId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("SocialMedia.Data.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>

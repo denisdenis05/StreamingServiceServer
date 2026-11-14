@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using StreamingServiceServer.Business.Services.Artists;
 using SocialMedia.Data.Models;
 using StreamingServiceServer.Business.Services.Authentication;
 using StreamingServiceServer.Business.Services.Images;
@@ -12,6 +13,9 @@ public static class ServiceExtensions
 {
     public static void AddApplicationServices(this IServiceCollection services)
     {
+        services.AddMemoryCache();
+        services.AddScoped<IArtistCatalogProvider, MusicBrainzService>();
+        services.AddScoped<ArtistCatalogService>();
         services.AddScoped<IRecordingCatalogQuery, RecordingCatalogQuery>();
         services.AddScoped<IExternalMusicSearchService, MusicBrainzService>();
         services.AddScoped<IMetadataService, MetadataService>();

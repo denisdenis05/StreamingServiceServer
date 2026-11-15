@@ -45,6 +45,62 @@ public sealed class SoulseekDownloadRetryTests
         await Assert.ThrowsAsync<HttpRequestException>(() => fixture.Helper.StartAlbumDownloadAsync(Source(), default));
     }
 
+    [Fact]
+    public async Task CompletedTransferCleanupDoesNotRequireSlskdToBeReachable()
+    {
+        using var fixture = new TransferFixture();
+        fixture.SnapshotStatus = HttpStatusCode.ServiceUnavailable;
+        var provider = new SoulseekProvider(fixture.Helper);
+        Assert.False(await provider.TryClearCompletedTransfersAsync(Source().Encode()));
+        Assert.Equal(0, fixture.DeleteRequests);
+        await Assert.ThrowsAsync<HttpRequestException>(() => provider.CleanUpAsync(Source().Encode(), false));
+    }
+
+    [Fact]
+    public async Task MalformedTransferResponseCannotBlockCompletedAlbumFinalization()
+    {
+        using var fixture = new TransferFixture();
+        fixture.MalformedSnapshot = true;
+        Assert.False(await new SoulseekProvider(fixture.Helper).TryClearCompletedTransfersAsync(Source().Encode()));
+        Assert.Equal(0, fixture.DeleteRequests);
+    }
+
+    [Fact]
+    public async Task CompletedTransferDeletionFailureIsBestEffort()
+    {
+        using var fixture = new TransferFixture();
+        var completed = Transfer(FirstTrack, "Completed, Succeeded");
+        completed.Id = "completed-transfer";
+        fixture.Transfers.Add(completed);
+        fixture.DeleteStatus = HttpStatusCode.ServiceUnavailable;
+        Assert.False(await new SoulseekProvider(fixture.Helper).TryClearCompletedTransfersAsync(Source().Encode()));
+        Assert.Equal(1, fixture.DeleteRequests);
+    }
+
+    [Fact]
+    public async Task TransferCleanupTimeoutDoesNotPreventCompletedAlbumFinalization()
+    {
+        using var fixture = new TransferFixture();
+        fixture.SnapshotFailure = new TaskCanceledException("slskd request timed out");
+        Assert.False(await new SoulseekProvider(fixture.Helper).TryClearCompletedTransfersAsync(Source().Encode()));
+    }
+
+    [Fact]
+    public async Task AlreadyClearedTransfersNeedNoFurtherCleanup()
+    {
+        using var fixture = new TransferFixture();
+        Assert.True(await new SoulseekProvider(fixture.Helper).TryClearCompletedTransfersAsync(Source().Encode()));
+        Assert.Equal(0, fixture.DeleteRequests);
+    }
+
+    [Fact]
+    public async Task BestEffortCleanupDoesNotHideAnInvalidSourceContract()
+    {
+        using var fixture = new TransferFixture();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new SoulseekProvider(fixture.Helper).TryClearCompletedTransfersAsync("invalid-source"));
+    }
+
     [Theory]
     [InlineData("Completed, Errored")]
     [InlineData("Completed, Cancelled")]
@@ -219,6 +275,9 @@ public sealed class SoulseekDownloadRetryTests
         public bool AcceptOnlyFirstTrack { get; set; }
         public HttpStatusCode EnqueueStatus { get; set; } = HttpStatusCode.Created;
         public HttpStatusCode SnapshotStatus { get; set; } = HttpStatusCode.OK;
+        public bool MalformedSnapshot { get; set; }
+        public Exception? SnapshotFailure { get; set; }
+        public HttpStatusCode? DeleteStatus { get; set; }
         public int DeleteRequests { get; private set; }
 
         public TransferFixture()
@@ -238,11 +297,15 @@ public sealed class SoulseekDownloadRetryTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (request.Method == HttpMethod.Get)
+            {
+                if (SnapshotFailure is not null) throw SnapshotFailure;
                 return new HttpResponseMessage(SnapshotStatus)
-                    { Content = new StringContent(JsonSerializer.Serialize(Downloads()), Encoding.UTF8, "application/json") };
+                    { Content = new StringContent(MalformedSnapshot ? "invalid json" : JsonSerializer.Serialize(Downloads()), Encoding.UTF8, "application/json") };
+            }
             if (request.Method == HttpMethod.Delete)
             {
                 DeleteRequests++;
+                if (DeleteStatus is { } status) return new HttpResponseMessage(status);
                 throw new InvalidOperationException("Retries must retain transfer records and completed files.");
             }
             Assert.Equal(HttpMethod.Post, request.Method);

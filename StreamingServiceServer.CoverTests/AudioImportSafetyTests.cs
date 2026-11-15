@@ -12,6 +12,8 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Business.Services.Images;
+using System.Net;
+using StreamingServiceDownloader.Models.Slskd;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
@@ -218,6 +220,57 @@ public sealed class AudioImportSafetyTests
     }
 
     [Fact]
+    public async Task FullyImportedSoulseekAlbumLeavesQueueWhenTransferHistoryIsUnavailable()
+    {
+        using var fixture = new ImportFixture();
+        using var unavailable = new UnavailableSoulseekTransfers();
+        var provider = new SoulseekProvider(new SlskdHelper(unavailable));
+        var source = new SlskdSourceIdentity(Guid.NewGuid(), "peer", "Music/Album",
+            [new SlskdFileDownloadRequest { Filename = "Music/Album/song.wav", Size = 1000 }]);
+        fixture.CleanupOverride = async () => { await provider.TryClearCompletedTransfersAsync(source.Encode()); };
+        var result = await fixture.RunAsync();
+        Assert.True(result.Complete);
+        Assert.Equal(1, fixture.QueueRemovals);
+        Assert.False(File.Exists(fixture.FirstPath));
+        Assert.False(File.Exists(fixture.SecondPath));
+        Assert.True(File.Exists(fixture.Destination(fixture.First)));
+        Assert.True(File.Exists(fixture.Destination(fixture.Second)));
+    }
+
+    [Fact]
+    public async Task PartialSoulseekAlbumCannotUseBestEffortCleanupToSkipMissingTracks()
+    {
+        using var fixture = new ImportFixture();
+        File.Delete(fixture.SecondPath);
+        using var unavailable = new UnavailableSoulseekTransfers();
+        var provider = new SoulseekProvider(new SlskdHelper(unavailable));
+        var source = new SlskdSourceIdentity(Guid.NewGuid(), "peer", "Music/Album", []);
+        fixture.CleanupOverride = async () => { await provider.TryClearCompletedTransfersAsync(source.Encode()); };
+        Assert.False((await fixture.RunAsync()).Complete);
+        Assert.Equal(0, fixture.CleanupCalls);
+        Assert.Equal(0, fixture.QueueRemovals);
+        Assert.True(File.Exists(fixture.FirstPath));
+    }
+
+    [Fact]
+    public async Task QueueFailureAfterUnavailableTransferHistoryStillResumesWithoutRecopyingAudio()
+    {
+        using var fixture = new ImportFixture();
+        using var unavailable = new UnavailableSoulseekTransfers();
+        var provider = new SoulseekProvider(new SlskdHelper(unavailable));
+        var source = new SlskdSourceIdentity(Guid.NewGuid(), "peer", "Music/Album", []);
+        fixture.CleanupOverride = async () => { await provider.TryClearCompletedTransfersAsync(source.Encode()); };
+        fixture.FailQueueRemoval = true;
+        await Assert.ThrowsAsync<IOException>(() => fixture.RunAsync());
+        fixture.FailQueueRemoval = false;
+        fixture.FailCandidateReads = true;
+        Assert.True((await fixture.RunAsync()).Complete);
+        Assert.Equal(1, fixture.CleanupCalls);
+        Assert.Equal(1, fixture.Publisher.Calls[fixture.First.Id]);
+        Assert.Equal(1, fixture.Publisher.Calls[fixture.Second.Id]);
+    }
+
+    [Fact]
     public async Task MissingPublishedFileIsRepairedBeforeSourceCleanup()
     {
         using var fixture = new ImportFixture();
@@ -392,6 +445,7 @@ public sealed class AudioImportSafetyTests
         public bool FailQueueRemoval { get; set; }
         public bool FailMetadata { get; set; }
         public bool FailCandidateReads { get; set; }
+        public Func<Task>? CleanupOverride { get; set; }
         public bool EmptyExpected { get; set; }
         public IAudioImportJournal? JournalOverride { get; set; }
         public int CleanupCalls { get; private set; }
@@ -419,7 +473,7 @@ public sealed class AudioImportSafetyTests
                     return Task.FromResult(Directory.GetFiles(directory).Select(path => (Path.GetFileName(path), path)).ToList());
                 },
                 (expected, _) => { MetadataSaves++; if (FailMetadata) throw new IOException("metadata unavailable"); return Task.CompletedTask; },
-                _ => { CleanupCalls++; if (FailCleanup) throw new IOException("provider unavailable"); return Task.CompletedTask; },
+                _ => { CleanupCalls++; if (FailCleanup) throw new IOException("provider unavailable"); return CleanupOverride?.Invoke() ?? Task.CompletedTask; },
                 _ => { QueueRemovals++; if (FailQueueRemoval) throw new IOException("database unavailable"); return Task.CompletedTask; },
                 default, requireCurrent);
         public void Dispose() => Directory.Delete(root, true);
@@ -444,6 +498,24 @@ public sealed class AudioImportSafetyTests
             Calls[recording.Id] = Calls.GetValueOrDefault(recording.Id) + 1;
             return recording.Id == FailIdentifier ? Task.FromException<AudioImportPublication>(new IOException("disk unavailable"))
                 : inner.PublishAsync(recording, path, cancellationToken);
+        }
+    }
+
+    private sealed class UnavailableSoulseekTransfers : HttpMessageHandler, IHttpClientFactory
+    {
+        private readonly HttpClient _client;
+        public UnavailableSoulseekTransfers() => _client = new HttpClient(this, disposeHandler: false);
+        public HttpClient CreateClient(string name) => _client;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.EndsWith("/transfers/downloads", request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _client.Dispose();
+            base.Dispose(disposing);
         }
     }
 

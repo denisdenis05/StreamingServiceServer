@@ -163,6 +163,19 @@ public class SoulseekProvider : IDownloadProvider
         await _slskdHelper.RemoveSelectedTransfersAsync(source, CancellationToken.None);
     }
 
+    public async Task<bool> TryClearCompletedTransfersAsync(string sourceIdentifier)
+    {
+        try
+        {
+            await CleanUpAsync(sourceIdentifier, true);
+            return true;
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
     private static async Task ThrottleSearchAsync(CancellationToken cancellationToken)
     {
         await SearchRateLimiter.WaitAsync(cancellationToken);

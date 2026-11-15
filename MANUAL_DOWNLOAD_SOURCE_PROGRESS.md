@@ -35,12 +35,47 @@ Database tests used a newly initialized PostgreSQL server under `/tmp` and simul
 slskd HTTP responses. No production database, live Soulseek transfers, deployment
 or browser session was used.
 
-## Remaining work
+## Manual song retries
 
-The user added a single-song retry request during implementation. The next chapter
-will bound the explicit song retry action and report its attempts. Unless clarified
-otherwise, the five-retry limit applies to that manual action, while existing
-automatic album recovery remains unlimited.
+The album track list now labels its individual-track action `retry song`. It searches
+Soulseek for that song and downloads only the selected file, with one initial attempt
+and at most five retries. A failed attempt waits 30 seconds before another candidate
+is tried; if fewer candidates exist, they are reused within the same six-attempt
+budget. Status messages identify the current attempt. Each song/action has its own
+budget. The user explicitly confirmed that automatic album recovery stays unlimited.
 
-After the song work, finish validation, stop the disposable PostgreSQL server,
-push `feat/manual-audio-download-source` and open its pull request to `master`.
+The server checks recording/album ownership, prevents duplicate active jobs and
+scopes job status to its album. The UI disables duplicate submissions and restores
+the song button after completion or error. Transfer matching now checks the full
+selected path and size. Terminal error states are checked before success, a failed
+HTTP enqueue consumes an attempt, silent enqueue failures stop waiting after the
+appearance deadline, and a disk candidate must match the requested file size.
+
+`SoulseekSongRetryTests` provides seven deterministic cases for the initial attempt
+plus five retries, retry delays, peer fallback/reuse, immediate and final-attempt
+success, cancellation, independent song budgets and empty searches. The source
+integration class adds wrong-album and duplicate-job/status tests. Three additional
+UI tests cover the song action, repeated clicks, attempt display and exhaustion.
+
+Final validation:
+
+- `node --check StreamingServiceServer.API/wwwroot/js/dashboard.js`: passed.
+- `node --test tools/*.test.cjs`: 71 passed.
+- With the disposable PostgreSQL connection above, `dotnet test StreamingServiceServer.CoverTests/StreamingServiceServer.CoverTests.csproj --no-restore --filter 'FullyQualifiedName~ManualDownloadSourceTests|FullyQualifiedName~SoulseekDownloadRetryTests|FullyQualifiedName~SoulseekSongRetryTests' --verbosity quiet`: 46 passed, none skipped. This builds the API and referenced projects; existing compiler warnings remain.
+- `dotnet test StreamingServiceServer.CoverTests/StreamingServiceServer.CoverTests.csproj --no-build --no-restore --verbosity normal` without the PostgreSQL environment variable: 299 passed, 103 skipped, one existing failure in `AudioImportSafetyTests.ImportDestinationCannotEscapeMusicRootOrTraverseDirectoryLinks`. It expects `InvalidDataException`, but the unchanged path validator throws `InvalidOperationException`.
+- `git diff --check`: passed.
+
+The manual song job retains the existing in-memory background-job lifecycle;
+restarting the server does not resume it. Live transfer completion, disk publication
+and browser interaction remain unverified. These changes do not deploy the API.
+
+## Delivery
+
+Work is on `feat/manual-audio-download-source`, based on the freshly fetched
+`origin/master`. The manual-source chapter is commit `7b70cea`; the song chapter is
+committed separately. Unrelated local settings, notes and IDE files are excluded.
+
+GitHub authentication was initially unavailable over HTTPS and SSH. The user supplied
+a token through the private secrets card to finish pushing this branch and creating
+its pull request to `master`. The disposable PostgreSQL instance was stopped after
+validation. No runtime source changed during the delivery follow-up.

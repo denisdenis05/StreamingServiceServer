@@ -624,9 +624,9 @@ function renderAlbumDetail(album) {
               <span style="font-size: 0.85rem; color: var(--text-muted);">${dur}</span>
               <span class="track-redownload-area" style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
                 ${DashboardBrowserPlayer.button({ identifier: track.id, title: track.title, artist: album.artist, available: !isMissing }, escapeHtml)}
-                <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="${isMissing ? 'Download missing track' : 'Re-download this track'}" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">↻</button>
+                <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="Download this song with up to 5 retries" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">retry song</button>
                 <span id="rdc-${track.id}" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem;">
-                  <span style="color:var(--text-muted);">${isMissing ? 'download?' : 'redownload?'}</span>
+                  <span style="color:var(--text-muted);">retry this song up to 5 times?</span>
                   <button onclick="confirmRedownload('${album.id}','${track.id}')" class="btn-cta" style="padding:0.15rem 0.45rem; font-size:0.78rem;">yes</button>
                   <button onclick="hideRedownloadConfirm('${track.id}')" class="btn-secondary" style="padding:0.15rem 0.45rem; font-size:0.78rem;">no</button>
                 </span>
@@ -2509,6 +2509,9 @@ function hideRedownloadConfirm(recordingId) {
 }
 
 async function confirmRedownload(albumId, recordingId) {
+  const retryButton = document.getElementById(`rdb-${recordingId}`);
+  if (retryButton?.disabled) return;
+  if (retryButton) retryButton.disabled = true;
   hideRedownloadConfirm(recordingId);
   const statusEl = document.getElementById(`rds-${recordingId}`);
   if (statusEl) { statusEl.style.display = 'inline'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⟳ starting…'; }
@@ -2518,11 +2521,13 @@ async function confirmRedownload(albumId, recordingId) {
     if (!res.ok) {
       const d = await parseJsonResponse(res);
       if (statusEl) { statusEl.textContent = `✗ ${d.message || 'failed'}`; statusEl.style.color = '#c62828'; }
+      if (retryButton) retryButton.disabled = false;
       return;
     }
     pollRedownloadStatus(albumId, recordingId);
   } catch (err) {
     if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.style.color = '#c62828'; }
+    if (retryButton) retryButton.disabled = false;
   }
 }
 
@@ -2551,16 +2556,24 @@ function pollRedownloadStatus(albumId, recordingId) {
       }
 
       if (data.state === 'complete') {
+        const retryButton = document.getElementById(`rdb-${recordingId}`);
+        if (retryButton) retryButton.disabled = false;
         // Update track item styling: remove missing indicator
         const item = document.getElementById(`track-item-${recordingId}`);
         if (item) { item.style.backgroundColor = ''; item.style.borderLeft = ''; item.style.paddingLeft = ''; }
         return;
       }
-      if (data.state === 'error') return;
+      if (data.state === 'error' || data.state === 'idle') {
+        const retryButton = document.getElementById(`rdb-${recordingId}`);
+        if (retryButton) retryButton.disabled = false;
+        return;
+      }
 
       setTimeout(tick, 3000);
     } catch (err) {
       if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.style.color = '#c62828'; }
+      const retryButton = document.getElementById(`rdb-${recordingId}`);
+      if (retryButton) retryButton.disabled = false;
     }
   };
 

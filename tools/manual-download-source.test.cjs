@@ -23,6 +23,7 @@ function fixture() {
   const elements = new Map();
   const requests = [];
   const refreshes = [];
+  const timers = [];
   function element(identifier) {
     if (!elements.has(identifier)) elements.set(identifier, { style: {}, value: '', textContent: '', innerHTML: '', disabled: false,
       querySelectorAll() { return []; } });
@@ -30,7 +31,7 @@ function fixture() {
   }
   const sandbox = { document: { getElementById: element, addEventListener() {} },
     window: { location: { hash: '#queue' } }, localStorage: { getItem() { return ''; } },
-    console, requests, refreshes, request(url, options) {
+    console, requests, refreshes, setTimeout(callback) { timers.push(callback); }, request(url, options) {
       const completion = deferred();
       requests.push({ url, options, respond(data, status = 200) {
         completion.resolve({ ok: status < 400, status, text: async () => JSON.stringify(data) });
@@ -44,7 +45,7 @@ function fixture() {
     fetchQueued = async () => { refreshes.push('queued'); };
     state.queued = [{ id: 'album', title: 'Album', artist: 'Artist', status: 'failed', hasDownloadSource: false }];
     state.failed = [...state.queued];`);
-  return { element, requests, refreshes, run };
+  return { element, requests, refreshes, timers, run };
 }
 
 async function openAdding(value) {
@@ -167,4 +168,42 @@ test('late assignment response cannot change a reopened modal or remove its fail
   assert.deepEqual(value.refreshes, []);
   value.requests[2].respond({ sources: [], searchIdentifier, importIdentifier: emptyIdentifier });
   await settle();
+});
+
+test('manual song retry submits one recording and blocks duplicate clicks', async () => {
+  const value = fixture();
+  const starting = value.run("confirmRedownload('album', 'song')");
+  value.run("confirmRedownload('album', 'song')");
+  assert.equal(value.requests.length, 1);
+  assert.match(value.requests[0].url, /album\/album\/recording\/song\/redownload$/);
+  assert.equal(value.element('rdb-song').disabled, true);
+  value.requests[0].respond({ message: 'Song is already being retried.' }, 409);
+  await starting;
+  assert.equal(value.element('rdb-song').disabled, false);
+  assert.match(value.element('rds-song').textContent, /already being retried/);
+});
+
+test('album track list exposes a retry action for each individual song', () => {
+  const value = fixture();
+  value.run(`DashboardBrowserPlayer = { button() { return ''; } }; setupDropzone = () => {};
+    renderAlbumDetail({ id: 'album', title: 'Album', artist: 'Artist', isDownloaded: true,
+      recordings: [{ id: 'song', title: 'Song', fileExists: false }] });`);
+  const markup = value.element('album-detail-content').innerHTML;
+  assert.match(markup, /retry song/);
+  assert.match(markup, /retry this song up to 5 times/);
+  assert.match(markup, /confirmRedownload\('album','song'\)/);
+});
+
+test('song retry status displays attempt counts and unlocks its button on exhaustion', async () => {
+  const value = fixture();
+  value.element('rdb-song').disabled = true;
+  value.run("pollRedownloadStatus('album', 'song')");
+  value.requests[0].respond({ state: 'downloading', message: 'attempt 1/6 (up to 5 retries)' });
+  await settle();
+  assert.match(value.element('rds-song').textContent, /attempt 1\/6/);
+  value.timers[0]();
+  value.requests[1].respond({ state: 'error', message: 'Song download failed after 5 retries.' });
+  await settle();
+  assert.match(value.element('rds-song').textContent, /failed after 5 retries/);
+  assert.equal(value.element('rdb-song').disabled, false);
 });

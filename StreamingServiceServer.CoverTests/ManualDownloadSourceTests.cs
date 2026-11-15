@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -199,6 +201,56 @@ public sealed class ManualDownloadSourceTests
         Assert.IsType<NotFoundObjectResult>(await fixture.Controller.SearchSlskdSources(fixture.AlbumIdentifier, new(), default));
         Assert.IsType<NotFoundObjectResult>(await fixture.Controller.AddSlskdSource(fixture.AlbumIdentifier, Request(), default));
         Assert.Empty(fixture.Handler.Submissions);
+    }
+
+    [PostgresFact]
+    public async Task SingleSongRetryRejectsARecordingFromAnotherAlbum()
+    {
+        await using var fixture = await ManualSourceFixture.CreateAsync();
+        var recording = await AddRecordingAsync(fixture);
+        Assert.IsType<NotFoundObjectResult>(await fixture.Controller.StartRecordingRedownload(
+            Guid.NewGuid(), recording.Id, default));
+        Assert.Empty(fixture.Handler.Submissions);
+    }
+
+    [PostgresFact]
+    public async Task SingleSongRetryRejectsDuplicateActiveJobsAndScopesStatusToItsAlbum()
+    {
+        await using var fixture = await ManualSourceFixture.CreateAsync();
+        var recording = await AddRecordingAsync(fixture);
+        var jobs = (ConcurrentDictionary<Guid, RecordingRedownloadJob>)typeof(DashboardController)
+            .GetField("_recordingJobs", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        jobs[recording.Id] = new RecordingRedownloadJob { AlbumIdentifier = recording.Release.Id, State = "downloading" };
+        try
+        {
+            Assert.IsType<ConflictObjectResult>(await fixture.Controller.StartRecordingRedownload(
+                recording.Release.Id, recording.Id, default));
+            Assert.Equal("idle", Json(fixture.Controller.GetRecordingRedownloadStatus(Guid.NewGuid(), recording.Id))
+                .GetProperty("state").GetString());
+            Assert.Equal("downloading", Json(fixture.Controller.GetRecordingRedownloadStatus(recording.Release.Id, recording.Id))
+                .GetProperty("State").GetString());
+            Assert.Empty(fixture.Handler.Submissions);
+        }
+        finally
+        {
+            jobs.TryRemove(recording.Id, out _);
+        }
+    }
+
+    private static async Task<Recording> AddRecordingAsync(ManualSourceFixture fixture)
+    {
+        var recording = new Recording
+        {
+            Id = Guid.NewGuid(), Title = "Song", Cover = "",
+            Release = new Release
+            {
+                Id = Guid.NewGuid(), Title = "Album", Cover = "",
+                Artist = new Artist { Id = Guid.NewGuid(), Name = "Artist", SortName = "Artist" }
+            }
+        };
+        fixture.Database.Recordings.Add(recording);
+        await fixture.Database.SaveChangesAsync();
+        return recording;
     }
 
     private static JsonElement Json(IActionResult result) => JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result).Value);

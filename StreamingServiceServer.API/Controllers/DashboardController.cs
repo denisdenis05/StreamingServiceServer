@@ -16,7 +16,7 @@ namespace StreamingServiceServer.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DashboardController : ControllerBase
+public partial class DashboardController : ControllerBase
 {
     private readonly StreamingDbContext _dbContext;
     private readonly ITorrentHelper _torrentHelper;
@@ -131,6 +131,10 @@ public class DashboardController : ControllerBase
                 string state = "waiting";
                 long size = 0;
 
+                pendingMap.TryGetValue(rel.Id, out var pendingSource);
+                sourceName = pendingSource?.SourceName;
+                providerName = pendingSource?.ProviderName;
+
                 if (failedIds.Contains(rel.Id))
                 {
                     status = "failed";
@@ -179,6 +183,7 @@ public class DashboardController : ControllerBase
                     status = status,
                     sourceName = sourceName is null ? null : SlskdSourceIdentity.DisplayName(sourceName),
                     providerName = providerName,
+                    hasDownloadSource = !string.IsNullOrWhiteSpace(sourceName),
                     progress = Math.Min(1.0, Math.Max(0.0, progress)),
                     state = state,
                     size = size
@@ -200,13 +205,17 @@ public class DashboardController : ControllerBase
         try
         {
             var failedList = await _dbContext.FailedDownloads.ToListAsync(cancellationToken);
+            var sourcedAlbums = (await _dbContext.PendingDownloads
+                .Where(pending => pending.SourceName != "").Select(pending => pending.Id)
+                .ToListAsync(cancellationToken)).ToHashSet();
             var result = failedList.Select(f => new
             {
                 id = f.Id,
                 title = f.Title,
                 artist = f.Artist,
                 status = "failed",
-                state = "failed"
+                state = "failed",
+                hasDownloadSource = sourcedAlbums.Contains(f.Id)
             });
             return Ok(result);
         }
@@ -538,11 +547,15 @@ public class DashboardController : ControllerBase
         }
         if (searchResult is null)
             return StatusCode(StatusCodes.Status502BadGateway, new { message = "slskd search is unavailable, expired, or access was rejected. Requeue the album if its search was removed." });
-        if (searchResult.Responses == null || searchResult.Responses.Count == 0)
-            return Ok(new { sources = Array.Empty<object>(), currentUsername, importIdentifier = pending.ImportIdentifier });
+        return Ok(new { sources = BuildSlskdSourceChoices(searchResult, currentSource), currentUsername,
+            importIdentifier = pending.ImportIdentifier });
+    }
 
+    private static IReadOnlyList<object> BuildSlskdSourceChoices(
+        StreamingServiceDownloader.Models.Slskd.SlskdSearchResult searchResult, SlskdSourceIdentity? currentSource = null)
+    {
         var rows = new List<(bool hasFreeSlots, long uploadSpeedBps, object dto)>();
-        foreach (var response in searchResult.Responses)
+        foreach (var response in (searchResult.Responses ?? []))
         {
             if (string.IsNullOrWhiteSpace(response.Username) || response.Files == null || response.Files.Count == 0)
                 continue;
@@ -554,7 +567,7 @@ public class DashboardController : ControllerBase
             foreach (var group in dirGroups)
             {
                 var audioFiles = group
-                    .Where(f => f.Filename != null && !f.IsLocked &&
+                    .Where(f => f.Filename != null && !f.IsLocked && f.Size > 0 &&
                                 _audioExtensions.Contains(Path.GetExtension(f.Filename)))
                     .ToList();
 
@@ -580,7 +593,7 @@ public class DashboardController : ControllerBase
                     uploadSpeedBps = response.UploadSpeed,
                     hasFreeSlots = response.FreeUploadSlots > 0,
                     freeUploadSlots = response.FreeUploadSlots,
-                    isCurrentSource = response.Username == currentUsername
+                    isCurrentSource = currentSource is not null && response.Username == currentSource.Username
                         && SlskdSourceIdentity.NormalizePath(group.Key) == SlskdSourceIdentity.NormalizePath(currentSource.DirectoryPath),
                     files = audioFiles.Select(f => new { filename = f.Filename, size = f.Size }).ToList()
                 };
@@ -594,7 +607,7 @@ public class DashboardController : ControllerBase
             .Select(r => r.dto)
             .ToList();
 
-        return Ok(new { sources, currentUsername, importIdentifier = pending.ImportIdentifier });
+        return sources;
     }
 
     private async Task<bool> ConfigureDashboardSoulseekAsync(CancellationToken cancellationToken)

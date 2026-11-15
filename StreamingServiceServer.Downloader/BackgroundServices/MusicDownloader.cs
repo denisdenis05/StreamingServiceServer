@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 using StreamingServiceDownloader.Helpers;
+using StreamingServiceDownloader.Importing;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
 
@@ -56,6 +59,20 @@ public class MusicDownloader : BackgroundService
 
         foreach (var album in albumsToDownload)
         {
+            IAsyncDisposable ownership;
+            try
+            {
+                var musicRoot = scope.ServiceProvider.GetRequiredService<IConfiguration>()["Music:Path"] ?? "./Music";
+                ownership = await new AudioImportJournal(musicRoot, album.Id, "automatic-source").AcquireAsync(cancellationToken);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+            await using var albumOwnership = ownership;
+            if (!await dbContext.ReleasesToDownload.AnyAsync(release => release.Id == album.Id
+                && !dbContext.PendingDownloads.Any(pending => pending.Id == release.Id)
+                && !dbContext.FailedDownloads.Any(failed => failed.Id == release.Id), cancellationToken)) continue;
             bool downloadStarted = false;
 
             foreach (var (provider, config) in providers)

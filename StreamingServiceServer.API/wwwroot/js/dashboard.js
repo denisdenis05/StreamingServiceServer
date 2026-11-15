@@ -462,7 +462,10 @@ function renderQueueTable() {
 
   container.innerHTML = state.queued.map(item => {
     const isSlskd = item.providerName === 'Soulseek' && item.sourceName && item.sourceName.startsWith('slskd:');
-    const changeSourceBtn = isSlskd && item.status === 'downloading'
+    const hasDownloadSource = item.hasDownloadSource ?? Boolean(item.sourceName);
+    const changeSourceBtn = !hasDownloadSource
+      ? `<button onclick="openSlskdSourcesModal('${item.id}', true)" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">add source manually</button>`
+      : isSlskd && item.status === 'downloading'
       ? `<button onclick="openSlskdSourcesModal('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">change source</button>`
       : '';
     return `
@@ -520,6 +523,7 @@ function renderFailedTable() {
         </td>
         <td onclick="event.stopPropagation()">
           <button onclick="handleRequeue('${item.id}')" class="btn-cta" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;">requeue</button>
+          ${!item.hasDownloadSource ? `<button onclick="openSlskdSourcesModal('${item.id}', true)" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">add source manually</button>` : ''}
           <button onclick="handleDeleteAlbum('${item.id}')" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">delete</button>
         </td>
       </tr>
@@ -620,9 +624,9 @@ function renderAlbumDetail(album) {
               <span style="font-size: 0.85rem; color: var(--text-muted);">${dur}</span>
               <span class="track-redownload-area" style="margin-left: auto; display: flex; align-items: center; gap: 0.4rem;">
                 ${DashboardBrowserPlayer.button({ identifier: track.id, title: track.title, artist: album.artist, available: !isMissing }, escapeHtml)}
-                <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="${isMissing ? 'Download missing track' : 'Re-download this track'}" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">↻</button>
+                <button id="rdb-${track.id}" onclick="showRedownloadConfirm('${album.id}','${track.id}')" class="btn-secondary" title="Download this song with up to 5 retries" style="padding: 0.15rem 0.45rem; font-size: 0.78rem; color: var(--text-muted);">retry song</button>
                 <span id="rdc-${track.id}" style="display:none; align-items:center; gap:0.35rem; font-size:0.8rem;">
-                  <span style="color:var(--text-muted);">${isMissing ? 'download?' : 'redownload?'}</span>
+                  <span style="color:var(--text-muted);">retry this song up to 5 times?</span>
                   <button onclick="confirmRedownload('${album.id}','${track.id}')" class="btn-cta" style="padding:0.15rem 0.45rem; font-size:0.78rem;">yes</button>
                   <button onclick="hideRedownloadConfirm('${track.id}')" class="btn-secondary" style="padding:0.15rem 0.45rem; font-size:0.78rem;">no</button>
                 </span>
@@ -2505,6 +2509,9 @@ function hideRedownloadConfirm(recordingId) {
 }
 
 async function confirmRedownload(albumId, recordingId) {
+  const retryButton = document.getElementById(`rdb-${recordingId}`);
+  if (retryButton?.disabled) return;
+  if (retryButton) retryButton.disabled = true;
   hideRedownloadConfirm(recordingId);
   const statusEl = document.getElementById(`rds-${recordingId}`);
   if (statusEl) { statusEl.style.display = 'inline'; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '⟳ starting…'; }
@@ -2514,11 +2521,13 @@ async function confirmRedownload(albumId, recordingId) {
     if (!res.ok) {
       const d = await parseJsonResponse(res);
       if (statusEl) { statusEl.textContent = `✗ ${d.message || 'failed'}`; statusEl.style.color = '#c62828'; }
+      if (retryButton) retryButton.disabled = false;
       return;
     }
     pollRedownloadStatus(albumId, recordingId);
   } catch (err) {
     if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.style.color = '#c62828'; }
+    if (retryButton) retryButton.disabled = false;
   }
 }
 
@@ -2547,16 +2556,24 @@ function pollRedownloadStatus(albumId, recordingId) {
       }
 
       if (data.state === 'complete') {
+        const retryButton = document.getElementById(`rdb-${recordingId}`);
+        if (retryButton) retryButton.disabled = false;
         // Update track item styling: remove missing indicator
         const item = document.getElementById(`track-item-${recordingId}`);
         if (item) { item.style.backgroundColor = ''; item.style.borderLeft = ''; item.style.paddingLeft = ''; }
         return;
       }
-      if (data.state === 'error') return;
+      if (data.state === 'error' || data.state === 'idle') {
+        const retryButton = document.getElementById(`rdb-${recordingId}`);
+        if (retryButton) retryButton.disabled = false;
+        return;
+      }
 
       setTimeout(tick, 3000);
     } catch (err) {
       if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.style.color = '#c62828'; }
+      const retryButton = document.getElementById(`rdb-${recordingId}`);
+      if (retryButton) retryButton.disabled = false;
     }
   };
 
@@ -2570,6 +2587,9 @@ let _slskdSourcesData = [];
 let _slskdSourcesImportIdentifier = null;
 let _slskdSourcesGeneration = 0;
 let _slskdSourceChanging = false;
+let _slskdSourcesAdding = false;
+let _slskdSourcesSearchIdentifier = null;
+let _slskdSourcesLoading = false;
 
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -2579,12 +2599,19 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-function openSlskdSourcesModal(albumId) {
+function openSlskdSourcesModal(albumId, adding = false) {
+  if (!isAdmin()) { openAuthModal(); return; }
   _slskdSourcesGeneration++;
   _slskdSourceChanging = false;
   _slskdSourcesImportIdentifier = null;
   _slskdSourcesAlbumId = albumId;
   _slskdSourcesData = [];
+  _slskdSourcesAdding = adding;
+  _slskdSourcesLoading = false;
+  _slskdSourcesSearchIdentifier = null;
+  updateSlskdSourcesMode();
+  const album = state.queued.find(item => item.id === albumId) || state.failed.find(item => item.id === albumId);
+  document.getElementById('slskd-sources-query').value = album ? `${album.artist} ${album.title}` : '';
 
   const modal = document.getElementById('slskd-sources-modal');
   const loading = document.getElementById('slskd-sources-loading');
@@ -2610,27 +2637,59 @@ function closeSlskdSourcesModal() {
   if (modal) modal.style.display = 'none';
   _slskdSourcesAlbumId = null;
   _slskdSourcesData = [];
+  _slskdSourcesSearchIdentifier = null;
+}
+
+function updateSlskdSourcesMode() {
+  document.getElementById('slskd-sources-title').textContent = _slskdSourcesAdding ? 'add download source manually' : 'change download source';
+  document.getElementById('slskd-sources-description').textContent = _slskdSourcesAdding
+    ? 'Search Soulseek and choose an album directory. Adding a source moves a failed album back into the download queue.'
+    : 'Select a different source from the original Soulseek search. The current download will be cancelled and the new one queued.';
+  document.getElementById('slskd-sources-search-form').style.display = _slskdSourcesAdding ? 'flex' : 'none';
+}
+
+function searchSlskdSources() {
+  if (_slskdSourceChanging || _slskdSourcesLoading || !_slskdSourcesAlbumId) return;
+  return loadSlskdSources(_slskdSourcesAlbumId);
 }
 
 async function loadSlskdSources(albumId) {
-  const generation = _slskdSourcesGeneration;
+  const generation = ++_slskdSourcesGeneration;
+  _slskdSourceChanging = false;
+  _slskdSourcesLoading = true;
+  const adding = _slskdSourcesAdding;
+  _slskdSourcesData = [];
+  _slskdSourcesImportIdentifier = null;
+  _slskdSourcesSearchIdentifier = null;
   const loading = document.getElementById('slskd-sources-loading');
   const container = document.getElementById('slskd-sources-container');
   const empty = document.getElementById('slskd-sources-empty');
   const tbody = document.getElementById('slskd-sources-table-body');
+  const searchButton = document.getElementById('slskd-sources-search-button');
+  loading.style.display = 'block';
+  loading.textContent = adding ? 'searching Soulseek…' : 'loading sources…';
+  container.style.display = 'none';
+  empty.style.display = 'none';
+  searchButton.disabled = true;
 
   try {
-    const res = await authFetch(`${API_BASE}/album/${albumId}/slskd-sources`);
+    const res = adding
+      ? await authFetch(`${API_BASE}/album/${albumId}/slskd-source-search`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: document.getElementById('slskd-sources-query').value.trim() })
+      })
+      : await authFetch(`${API_BASE}/album/${albumId}/slskd-sources`);
     const data = await parseJsonResponse(res);
     if (_slskdSourcesAlbumId !== albumId || _slskdSourcesGeneration !== generation) return;
     if (!res.ok) throw new Error(data.message || `Could not load sources (HTTP ${res.status}).`);
     _slskdSourcesImportIdentifier = data.importIdentifier;
+    _slskdSourcesSearchIdentifier = data.searchIdentifier || null;
 
     loading.style.display = 'none';
 
     if (!res.ok || !data.sources || data.sources.length === 0) {
       container.style.display = 'none';
-      empty.textContent = 'No sources are available in the stored slskd search.';
+      empty.textContent = adding ? 'No sources found. Try different search terms.' : 'No sources are available in the stored slskd search.';
       empty.style.display = 'block';
       return;
     }
@@ -2673,6 +2732,11 @@ async function loadSlskdSources(albumId) {
     loading.style.display = 'none';
     empty.style.display = 'block';
     empty.textContent = `error loading sources: ${err.message}`;
+  } finally {
+    if (_slskdSourcesAlbumId === albumId && _slskdSourcesGeneration === generation) {
+      searchButton.disabled = false;
+      _slskdSourcesLoading = false;
+    }
   }
 }
 
@@ -2681,23 +2745,28 @@ async function selectSlskdSource(idx) {
   const albumId = _slskdSourcesAlbumId;
   const generation = _slskdSourcesGeneration;
   const importIdentifier = _slskdSourcesImportIdentifier;
-  if (!src || !albumId || !importIdentifier || _slskdSourceChanging) return;
+  const adding = _slskdSourcesAdding;
+  const searchIdentifier = _slskdSourcesSearchIdentifier;
+  if (!src || !albumId || !importIdentifier || (adding && !searchIdentifier) || _slskdSourceChanging) return;
   _slskdSourceChanging = true;
   const container = document.getElementById('slskd-sources-container');
   container.querySelectorAll('button').forEach(button => { button.disabled = true; });
   const status = document.getElementById('slskd-sources-status');
-  status.textContent = 'switching source…';
+  document.getElementById('slskd-sources-search-button').disabled = true;
+  status.textContent = adding ? 'adding source…' : 'switching source…';
   status.style.color = 'var(--text-muted)';
 
   try {
-    const res = await authFetch(`${API_BASE}/album/${albumId}/change-slskd-source`, {
+    const endpoint = adding ? 'add-slskd-source' : 'change-slskd-source';
+    const res = await authFetch(`${API_BASE}/album/${albumId}/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: src.username,
         directoryPath: src.directoryPath,
         files: src.files,
-        expectedImportIdentifier: importIdentifier
+        expectedImportIdentifier: importIdentifier,
+        ...(adding ? { searchIdentifier } : {})
       })
     });
     const data = await parseJsonResponse(res);
@@ -2705,6 +2774,12 @@ async function selectSlskdSource(idx) {
     if (res.ok) {
       status.textContent = [data.message || 'source changed successfully.', data.warning].filter(Boolean).join(' ');
       status.style.color = data.warning ? 'var(--accent-terracotta)' : '#388e3c';
+      if (adding) {
+        state.failed = state.failed.filter(item => item.id !== albumId);
+        renderFailedTable();
+        _slskdSourcesAdding = false;
+        updateSlskdSourcesMode();
+      }
       await fetchQueued();
       if (_slskdSourcesAlbumId === albumId && _slskdSourcesGeneration === generation) await loadSlskdSources(albumId);
     } else {
@@ -2721,6 +2796,7 @@ async function selectSlskdSource(idx) {
     if (_slskdSourcesAlbumId === albumId && _slskdSourcesGeneration === generation) {
       _slskdSourceChanging = false;
       container.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      document.getElementById('slskd-sources-search-button').disabled = false;
     }
   }
 }

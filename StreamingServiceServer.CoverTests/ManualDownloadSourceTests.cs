@@ -237,6 +237,41 @@ public sealed class ManualDownloadSourceTests
         }
     }
 
+    [PostgresFact]
+    public async Task QueueExposesDurableFinalizationErrorsWithoutOldWorkerLogs()
+    {
+        await using var fixture = await ManualSourceFixture.CreateAsync();
+        await fixture.Controller.AddSlskdSource(fixture.AlbumIdentifier, Request(), default);
+        var pending = await fixture.Database.PendingDownloads.SingleAsync();
+        var diagnostics = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        await Assert.ThrowsAsync<IOException>(() => diagnostics.TrackAsync(async report =>
+        {
+            await report(AudioImportPhase.CleaningProvider, null, default);
+            throw new IOException("slskd cleanup unavailable");
+        }, default));
+        var queued = Json(await fixture.Controller.GetQueuedAlbums(default));
+        var progress = queued[0].GetProperty("importProgress");
+        Assert.Equal("CleaningProvider", progress.GetProperty("Phase").GetString());
+        Assert.Equal("slskd cleanup unavailable", progress.GetProperty("LastError").GetString());
+        Assert.True(await fixture.Database.PendingDownloads.AnyAsync());
+        Assert.True(await fixture.Database.ReleasesToDownload.AnyAsync());
+    }
+
+    [PostgresFact]
+    public async Task CorruptImportStatusDoesNotHideTheQueuedAlbum()
+    {
+        await using var fixture = await ManualSourceFixture.CreateAsync();
+        await fixture.Controller.AddSlskdSource(fixture.AlbumIdentifier, Request(), default);
+        var pending = await fixture.Database.PendingDownloads.SingleAsync();
+        var diagnostics = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        await diagnostics.TrackAsync(report => Task.FromResult(new AudioImportResult(1, 0, false)), default);
+        var path = Directory.GetFiles(fixture.MusicRoot, "*.status.json", SearchOption.AllDirectories).Single();
+        await File.WriteAllTextAsync(path, "invalid json");
+        var queued = Json(await fixture.Controller.GetQueuedAlbums(default));
+        Assert.Equal(1, queued.GetArrayLength());
+        Assert.Equal("Unavailable", queued[0].GetProperty("importProgress").GetProperty("Phase").GetString());
+    }
+
     private static async Task<Recording> AddRecordingAsync(ManualSourceFixture fixture)
     {
         var recording = new Recording

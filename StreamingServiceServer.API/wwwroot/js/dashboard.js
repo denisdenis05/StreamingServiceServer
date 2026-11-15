@@ -463,6 +463,13 @@ function renderQueueTable() {
   container.innerHTML = state.queued.map(item => {
     const isSlskd = item.providerName === 'Soulseek' && item.sourceName && item.sourceName.startsWith('slskd:');
     const hasDownloadSource = item.hasDownloadSource ?? Boolean(item.sourceName);
+    const importProgress = item.importProgress;
+    const finalizationPhases = ['Finalizing', 'RemovingSourceFiles', 'CleaningProvider', 'RemovingQueue'];
+    const statusLabel = importProgress
+      ? importProgress.lastError ? 'import error'
+        : importProgress.phase === 'Completed' ? 'completed'
+        : finalizationPhases.includes(importProgress.phase) ? 'finalizing' : 'importing'
+      : item.status === 'downloading' && item.progress >= 1 ? 'awaiting import' : item.status;
     const changeSourceBtn = !hasDownloadSource
       ? `<button onclick="openSlskdSourcesModal('${item.id}', true)" class="btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem; margin-left: 0.3rem;">add source manually</button>`
       : isSlskd && item.status === 'downloading'
@@ -476,8 +483,12 @@ function renderQueueTable() {
         <td>${item.artist}</td>
         <td>
           <span class="album-badge ${item.status === 'downloading' ? 'badge-terracotta' : (item.status === 'failed' ? 'badge-slate' : 'badge-ochre')}">
-            ${item.status} ${item.status === 'downloading' ? `(${Math.round(item.progress * 100)}%)` : ''}
+            ${escapeHtml(statusLabel)} ${statusLabel === 'downloading' ? `(${Math.round(item.progress * 100)}%)` : ''}
           </span>
+          ${item.importProgress ? `
+            <div style="margin-top:0.4rem; font-size:0.8rem; color:var(--text-muted);">${escapeHtml(item.importProgress.description)}</div>
+            ${item.importProgress.lastError ? `<div role="status" style="margin-top:0.3rem; font-size:0.8rem; color:var(--accent-terracotta);">${escapeHtml(item.importProgress.lastError)}. The album stays queued until import and finalization succeed.</div>` : ''}
+          ` : item.status === 'downloading' && item.progress >= 1 ? '<div style="margin-top:0.4rem; font-size:0.8rem; color:var(--text-muted);">Download complete; waiting for import.</div>' : ''}
         </td>
         <td>${escapeHtml(item.sourceName || '—')}</td>
         <td onclick="event.stopPropagation()">

@@ -11,6 +11,7 @@ public sealed class AudioImportState
     public string SourceDirectory { get; set; } = string.Empty;
     public bool CleanupPending { get; set; }
     public bool CleanupCompleted { get; set; }
+    public string? LastPublicationError { get; set; }
 }
 
 public sealed record AudioImportResult(int ExpectedTracks, int PublishedTracks, bool Complete);
@@ -29,15 +30,21 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
         Func<CancellationToken, Task> cleanupSource,
         Func<CancellationToken, Task> removeQueue,
         CancellationToken cancellationToken,
-        Func<CancellationToken, Task>? requireCurrent = null)
+        Func<CancellationToken, Task>? requireCurrent = null,
+        Func<AudioImportPhase, AudioImportState?, CancellationToken, Task>? reportProgress = null)
     {
+        Task Report(AudioImportPhase phase, AudioImportState? current) =>
+            reportProgress?.Invoke(phase, current, cancellationToken) ?? Task.CompletedTask;
         await using var ownership = await journal.AcquireAsync(cancellationToken);
         if (requireCurrent is not null) await requireCurrent(cancellationToken);
+        await Report(AudioImportPhase.ReadingJournal, null);
         var state = await journal.ReadAsync(cancellationToken);
         if (state is null)
         {
+            await Report(AudioImportPhase.CheckingSource, null);
             if ((File.GetAttributes(sourceDirectory) & FileAttributes.Directory) == 0)
                 throw new IOException("Audio import source is not a directory.");
+            await Report(AudioImportPhase.ReadingMetadata, null);
             var expected = await readExpected(cancellationToken);
             state = new AudioImportState { Expected = expected.ToList(), SourceDirectory = Path.GetFullPath(sourceDirectory) };
             Validate(state);
@@ -56,6 +63,8 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
             var remaining = state.Expected.Where(recording => !healthy.Any(publication => publication.RecordingIdentifier == recording.Id)).ToList();
             if (remaining.Count > 0)
             {
+                state.LastPublicationError = null;
+                await Report(AudioImportPhase.ImportingTracks, state);
                 var usedSources = healthy.Select(publication => publication.SourcePath).ToHashSet(StringComparer.Ordinal);
                 var candidates = (await readCandidates(state.SourceDirectory, cancellationToken))
                     .Where(candidate => !usedSources.Contains(Path.GetFullPath(candidate.fullPath))).ToList();
@@ -71,10 +80,14 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
                     catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or TagLib.CorruptFileException or TagLib.UnsupportedFormatException)
                     {
                         reportFailure(match.Recording.Id, failure);
+                        state.LastPublicationError = AudioImportDiagnostics.DescribeFailure(failure);
+                        await journal.WriteAsync(state, cancellationToken);
+                        await Report(AudioImportPhase.ImportingTracks, state);
                         continue;
                     }
                     state.Published.Add(publication);
                     await journal.WriteAsync(state, cancellationToken);
+                    await Report(AudioImportPhase.ImportingTracks, state);
                 }
             }
             if (state.Published.Count != state.Expected.Count)
@@ -82,23 +95,28 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
             if (!state.Published.All(files.IsPublished)) throw new IOException("An imported track changed before album completion.");
             if (!state.CleanupPending)
             {
+                await Report(AudioImportPhase.SavingMetadata, state);
                 await saveMetadata(state.Expected, cancellationToken);
                 state.CleanupPending = true;
                 await journal.WriteAsync(state, cancellationToken);
             }
             if (requireCurrent is not null) await requireCurrent(cancellationToken);
+            await Report(AudioImportPhase.RemovingSourceFiles, state);
             foreach (var publication in state.Published) await files.RemoveSourceAsync(publication, cancellationToken);
+            await Report(AudioImportPhase.CleaningProvider, state);
             await cleanupSource(cancellationToken);
             state.CleanupCompleted = true;
             await journal.WriteAsync(state, cancellationToken);
         }
         if (!state.Published.All(files.IsPublished)) throw new IOException("Imported audio is unavailable before queue removal.");
         if (requireCurrent is not null) await requireCurrent(cancellationToken);
+        await Report(AudioImportPhase.RemovingQueue, state);
         await removeQueue(cancellationToken);
+        await Report(AudioImportPhase.Completed, state);
         return new AudioImportResult(state.Expected.Count, state.Published.Count, true);
     }
 
-    private static void Validate(AudioImportState state)
+    internal static void Validate(AudioImportState state)
     {
         if (state.Version != JournalVersion || state.Expected is null || state.Published is null
             || !Path.IsPathFullyQualified(state.SourceDirectory)

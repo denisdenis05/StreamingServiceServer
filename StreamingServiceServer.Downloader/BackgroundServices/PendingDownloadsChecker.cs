@@ -337,7 +337,7 @@ public class PendingDownloadChecker : BackgroundService
             ? SlskdSourceIdentity.Parse(item.SourceName, item.SavePath)?.Encode() ?? item.SourceName : item.SourceName;
 
     private AudioImportJournal CreateImportJournal(StreamingServiceServer.Data.Models.PendingDownload item) =>
-        new(_musicLocation, item.Id, System.Text.Json.JsonSerializer.Serialize(new[] { item.ProviderName ?? "Torrent", item.SourceName, item.ImportIdentifier.ToString() }));
+        AudioImportDiagnostics.CreateJournal(_musicLocation, item);
 
     private async Task ImportAlbumAsync(StreamingServiceServer.Data.Models.PendingDownload item, string sourceDirectory,
         StreamingDbContext database, IMetadataService metadataService, IExternalMusicSearchService metadataSource,
@@ -352,7 +352,9 @@ public class PendingDownloadChecker : BackgroundService
                 && current.ImportIdentifier == item.ImportIdentifier, token))
                 throw new IOException("The pending import source changed.");
         }
-        var result = await coordinator.RunAsync(sourceDirectory,
+        var diagnostics = new AudioImportDiagnostics(_musicLocation, item,
+            failure => Console.WriteLine($"[PendingDownloadChecker] Could not save import status for {item.Id}: {failure.Message}"));
+        var result = await diagnostics.TrackAsync(reportProgress => coordinator.RunAsync(sourceDirectory,
             async token => (await metadataSource.SearchAlbumRecordingsByIdAsync(item.Id).WaitAsync(token))
                 .Select(recording => AudioImportCatalog.CreateExpected(recording, images)).ToArray(),
             (directory, token) => { token.ThrowIfCancellationRequested(); return Task.FromResult(GetMusicFilesInSavePath(directory)); },
@@ -366,7 +368,7 @@ public class PendingDownloadChecker : BackgroundService
                 AudioImportCatalog.RequireMatchingDestinations(expected, saved);
             },
             async token => { await RequireCurrent(token); await cleanup(); token.ThrowIfCancellationRequested(); },
-            token => RemoveAlbumFromDatabaseQueues(item, database, token), cancellationToken, RequireCurrent);
+            token => RemoveAlbumFromDatabaseQueues(item, database, token), cancellationToken, RequireCurrent, reportProgress), cancellationToken);
         if (result.Complete) _stallTrackers.TryRemove(item.Id, out _);
         else Console.WriteLine($"[PendingDownloadChecker] {result.PublishedTracks}/{result.ExpectedTracks} tracks published for {item.Id}; source and queue retained.");
     }

@@ -217,6 +217,80 @@ public sealed class AudioImportSafetyTests
         Assert.Equal(2, fixture.QueueRemovals);
     }
 
+    [Theory]
+    [InlineData(AudioImportPhase.SavingMetadata, "metadata unavailable")]
+    [InlineData(AudioImportPhase.CleaningProvider, "provider unavailable")]
+    [InlineData(AudioImportPhase.RemovingQueue, "database unavailable")]
+    public async Task ImportFailureRemainsVisibleAfterRestartWithoutItsOldLogs(AudioImportPhase phase, string message)
+    {
+        using var fixture = new ImportFixture();
+        var pending = new PendingDownload { Id = fixture.Album, SourceName = "source", ProviderName = "Soulseek" };
+        fixture.JournalOverride = AudioImportDiagnostics.CreateJournal(fixture.MusicRoot, pending);
+        fixture.FailMetadata = phase == AudioImportPhase.SavingMetadata;
+        fixture.FailCleanup = phase == AudioImportPhase.CleaningProvider;
+        fixture.FailQueueRemoval = phase == AudioImportPhase.RemovingQueue;
+        var diagnostics = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        await Assert.ThrowsAsync<IOException>(() => diagnostics.TrackAsync(report => fixture.RunAsync(reportProgress: report), default));
+        var restarted = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        var progress = await restarted.ReadAsync(default);
+        Assert.Equal(phase, progress!.Phase);
+        Assert.Equal(message, progress.LastError);
+        Assert.Equal(2, progress.ExpectedTracks);
+        Assert.Equal(2, progress.PublishedTracks);
+        fixture.FailMetadata = fixture.FailCleanup = fixture.FailQueueRemoval = false;
+        Assert.True((await restarted.TrackAsync(report => fixture.RunAsync(reportProgress: report), default)).Complete);
+        progress = await restarted.ReadAsync(default);
+        Assert.Equal(AudioImportPhase.Completed, progress!.Phase);
+        Assert.Null(progress.LastError);
+        Assert.Equal(1, fixture.Publisher.Calls[fixture.First.Id]);
+    }
+
+    [Fact]
+    public async Task IndividualPublicationErrorIsRetainedWithPartialTrackCount()
+    {
+        using var fixture = new ImportFixture();
+        var pending = new PendingDownload { Id = fixture.Album, SourceName = "source" };
+        fixture.Publisher.FailIdentifier = fixture.Second.Id;
+        var diagnostics = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        var result = await diagnostics.TrackAsync(report => fixture.RunAsync(reportProgress: report), default);
+        Assert.False(result.Complete);
+        var progress = await diagnostics.ReadAsync(default);
+        Assert.Equal(AudioImportPhase.ImportingTracks, progress!.Phase);
+        Assert.Equal("disk unavailable", progress.LastError);
+        Assert.Equal(1, progress.PublishedTracks);
+        Assert.Equal(0, fixture.QueueRemovals);
+    }
+
+    [Fact]
+    public async Task MissingSourceFailureBeforeJournalCreationIsPersisted()
+    {
+        using var fixture = new ImportFixture();
+        Directory.Delete(fixture.SourceRoot, recursive: true);
+        var pending = new PendingDownload { Id = fixture.Album, SourceName = "source" };
+        var diagnostics = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        await Assert.ThrowsAnyAsync<IOException>(() => diagnostics.TrackAsync(report => fixture.RunAsync(reportProgress: report), default));
+        Assert.Null(await fixture.Journal().ReadAsync(default));
+        var progress = await diagnostics.ReadAsync(default);
+        Assert.Equal(AudioImportPhase.CheckingSource, progress!.Phase);
+        Assert.False(string.IsNullOrWhiteSpace(progress.LastError));
+    }
+
+    [Fact]
+    public async Task OlderJournalIdentifiesUnfinishedCleanupWithoutInventingAMissingError()
+    {
+        using var fixture = new ImportFixture();
+        var pending = new PendingDownload { Id = fixture.Album, SourceName = "source" };
+        fixture.JournalOverride = AudioImportDiagnostics.CreateJournal(fixture.MusicRoot, pending);
+        fixture.FailCleanup = true;
+        await Assert.ThrowsAsync<IOException>(() => fixture.RunAsync());
+        var diagnostics = new AudioImportDiagnostics(fixture.MusicRoot, pending);
+        var progress = await diagnostics.ReadAsync(default);
+        Assert.Equal(AudioImportPhase.Finalizing, progress!.Phase);
+        Assert.Equal(2, progress.PublishedTracks);
+        Assert.Null(progress.LastError);
+        Assert.Contains("Tracks imported", progress.Description);
+    }
+
     [Fact]
     public async Task MissingPublishedFileIsRepairedBeforeSourceCleanup()
     {
@@ -410,7 +484,8 @@ public sealed class AudioImportSafetyTests
         public void WriteSources() { WriteWave(FirstPath); WriteSecond(); }
         public string Destination(RecordingResponse recording) => Path.Combine(MusicRoot, "ARTIST", "ALBUM", recording.Id + ".wav");
         public AudioImportJournal Journal() => new(MusicRoot, Album, "fixture-source");
-        public Task<AudioImportResult> RunAsync(Func<CancellationToken, Task>? requireCurrent = null) =>
+        public Task<AudioImportResult> RunAsync(Func<CancellationToken, Task>? requireCurrent = null,
+            Func<AudioImportPhase, AudioImportState?, CancellationToken, Task>? reportProgress = null) =>
             new AudioAlbumImport(JournalOverride ?? Journal(), Publisher, (_, _) => { }).RunAsync(SourceRoot,
                 _ => { ExpectedReads++; return Task.FromResult<IReadOnlyList<RecordingResponse>>(EmptyExpected ? [] : [First, Second]); },
                 (directory, _) =>
@@ -421,7 +496,7 @@ public sealed class AudioImportSafetyTests
                 (expected, _) => { MetadataSaves++; if (FailMetadata) throw new IOException("metadata unavailable"); return Task.CompletedTask; },
                 _ => { CleanupCalls++; if (FailCleanup) throw new IOException("provider unavailable"); return Task.CompletedTask; },
                 _ => { QueueRemovals++; if (FailQueueRemoval) throw new IOException("database unavailable"); return Task.CompletedTask; },
-                default, requireCurrent);
+                default, requireCurrent, reportProgress);
         public void Dispose() => Directory.Delete(root, true);
         private static void WriteWave(string path)
         {

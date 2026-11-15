@@ -11,6 +11,7 @@ using StreamingServiceServer.Business.Helpers;
 using StreamingServiceServer.Business.Models.Dashboard;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Data.Models;
+using StreamingServiceDownloader.Importing;
 
 namespace StreamingServiceServer.API.Controllers;
 
@@ -134,6 +135,20 @@ public partial class DashboardController : ControllerBase
                 pendingMap.TryGetValue(rel.Id, out var pendingSource);
                 sourceName = pendingSource?.SourceName;
                 providerName = pendingSource?.ProviderName;
+                AudioImportProgress? importProgress = null;
+                if (pendingSource is not null)
+                {
+                    try
+                    {
+                        var musicRoot = _configuration["Music:Path"] ?? "./Music";
+                        importProgress = await new AudioImportDiagnostics(musicRoot, pendingSource).ReadAsync(cancellationToken);
+                    }
+                    catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+                    {
+                        _logger.LogWarning(failure, "Could not read import progress for album {AlbumId}", rel.Id);
+                        importProgress = new AudioImportProgress(AudioImportPhase.Unavailable, 0, 0, failure.Message, DateTimeOffset.UtcNow);
+                    }
+                }
 
                 if (failedIds.Contains(rel.Id))
                 {
@@ -184,6 +199,7 @@ public partial class DashboardController : ControllerBase
                     sourceName = sourceName is null ? null : SlskdSourceIdentity.DisplayName(sourceName),
                     providerName = providerName,
                     hasDownloadSource = !string.IsNullOrWhiteSpace(sourceName),
+                    importProgress,
                     progress = Math.Min(1.0, Math.Max(0.0, progress)),
                     state = state,
                     size = size

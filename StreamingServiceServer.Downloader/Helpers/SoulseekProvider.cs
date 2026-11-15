@@ -87,7 +87,7 @@ public class SoulseekProvider : IDownloadProvider
                             candidate.DirectoryPath, candidate.Files);
                         try
                         {
-                            await _slskdHelper.EnsureSelectedFilesEnqueuedAsync(selectedSource, cancellationToken);
+                            await _slskdHelper.StartAlbumDownloadAsync(selectedSource, cancellationToken);
                             downloadEnqueued = true;
                             return new DownloadSearchResult
                             {

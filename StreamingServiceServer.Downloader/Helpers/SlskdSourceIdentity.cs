@@ -64,5 +64,8 @@ public sealed record SlskdSourceIdentity(Guid SearchId, string Username, string 
     public static bool IsFailed(SlskdTransferItem file) =>
         file.State?.Contains("Errored", StringComparison.OrdinalIgnoreCase) == true
         || file.State?.Contains("Cancelled", StringComparison.OrdinalIgnoreCase) == true
-        || file.State?.Contains("Canceled", StringComparison.OrdinalIgnoreCase) == true;
+        || file.State?.Contains("Canceled", StringComparison.OrdinalIgnoreCase) == true
+        || file.State?.Contains("TimedOut", StringComparison.OrdinalIgnoreCase) == true
+        || file.State?.Contains("Rejected", StringComparison.OrdinalIgnoreCase) == true
+        || file.State?.Contains("Aborted", StringComparison.OrdinalIgnoreCase) == true;
 }

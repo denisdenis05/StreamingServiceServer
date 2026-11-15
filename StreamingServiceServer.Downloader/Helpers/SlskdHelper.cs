@@ -8,15 +8,17 @@ namespace StreamingServiceDownloader.Helpers;
 public class SlskdHelper
 {
     private readonly HttpClient _httpClient;
+    private readonly TimeProvider _timeProvider;
     private string _baseUrl = "http://localhost:5030";
     private string _apiKey = "";
     private string _username = "";
     private string _password = "";
     private string? _sessionToken;
 
-    public SlskdHelper(IHttpClientFactory httpClientFactory)
+    public SlskdHelper(IHttpClientFactory httpClientFactory, TimeProvider? timeProvider = null)
     {
         _httpClient = httpClientFactory.CreateClient();
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
@@ -339,6 +341,53 @@ public class SlskdHelper
             throw new HttpRequestException($"slskd has not queued {remaining.Count} of {source.Files.Count} selected files. The previous source is retained; retry the selection.");
     }
 
+    public async Task StartAlbumDownloadAsync(SlskdSourceIdentity source, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EnsureSelectedFilesEnqueuedAsync(source, cancellationToken);
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            var downloads = await GetDownloadsAsync(cancellationToken);
+            if (downloads is null || !downloads.Where(user => user.Username == source.Username)
+                .SelectMany(user => user.Directories ?? [])
+                .Any(directory => (directory.Files ?? []).Any(file => source.Matches(directory, file)))) throw;
+            Console.WriteLine($"[Soulseek] Album transfers retained for '{source.Username}'; missing or failed tracks will retry individually: {failure.Message}");
+        }
+    }
+
+    public async Task<bool> RetryMissingFileAsync(SlskdSourceIdentity source,
+        SoulseekFileRetrySchedule schedule, CancellationToken cancellationToken)
+    {
+        var downloads = await GetDownloadsAsync(cancellationToken)
+            ?? throw new HttpRequestException("Could not read slskd transfers before retrying a track.");
+        if (source.Files.Count == 0)
+        {
+            var user = downloads.FirstOrDefault(candidate => candidate.Username == source.Username);
+            var files = (user?.Directories ?? []).SelectMany(directory => (directory.Files ?? [])
+                .Where(file => source.Matches(directory, file) && SlskdSourceIdentity.IsFailed(file)
+                    && file.Size > 0)
+                .Select(file => new SlskdFileDownloadRequest
+                {
+                    Filename = SlskdSourceIdentity.NormalizePath(file.Filename!).Contains('/')
+                        ? file.Filename! : source.DirectoryPath.TrimEnd('/', '\\') + "/" + file.Filename,
+                    Size = file.Size
+                })).ToArray();
+            source = source with { Files = files };
+        }
+        var missing = source.MissingFiles(downloads);
+        if (missing.Count == 0) return false;
+        var selected = schedule.TakeNext(missing, _timeProvider.GetUtcNow());
+        if (selected is not null)
+        {
+            Console.WriteLine($"[Soulseek] Retrying track '{selected.Filename}' from '{source.Username}'.");
+            await EnqueueSelectedFilesAsync(source.Username, [selected], cancellationToken);
+        }
+        return true;
+    }
+
 
     public async Task<List<SlskdTransferUser>?> GetDownloadsAsync(CancellationToken cancellationToken = default)
     {
@@ -464,4 +513,3 @@ public class SlskdHelper
         catch { }
     }
 }
-

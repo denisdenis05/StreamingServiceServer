@@ -30,6 +30,7 @@ public class PendingDownloadChecker : BackgroundService
         public DateTime LastProgressAt { get; set; } = DateTime.UtcNow;
         public bool HasSeenActiveTransfers { get; set; }
         public int RetryCount { get; set; }
+        public SoulseekFileRetrySchedule FileRetries { get; } = new();
     }
 
     private readonly ConcurrentDictionary<Guid, StallTracker> _stallTrackers = new();
@@ -77,6 +78,9 @@ public class PendingDownloadChecker : BackgroundService
         var imageService = scope.ServiceProvider.GetRequiredService<IImageService>();
 
         var pending = await dbContext.PendingDownloads.ToListAsync(cancellationToken);
+        var pendingIdentifiers = pending.Select(item => item.Id).ToHashSet();
+        foreach (var identifier in _stallTrackers.Keys)
+            if (!pendingIdentifiers.Contains(identifier)) _stallTrackers.TryRemove(identifier, out _);
 
 
         var providers = await configService.GetActiveProvidersOrderedAsync();
@@ -118,6 +122,21 @@ public class PendingDownloadChecker : BackgroundService
                     _ => new StallTracker { ImportIdentifier = item.ImportIdentifier },
                     (_, existing) => existing.ImportIdentifier == item.ImportIdentifier ? existing
                         : new StallTracker { ImportIdentifier = item.ImportIdentifier, RetryCount = existing.RetryCount });
+
+                if (providerEntry.provider is SoulseekProvider && progressInfo.Progress < 1.0)
+                {
+                    await using var ownership = await journal.AcquireAsync(cancellationToken);
+                    if (!await dbContext.PendingDownloads.AnyAsync(current => current.Id == item.Id
+                        && current.ImportIdentifier == item.ImportIdentifier && current.SourceName == item.SourceName,
+                        cancellationToken)) continue;
+                    var source = SlskdSourceIdentity.Parse(item.SourceName, item.SavePath);
+                    if (source is not null && await scope.ServiceProvider.GetRequiredService<SlskdHelper>()
+                        .RetryMissingFileAsync(source, tracker.FileRetries, cancellationToken))
+                    {
+                        tracker.LastProgressAt = DateTime.UtcNow;
+                        continue;
+                    }
+                }
 
                 if (progressInfo.State == "Failed")
                 {

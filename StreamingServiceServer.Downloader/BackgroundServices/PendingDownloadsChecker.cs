@@ -104,7 +104,7 @@ public class PendingDownloadChecker : BackgroundService
                     await ImportAlbumAsync(item, item.SavePath ?? string.Empty, dbContext, metadataService,
                         externalMusicSearchService, imageService,
                         providerEntry.provider is null ? () => CleanUpTorrentAndFilesAsync(item.SourceName)
-                            : () => providerEntry.provider.CleanUpAsync(GetProviderSource(item), true), cancellationToken);
+                            : () => CleanUpCompletedDownloadAsync(providerEntry.provider, item), cancellationToken);
                     continue;
                 }
                 if (providerEntry.provider == null)
@@ -183,7 +183,7 @@ public class PendingDownloadChecker : BackgroundService
                     {
                         await ImportAlbumAsync(item, resolvedSavePath, dbContext, metadataService,
                             externalMusicSearchService, imageService,
-                            () => providerEntry.provider.CleanUpAsync(GetProviderSource(item), true), cancellationToken);
+                            () => CleanUpCompletedDownloadAsync(providerEntry.provider, item), cancellationToken);
                     }
                 }
                 else
@@ -316,7 +316,7 @@ public class PendingDownloadChecker : BackgroundService
         if (string.IsNullOrWhiteSpace(resolvedPath)) return;
 
         await ImportAlbumAsync(item, resolvedPath, dbContext, metadataService, externalMusicSearchService,
-            imageService, () => provider.CleanUpAsync(GetProviderSource(item), true), cancellationToken);
+            imageService, () => CleanUpCompletedDownloadAsync(provider, item), cancellationToken);
     }
 
     private async Task CheckTorrentPendingAsync(StreamingServiceServer.Data.Models.PendingDownload item,
@@ -335,6 +335,15 @@ public class PendingDownloadChecker : BackgroundService
     private static string GetProviderSource(StreamingServiceServer.Data.Models.PendingDownload item) =>
         item.ProviderName == "Soulseek"
             ? SlskdSourceIdentity.Parse(item.SourceName, item.SavePath)?.Encode() ?? item.SourceName : item.SourceName;
+
+    private static async Task CleanUpCompletedDownloadAsync(IDownloadProvider provider,
+        StreamingServiceServer.Data.Models.PendingDownload item)
+    {
+        if (provider is SoulseekProvider soulseek)
+            await soulseek.TryClearCompletedTransfersAsync(GetProviderSource(item));
+        else
+            await provider.CleanUpAsync(GetProviderSource(item), true);
+    }
 
     private AudioImportJournal CreateImportJournal(StreamingServiceServer.Data.Models.PendingDownload item) =>
         new(_musicLocation, item.Id, System.Text.Json.JsonSerializer.Serialize(new[] { item.ProviderName ?? "Torrent", item.SourceName, item.ImportIdentifier.ToString() }));

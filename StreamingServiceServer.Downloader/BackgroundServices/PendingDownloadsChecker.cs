@@ -136,12 +136,9 @@ public class PendingDownloadChecker : BackgroundService
                         && current.ImportIdentifier == item.ImportIdentifier && current.SourceName == item.SourceName,
                         cancellationToken)) continue;
                     var source = SlskdSourceIdentity.Parse(item.SourceName, item.SavePath);
-                    if (source is not null && await scope.ServiceProvider.GetRequiredService<SlskdHelper>()
-                        .RetryMissingFileAsync(source, tracker.FileRetries, cancellationToken))
-                    {
-                        tracker.LastProgressAt = DateTime.UtcNow;
-                        continue;
-                    }
+                    if (source is not null)
+                        await scope.ServiceProvider.GetRequiredService<SlskdHelper>()
+                            .TryRetryMissingFileAsync(source, tracker.FileRetries, cancellationToken);
                 }
 
                 if (progressInfo.State == "Failed")

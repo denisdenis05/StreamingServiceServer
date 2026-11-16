@@ -56,7 +56,8 @@ public class SoulseekProvider : IDownloadProvider
             .SelectMany(album => album.ArtistCredit ?? [])
             .SelectMany(credit => new[] { credit.Name, credit.Artist?.Name })
             .Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (_metadataSource is not null && expectedTracks == 0) return null;
+        if (_metadataSource is not null && expectedTracks == 0)
+            throw new HttpRequestException("Album metadata is unavailable; source selection will be retried.");
         var queries = GenerateSearchQueries(release);
 
         foreach (var queryOption in queries)

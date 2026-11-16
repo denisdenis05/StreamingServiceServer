@@ -387,41 +387,8 @@ public class PendingDownloadChecker : BackgroundService
         return result;
     }
 
-    private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath)
-    {
-        var result = new List<(string fileName, string fullPath)>();
-
-        if (!Directory.Exists(savePath))
-        {
-            return result;
-        }
-
-        var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a", ".alac", ".wma"
-        };
-
-        try
-        {
-            foreach (var filePath in Directory.EnumerateFiles(savePath, "*.*", SearchOption.AllDirectories))
-            {
-                if (allowedExtensions.Contains(Path.GetExtension(filePath)))
-                {
-                    result.Add((Path.GetFileName(filePath), filePath));
-                }
-            }
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            Console.WriteLine($"Access denied to some folders: {exception.Message}");
-        }
-        catch (Exception exception)
-        {
-            Console.WriteLine($"Error while searching files: {exception.Message}");
-        }
-
-        return result;
-    }
+    private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath) =>
+        AudioImportCandidates.Read(savePath, _musicLocation);
 
     private async Task CleanUpTorrentAndFilesAsync(string torrentName)
     {

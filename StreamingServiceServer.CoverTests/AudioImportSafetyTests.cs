@@ -478,6 +478,37 @@ public sealed class AudioImportSafetyTests
         Assert.Single(Directory.GetFiles(Path.Combine(fixture.MusicRoot, ".audio-import-rejected")));
     }
 
+    [Fact]
+    public async Task MissingMetadataDefersLegacyValidationWithoutQuarantiningExistingAudio()
+    {
+        using var fixture = new ImportFixture();
+        File.Delete(fixture.SecondPath);
+        await fixture.RunAsync();
+        var state = (await fixture.Journal().ReadAsync(default))!;
+        state.MatchPolicyVersion = 0;
+        await fixture.Journal().WriteAsync(state, default);
+        fixture.EmptyExpected = true;
+        await Assert.ThrowsAsync<IOException>(() => fixture.RunAsync());
+        Assert.True(File.Exists(fixture.Destination(fixture.First)));
+        Assert.Equal(0, (await fixture.Journal().ReadAsync(default))!.MatchPolicyVersion);
+    }
+
+    [Fact]
+    public async Task ReusingAValidatedQuarantineFilePreservesTheRecoveryCopy()
+    {
+        using var fixture = new ImportFixture();
+        var directory = Path.Combine(fixture.MusicRoot, ".audio-import-rejected");
+        Directory.CreateDirectory(directory);
+        var source = Path.Combine(directory, "recovery.wav");
+        File.Copy(fixture.FirstPath, source);
+        var publisher = new AudioImportFiles(fixture.MusicRoot);
+        var receipt = await publisher.PublishAsync(fixture.First, source, default);
+        Assert.True(receipt.RetainSource);
+        Assert.True(publisher.IsPublished(receipt));
+        await publisher.RemoveSourceAsync(receipt, default);
+        Assert.True(File.Exists(source));
+    }
+
     private sealed class ImportFixture : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "audio-import-tests-" + Guid.NewGuid());
@@ -519,7 +550,7 @@ public sealed class AudioImportSafetyTests
                 (directory, _) =>
                 {
                     if (FailCandidateReads) throw new InvalidOperationException("Unexpected candidate read");
-                    return Task.FromResult(Directory.GetFiles(directory).Select(path => (Path.GetFileName(path), path)).ToList());
+                    return Task.FromResult(AudioImportCandidates.Read(directory, MusicRoot));
                 },
                 (expected, _) => { MetadataSaves++; if (FailMetadata) throw new IOException("metadata unavailable"); return Task.CompletedTask; },
                 _ => { CleanupCalls++; if (FailCleanup) throw new IOException("provider unavailable"); return CleanupOverride?.Invoke() ?? Task.CompletedTask; },

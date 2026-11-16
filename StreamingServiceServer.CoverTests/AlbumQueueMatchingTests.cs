@@ -48,6 +48,9 @@ public sealed class AlbumQueueMatchingTests
     [InlineData("Artist", "Album", "Song", "Other Artist", "Album", "Song", false)]
     [InlineData("Artist", "Album", "Song", "Artist", "Other Album", "Song", false)]
     [InlineData("Artist", "Album", "Song", "Artist", "Album", "Song (live)", false)]
+    [InlineData("MF DOOM", "Operation: Doomsday", "Rhymes Like Dimes", "MF Doom", "Operation: Doomsday", "Rhymes Like Dimes (feat. DJ Cucumber Slice)", true)]
+    [InlineData("Artist", "Album", "Song", "Artist", "Album", "Song feat. Guest", true)]
+    [InlineData("Artist", "Album", "Song", "Artist", "Album", "Song (remix)", false)]
     [InlineData("Artist", "Album", "?", "Artist", "Album", "?", true)]
     [InlineData("Artist", "Album", "?", "Artist", "Album", "_", false)]
     public void TaggedTracksRequireCompatibleIdentity(string artist, string album, string title,
@@ -77,5 +80,21 @@ public sealed class AlbumQueueMatchingTests
         var result = (List<CandidateDirectory>)method.Invoke(provider, [new ReleaseToDownload { Artist = "Queen", Title = "Hot Space" },
             true, new List<SlskdSearchResponse> { response }, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".flac" }])!;
         Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task UnavailableAlbumMetadataIsRetryableRatherThanAnEmptySearchResult()
+    {
+        var metadata = DispatchProxy.Create<StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService, UnavailableMetadata>();
+        var provider = new SoulseekProvider(null!, metadata);
+        await Assert.ThrowsAsync<HttpRequestException>(() => provider.SearchAndEnqueueAsync(
+            new ReleaseToDownload { Id = Guid.NewGuid(), Artist = "Artist", Title = "Album" }, ["FLAC"], default));
+    }
+
+    public class UnavailableMetadata : DispatchProxy
+    {
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
+            targetMethod?.Name == "SearchAlbumRecordingsByIdAsync" ? Task.FromResult(new List<RecordingDto>())
+                : throw new InvalidOperationException("Unexpected metadata call.");
     }
 }

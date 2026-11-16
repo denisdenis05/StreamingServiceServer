@@ -55,6 +55,8 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
         if (state.MatchPolicyVersion < CurrentMatchPolicy)
         {
             var currentMetadata = (await readExpected(cancellationToken)).ToDictionary(recording => recording.Id);
+            if (state.Expected.Any(recording => !currentMetadata.ContainsKey(recording.Id)))
+                throw new IOException("Current album metadata is unavailable or changed; legacy audio validation is deferred.");
             foreach (var recording in state.Expected)
                 if (currentMetadata.TryGetValue(recording.Id, out var current)) recording.ArtistAliases = current.ArtistAliases;
             var verified = new List<AudioImportPublication>();
@@ -150,8 +152,9 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
             || state.Expected.Select(recording => recording.Id).Distinct().Count() != state.Expected.Count
             || state.Published.Select(publication => publication.RecordingIdentifier).Distinct().Count() != state.Published.Count
             || state.Published.Any(publication => !Path.IsPathFullyQualified(publication.SourcePath)
-                || !Path.GetFullPath(publication.SourcePath).StartsWith(
-                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(state.SourceDirectory)) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                || (!Path.GetFullPath(publication.SourcePath).StartsWith(
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(state.SourceDirectory)) + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                    && !(publication.RetainSource && Path.GetFileName(Path.GetDirectoryName(publication.SourcePath)) == ".audio-import-rejected")))
             || state.Published.Any(publication => !state.Expected.Any(recording => recording.Id == publication.RecordingIdentifier))
             || ((state.CleanupPending || state.CleanupCompleted) && state.Published.Count != state.Expected.Count)
             || (state.CleanupCompleted && !state.CleanupPending))

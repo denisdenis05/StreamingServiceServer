@@ -11,7 +11,8 @@ using StreamingServiceServer.Data.Models;
 namespace StreamingServiceServer.Background;
 
 public sealed class CoverAssetJobService(IServiceScopeFactory scopes, ICoverAssetStore assets,
-    IOptions<CoverAssetOptions> configuration, TimeProvider clock, ILogger<CoverAssetJobService> logger) : BackgroundService
+    IOptions<CoverAssetOptions> configuration, TimeProvider clock, ILogger<CoverAssetJobService> logger,
+    IAlbumCoverFallback? albumFallback = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -116,7 +117,7 @@ public sealed class CoverAssetJobService(IServiceScopeFactory scopes, ICoverAsse
                 && previousAddress.Segments.Last() == previousAssets.Full.Filename;
             var sourceWasLocal = local == sources.PrimaryAddress;
             var result = generatedSource ? await assets.RestoreAsync(previousAssets!, cancellationToken)
-                : await DownloadCandidatesAsync(sources, sourceWasLocal, cancellationToken);
+                : await DownloadCandidatesAsync(database, job, sources, sourceWasLocal, cancellationToken);
             await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
             var full = assets.PublicAddress(result.Full); var small = assets.PublicAddress(result.Small);
             var thumbnail = assets.PublicAddress(result.Thumbnail);
@@ -202,18 +203,48 @@ public sealed class CoverAssetJobService(IServiceScopeFactory scopes, ICoverAsse
             logger.LogWarning(failure, "Cover job for {EntityKind}/{EntityIdentifier} failed; retry {NextAttemptAt}.", job.EntityKind, job.EntityIdentifier, nextAttempt);
         }
     }
-    private async Task<CoverAssetSet> DownloadCandidatesAsync(CoverSourceSet sources, bool sourceWasLocal, CancellationToken cancellationToken)
+    private async Task<CoverAssetSet> DownloadCandidatesAsync(StreamingDbContext database, CoverAssetJob job,
+        CoverSourceSet sources, bool sourceWasLocal, CancellationToken cancellationToken)
     {
         var failures = new List<Exception>();
+        var fallbackAttempted = false;
         foreach (var candidate in sources.Candidates)
         {
             try { return await assets.GetOrCreateAsync(sourceWasLocal ? assets.NormalizeLocalAddress(candidate) : candidate, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception failure) when (failure is IOException or HttpRequestException or OperationCanceledException)
-            { failures.Add(failure); }
+            {
+                failures.Add(failure);
+                if (sourceWasLocal || fallbackAttempted || albumFallback is null || !IsArchiveSource(candidate)) continue;
+                fallbackAttempted = true;
+                try
+                {
+                    var album = job.EntityKind == CoverEntityKind.Release
+                        ? await database.Releases.Where(release => release.Id == job.EntityIdentifier)
+                            .Select(release => new { Artist = release.Artist.Name, Album = release.Title }).SingleOrDefaultAsync(cancellationToken)
+                        : await database.Recordings.Where(recording => recording.Id == job.EntityIdentifier)
+                            .Select(recording => new { Artist = recording.Release.Artist.Name, Album = recording.Release.Title }).SingleOrDefaultAsync(cancellationToken);
+                    if (album is null) continue;
+                    var alternative = await albumFallback.ResolveAsync(album.Artist ?? string.Empty, album.Album ?? string.Empty, cancellationToken);
+                    if (alternative is null) continue;
+                    var result = await assets.GetOrCreateAsync(alternative.AbsoluteUri, cancellationToken);
+                    logger.LogInformation("Recovered cover for {EntityKind}/{EntityIdentifier} through the album artwork fallback.", job.EntityKind, job.EntityIdentifier);
+                    return result;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception fallbackFailure) when (fallbackFailure is IOException or HttpRequestException or OperationCanceledException or JsonException)
+                {
+                    failures.Add(fallbackFailure);
+                    logger.LogWarning(fallbackFailure, "Album artwork fallback failed for {EntityKind}/{EntityIdentifier}; remaining sources will be tried.", job.EntityKind, job.EntityIdentifier);
+                }
+            }
         }
         throw new AggregateException("No cover source candidate produced a valid asset.", failures);
     }
+    private static bool IsArchiveSource(string source) => Uri.TryCreate(source, UriKind.Absolute, out var address)
+        && (address.Host.Equals("coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+            || address.Host.Equals("archive.org", StringComparison.OrdinalIgnoreCase)
+            || address.Host.EndsWith(".archive.org", StringComparison.OrdinalIgnoreCase));
     public static TimeSpan RetryDelay(int attempts, CoverAssetOptions options) => TimeSpan.FromTicks((long)Math.Min(options.MaximumRetryDelay.Ticks,
         options.InitialRetryDelay.Ticks * Math.Pow(2, Math.Min(attempts - 1, 20))));
     public Task RepairAsync(CancellationToken cancellationToken) =>

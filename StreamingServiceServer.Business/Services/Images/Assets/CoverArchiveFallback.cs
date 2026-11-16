@@ -1,13 +1,15 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
+using StreamingServiceServer.Business.Services.MusicSearch.Requests;
 namespace StreamingServiceServer.Business.Services.Images.Assets;
 
 public interface ICoverArchiveFallback
 {
     Task<Uri?> ResolveAsync(Uri source, CancellationToken cancellationToken);
 }
-public sealed class CoverArchiveFallback(Func<HttpClient> createClient, Uri metadataRoot, TimeProvider clock) : ICoverArchiveFallback
+public sealed class CoverArchiveFallback(Func<HttpClient> createClient, Uri metadataRoot, TimeProvider clock,
+    IMusicBrainzRequestQueue? requestQueue = null) : ICoverArchiveFallback
 {
     private const string ArchiveHost = "coverartarchive.org";
     private const string ReleaseKind = "release";
@@ -25,10 +27,8 @@ public sealed class CoverArchiveFallback(Func<HttpClient> createClient, Uri meta
         CoverPolicy.FullSuffix.Trim('/'), CoverPolicy.SmallSuffix.Trim('/'), CoverPolicy.ThumbnailSuffix.Trim('/') };
     private static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromDays(1);
-    private static readonly TimeSpan MinimumRequestInterval = TimeSpan.FromMilliseconds(1100);
     private readonly ConcurrentDictionary<Guid, Lazy<Task<GroupLookup>>> lookups = new();
-    private readonly SemaphoreSlim requestOrder = new(1);
-    private DateTimeOffset nextRequest = DateTimeOffset.MinValue;
+    private readonly IMusicBrainzRequestQueue metadataRequests = requestQueue ?? MusicBrainzRequestQueue.Shared;
     private sealed record GroupLookup(Guid? Identifier, DateTimeOffset ExpiresAt);
     public async Task<Uri?> ResolveAsync(Uri source, CancellationToken cancellationToken)
     {
@@ -65,17 +65,10 @@ public sealed class CoverArchiveFallback(Func<HttpClient> createClient, Uri meta
     private async Task<GroupLookup> LookupAsync(Guid identifier)
     {
         using var timeout = new CancellationTokenSource(LookupTimeout, clock);
-        await requestOrder.WaitAsync(timeout.Token);
-        try
-        {
-            var wait = nextRequest - clock.GetUtcNow();
-            if (wait > TimeSpan.Zero) await Task.Delay(wait, clock, timeout.Token);
-            nextRequest = clock.GetUtcNow() + MinimumRequestInterval;
-        }
-        finally { requestOrder.Release(); }
         using var client = createClient();
-        using var response = await client.GetAsync(new Uri(metadataRoot, ReleaseKind + "/" + identifier + MetadataQuery),
-            HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        using var response = await metadataRequests.SendAsync(requestCancellation => client.GetAsync(
+            new Uri(metadataRoot, ReleaseKind + "/" + identifier + MetadataQuery),
+            HttpCompletionOption.ResponseHeadersRead, requestCancellation), timeout.Token);
         if (response.StatusCode == HttpStatusCode.NotFound) return new GroupLookup(null, clock.GetUtcNow() + CacheLifetime);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > MaximumMetadataBytes) throw new IOException("Cover metadata exceeds its size limit.");

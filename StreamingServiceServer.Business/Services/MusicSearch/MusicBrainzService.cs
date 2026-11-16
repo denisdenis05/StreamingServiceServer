@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using StreamingServiceServer.Business.Services.MusicSearch.Requests;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -14,72 +15,33 @@ public partial class MusicBrainzService : IExternalMusicSearchService
     private readonly IConfiguration _configuration;
     private readonly string _baseUrl, _baseCoverUrl;
 
-    private static readonly SemaphoreSlim RateLimiter = new(1, 1);
-    private static DateTime _lastRequestTime = DateTime.MinValue;
-    private static readonly TimeSpan MinRequestDelay = TimeSpan.FromMilliseconds(1100);
+    private readonly IMusicBrainzRequestQueue requestQueue;
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (List<ReleaseDto> Results, DateTime CachedAt)> _albumSearchCache = new();
     private static readonly TimeSpan _albumCacheTtl = TimeSpan.FromMinutes(5);
 
-    public MusicBrainzService(HttpClient httpClient, IConfiguration configuration)
+    public MusicBrainzService(HttpClient httpClient, IConfiguration configuration, IMusicBrainzRequestQueue? requestQueue = null)
     {
         _httpClient = httpClient;
+        this.requestQueue = requestQueue ?? MusicBrainzRequestQueue.Shared;
         _configuration = configuration;
         _baseUrl = _configuration["Music:External:MusicBrainz:BaseUrl"] ?? "https://musicbrainz.org/ws/2/";
         _baseCoverUrl = _configuration["Music:External:AlbumCover:BaseUrl"] ?? "https://coverartarchive.org/release/";
 
-        var userAgent = _configuration["Music:External:MusicBrainz:User-Agent"] ?? "StreamingService/1.0.0 (contact@example.com)";
+        var userAgent = _configuration["Music:External:MusicBrainz:User-Agent"] ?? MusicBrainzRequestQueue.DefaultUserAgent;
         if (!_httpClient.DefaultRequestHeaders.Contains("User-Agent"))
         {
             _httpClient.DefaultRequestHeaders.Add("User-Agent", userAgent);
         }
     }
 
-    private async Task<T?> GetJsonAsync<T>(string url, CancellationToken cancellationToken = default)
+    private async Task<T?> GetJsonAsync<T>(string requestAddress, CancellationToken cancellationToken = default)
     {
-        await RateLimiter.WaitAsync(cancellationToken);
-        try
-        {
-            var elapsed = DateTime.UtcNow - _lastRequestTime;
-            if (elapsed < MinRequestDelay)
-            {
-                await Task.Delay(MinRequestDelay - elapsed, cancellationToken);
-            }
-            _lastRequestTime = DateTime.UtcNow;
-        }
-        finally
-        {
-            RateLimiter.Release();
-        }
-
-        for (int attempt = 1; attempt <= 4; attempt++)
-        {
-            try
-            {
-                using var response = await _httpClient.GetAsync(url, cancellationToken);
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
-                    return JsonSerializer.Deserialize<T>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                }
-
-                if ((int)response.StatusCode == 503 || (int)response.StatusCode == 429)
-                {
-                    Console.WriteLine($"[MusicBrainz] Rate limit {response.StatusCode} on attempt {attempt}/4 for {url}. Delaying {attempt * 2}s...");
-                    await Task.Delay(attempt * 2000, cancellationToken);
-                    continue;
-                }
-
-                return default;
-            }
-            catch (Exception ex) when (attempt < 4 && !cancellationToken.IsCancellationRequested)
-            {
-                Console.WriteLine($"[MusicBrainz] Transient error on attempt {attempt}/4 for {url}: {ex.Message}");
-                await Task.Delay(attempt * 1500, cancellationToken);
-            }
-        }
-
-        return default;
+        using var response = await requestQueue.SendAsync(
+            requestCancellation => _httpClient.GetAsync(requestAddress, requestCancellation), cancellationToken);
+        if (!response.IsSuccessStatusCode) return default;
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        return JsonSerializer.Deserialize<T>(responseBody, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
     public async Task<List<ArtistDto>> SearchArtistsAsync(string query)

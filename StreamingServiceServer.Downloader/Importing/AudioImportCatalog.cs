@@ -11,6 +11,9 @@ public static class AudioImportCatalog
         var response = recording.ToResponse(images);
         var albumArtist = recording.Releases?.FirstOrDefault()?.Artist?.Name;
         if (!string.IsNullOrWhiteSpace(albumArtist)) response.ArtistName = albumArtist;
+        response.ArtistAliases = recording.ArtistCredit.Concat(recording.Releases?.FirstOrDefault()?.ArtistCredit ?? [])
+            .SelectMany(credit => new[] { credit.Name, credit.Artist?.Name })
+            .Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         return response;
     }
 

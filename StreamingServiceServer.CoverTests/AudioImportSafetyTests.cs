@@ -430,6 +430,54 @@ public sealed class AudioImportSafetyTests
             _ => throw new InvalidOperationException("Unexpected read"), cancellation.Token));
     }
 
+    [Fact]
+    public async Task VerifiedAlbumCanFinishWhenSourceDeletionIsDeniedAndRecordsRetainedFiles()
+    {
+        using var fixture = new ImportFixture();
+        fixture.Publisher.DenySourceCleanup = true;
+        Assert.True((await fixture.RunAsync()).Complete);
+        Assert.True(File.Exists(fixture.FirstPath));
+        Assert.True(File.Exists(fixture.SecondPath));
+        var state = await fixture.Journal().ReadAsync(default);
+        Assert.Equal(2, state!.RetainedSources.Count);
+        Assert.True(state.CleanupCompleted);
+        Assert.Equal(1, fixture.MetadataSaves);
+        Assert.Equal(1, fixture.QueueRemovals);
+    }
+
+    [Fact]
+    public async Task IncompleteImportRequestsReplacementAfterNoProgressAcrossRestart()
+    {
+        using var fixture = new ImportFixture();
+        File.Delete(fixture.SecondPath);
+        Assert.False((await fixture.RunAsync()).Stalled);
+        fixture.Clock.Advance(AudioAlbumImport.IncompleteTimeout + TimeSpan.FromSeconds(1));
+        var result = await fixture.RunAsync();
+        Assert.True(result.Stalled);
+        Assert.False(result.Complete);
+        Assert.Equal(0, fixture.QueueRemovals);
+        Assert.True(File.Exists(fixture.FirstPath));
+    }
+
+    [Fact]
+    public async Task LegacyReceiptsAreRecheckedAndWrongTracksCannotFinishOrDeleteSources()
+    {
+        using var fixture = new ImportFixture();
+        File.Delete(fixture.SecondPath);
+        await fixture.RunAsync();
+        var state = (await fixture.Journal().ReadAsync(default))!;
+        state.MatchPolicyVersion = 0;
+        state.Expected.Single(recording => recording.Id == fixture.First.Id).Title = "A different song";
+        await fixture.Journal().WriteAsync(state, default);
+        var resumed = await fixture.RunAsync();
+        Assert.True(resumed.Stalled);
+        Assert.Equal(0, resumed.PublishedTracks);
+        Assert.Equal(0, fixture.QueueRemovals);
+        Assert.True(File.Exists(fixture.FirstPath));
+        Assert.False(File.Exists(fixture.Destination(fixture.First)));
+        Assert.Single(Directory.GetFiles(Path.Combine(fixture.MusicRoot, ".audio-import-rejected")));
+    }
+
     private sealed class ImportFixture : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "audio-import-tests-" + Guid.NewGuid());
@@ -447,6 +495,7 @@ public sealed class AudioImportSafetyTests
         public bool FailCandidateReads { get; set; }
         public Func<Task>? CleanupOverride { get; set; }
         public bool EmptyExpected { get; set; }
+        public TestClock Clock { get; } = new();
         public IAudioImportJournal? JournalOverride { get; set; }
         public int CleanupCalls { get; private set; }
         public int QueueRemovals { get; private set; }
@@ -465,7 +514,7 @@ public sealed class AudioImportSafetyTests
         public string Destination(RecordingResponse recording) => Path.Combine(MusicRoot, "ARTIST", "ALBUM", recording.Id + ".wav");
         public AudioImportJournal Journal() => new(MusicRoot, Album, "fixture-source");
         public Task<AudioImportResult> RunAsync(Func<CancellationToken, Task>? requireCurrent = null) =>
-            new AudioAlbumImport(JournalOverride ?? Journal(), Publisher, (_, _) => { }).RunAsync(SourceRoot,
+            new AudioAlbumImport(JournalOverride ?? Journal(), Publisher, (_, _) => { }, Clock).RunAsync(SourceRoot,
                 _ => { ExpectedReads++; return Task.FromResult<IReadOnlyList<RecordingResponse>>(EmptyExpected ? [] : [First, Second]); },
                 (directory, _) =>
                 {
@@ -491,8 +540,13 @@ public sealed class AudioImportSafetyTests
     {
         public Dictionary<Guid, int> Calls { get; } = [];
         public Guid? FailIdentifier { get; set; }
+        public bool DenySourceCleanup { get; set; }
         public bool IsPublished(AudioImportPublication publication) => inner.IsPublished(publication);
-        public Task RemoveSourceAsync(AudioImportPublication publication, CancellationToken cancellationToken) => inner.RemoveSourceAsync(publication, cancellationToken);
+        public bool MatchesRecording(AudioImportPublication publication, RecordingResponse recording) => inner.MatchesRecording(publication, recording);
+        public Task QuarantineAsync(AudioImportPublication publication, CancellationToken cancellationToken) => inner.QuarantineAsync(publication, cancellationToken);
+        public Task RemoveSourceAsync(AudioImportPublication publication, CancellationToken cancellationToken) => DenySourceCleanup
+            ? Task.FromException(new UnauthorizedAccessException("Source directory belongs to another user."))
+            : inner.RemoveSourceAsync(publication, cancellationToken);
         public Task<AudioImportPublication> PublishAsync(RecordingResponse recording, string path, CancellationToken cancellationToken)
         {
             Calls[recording.Id] = Calls.GetValueOrDefault(recording.Id) + 1;

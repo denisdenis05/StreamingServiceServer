@@ -13,6 +13,9 @@ namespace StreamingServiceDownloader.Helpers;
 public class SoulseekProvider : IDownloadProvider
 {
     private readonly SlskdHelper _slskdHelper;
+    private string[] _artistAliases = [];
+    private int _expectedTrackCount;
+    private readonly StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService? _metadataSource;
 
     private static readonly SemaphoreSlim SearchRateLimiter = new(1, 1);
     private static DateTime _lastSearchTime = DateTime.MinValue;
@@ -31,9 +34,10 @@ public class SoulseekProvider : IDownloadProvider
 
     public string ProviderName => "Soulseek";
 
-    public SoulseekProvider(SlskdHelper slskdHelper)
+    public SoulseekProvider(SlskdHelper slskdHelper, StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService? metadataSource = null)
     {
         _slskdHelper = slskdHelper;
+        _metadataSource = metadataSource;
     }
 
     public void ApplyConfig(DownloadProviderConfig config)
@@ -44,6 +48,15 @@ public class SoulseekProvider : IDownloadProvider
     public async Task<DownloadSearchResult?> SearchAndEnqueueAsync(
         ReleaseToDownload release, string[] formatOrder, CancellationToken cancellationToken)
     {
+        var expected = _metadataSource is null ? []
+            : await _metadataSource.SearchAlbumRecordingsByIdAsync(release.Id).WaitAsync(cancellationToken);
+        var expectedTracks = expected.Count;
+        _expectedTrackCount = expectedTracks;
+        _artistAliases = expected.SelectMany(recording => recording.Releases)
+            .SelectMany(album => album.ArtistCredit ?? [])
+            .SelectMany(credit => new[] { credit.Name, credit.Artist?.Name })
+            .Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (_metadataSource is not null && expectedTracks == 0) return null;
         var queries = GenerateSearchQueries(release);
 
         foreach (var queryOption in queries)
@@ -304,6 +317,7 @@ public class SoulseekProvider : IDownloadProvider
                     .Select(f => new SlskdFileDownloadRequest { Filename = f.Filename!, Size = f.Size })
                     .ToList();
 
+                if (validAudioFiles.Count < _expectedTrackCount) continue;
                 if (validAudioFiles.Count == 0)
                 {
                     var rejectedFiles = allFilesInGroup.Where(f => f.Filename != null).Take(3)
@@ -319,6 +333,15 @@ public class SoulseekProvider : IDownloadProvider
                 {
                     Console.WriteLine($"[Soulseek][Match] SKIP va-filter: '{dirPath}'");
                     skippedVa++;
+                    continue;
+                }
+
+                if (!(isTargetVariousArtists
+                    ? AudioMatchPolicy.ContainsName(dirPath, release.Title) || AudioMatchPolicy.ContainsName(dirPath, normalizedCoreAlbum)
+                    : AudioMatchPolicy.MatchesAlbumPath(release.Artist, release.Title, dirPath)
+                        || _artistAliases.Any(alias => AudioMatchPolicy.MatchesAlbumPath(alias, release.Title, dirPath))))
+                {
+                    skippedArtistScore++;
                     continue;
                 }
 
@@ -339,16 +362,6 @@ public class SoulseekProvider : IDownloadProvider
                     Console.WriteLine($"[Soulseek][Match] SKIP album-score<45: '{dirPath}' albumScore={maxAlbumScore}");
                     skippedAlbumScore++;
                     continue;
-                }
-
-                if (!queryContainsArtist && !isTargetVariousArtists)
-                {
-                    if (!artistMatched && artistScore < 50)
-                    {
-                        Console.WriteLine($"[Soulseek][Match] SKIP artist-score: '{dirPath}' artistScore={artistScore} artistMatched={artistMatched}");
-                        skippedArtistScore++;
-                        continue;
-                    }
                 }
 
                 int combinedScore = (int)(artistScore * 0.35 + maxAlbumScore * 0.65);

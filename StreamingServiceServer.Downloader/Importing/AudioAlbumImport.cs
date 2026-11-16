@@ -11,14 +11,20 @@ public sealed class AudioImportState
     public string SourceDirectory { get; set; } = string.Empty;
     public bool CleanupPending { get; set; }
     public bool CleanupCompleted { get; set; }
+    public int MatchPolicyVersion { get; set; }
+    public DateTimeOffset LastProgressAt { get; set; }
+    public List<string> RetainedSources { get; set; } = [];
 }
 
-public sealed record AudioImportResult(int ExpectedTracks, int PublishedTracks, bool Complete);
+public sealed record AudioImportResult(int ExpectedTracks, int PublishedTracks, bool Complete, bool Stalled = false);
 
 public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFiles files,
-    Action<Guid, Exception> reportFailure)
+    Action<Guid, Exception> reportFailure, TimeProvider? clock = null)
 {
     public const int JournalVersion = 1;
+    public const int CurrentMatchPolicy = 1;
+    public static readonly TimeSpan IncompleteTimeout = TimeSpan.FromMinutes(30);
+    private TimeProvider Clock => clock ?? TimeProvider.System;
     private const int MaximumExpectedTracks = 1000;
 
     public async Task<AudioImportResult> RunAsync(
@@ -39,11 +45,36 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
             if ((File.GetAttributes(sourceDirectory) & FileAttributes.Directory) == 0)
                 throw new IOException("Audio import source is not a directory.");
             var expected = await readExpected(cancellationToken);
-            state = new AudioImportState { Expected = expected.ToList(), SourceDirectory = Path.GetFullPath(sourceDirectory) };
+            state = new AudioImportState { Expected = expected.ToList(), SourceDirectory = Path.GetFullPath(sourceDirectory),
+                MatchPolicyVersion = CurrentMatchPolicy, LastProgressAt = Clock.GetUtcNow() };
             Validate(state);
             await journal.WriteAsync(state, cancellationToken);
         }
         Validate(state);
+        var rejectedLegacyMatches = false;
+        if (state.MatchPolicyVersion < CurrentMatchPolicy)
+        {
+            var currentMetadata = (await readExpected(cancellationToken)).ToDictionary(recording => recording.Id);
+            foreach (var recording in state.Expected)
+                if (currentMetadata.TryGetValue(recording.Id, out var current)) recording.ArtistAliases = current.ArtistAliases;
+            var verified = new List<AudioImportPublication>();
+            foreach (var publication in state.Published)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var recording = state.Expected.Single(recording => recording.Id == publication.RecordingIdentifier);
+                if (files.IsPublished(publication) && files.MatchesRecording(publication, recording)) verified.Add(publication);
+                else
+                {
+                    await files.QuarantineAsync(publication, cancellationToken);
+                    rejectedLegacyMatches = true;
+                    reportFailure(recording.Id, new InvalidDataException("Legacy imported audio does not match the expected track; replacement is required."));
+                }
+            }
+            state.Published = verified;
+            state.MatchPolicyVersion = CurrentMatchPolicy;
+            if (rejectedLegacyMatches) { state.CleanupPending = false; state.CleanupCompleted = false; }
+            await journal.WriteAsync(state, cancellationToken);
+        }
         if (!state.CleanupCompleted)
         {
             var healthy = state.Published.Where(files.IsPublished).ToList();
@@ -74,11 +105,13 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
                         continue;
                     }
                     state.Published.Add(publication);
+                    state.LastProgressAt = Clock.GetUtcNow();
                     await journal.WriteAsync(state, cancellationToken);
                 }
             }
             if (state.Published.Count != state.Expected.Count)
-                return new AudioImportResult(state.Expected.Count, state.Published.Count, false);
+                return new AudioImportResult(state.Expected.Count, state.Published.Count, false,
+                    rejectedLegacyMatches || Clock.GetUtcNow() - state.LastProgressAt >= IncompleteTimeout);
             if (!state.Published.All(files.IsPublished)) throw new IOException("An imported track changed before album completion.");
             if (!state.CleanupPending)
             {
@@ -87,7 +120,16 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
                 await journal.WriteAsync(state, cancellationToken);
             }
             if (requireCurrent is not null) await requireCurrent(cancellationToken);
-            foreach (var publication in state.Published) await files.RemoveSourceAsync(publication, cancellationToken);
+            foreach (var publication in state.Published)
+            {
+                try { await files.RemoveSourceAsync(publication, cancellationToken); }
+                catch (UnauthorizedAccessException failure)
+                {
+                    if (!state.RetainedSources.Contains(publication.SourcePath)) state.RetainedSources.Add(publication.SourcePath);
+                    reportFailure(publication.RecordingIdentifier, new UnauthorizedAccessException(
+                        "Imported audio is verified; source cleanup was denied and the source file was retained.", failure));
+                }
+            }
             await cleanupSource(cancellationToken);
             state.CleanupCompleted = true;
             await journal.WriteAsync(state, cancellationToken);
@@ -100,7 +142,8 @@ public sealed class AudioAlbumImport(IAudioImportJournal journal, IAudioImportFi
 
     private static void Validate(AudioImportState state)
     {
-        if (state.Version != JournalVersion || state.Expected is null || state.Published is null
+        if (state.Version != JournalVersion || state.Expected is null || state.Published is null || state.RetainedSources is null
+            || state.MatchPolicyVersion < 0 || state.MatchPolicyVersion > CurrentMatchPolicy
             || !Path.IsPathFullyQualified(state.SourceDirectory)
             || state.Expected.Count == 0 || state.Expected.Count > MaximumExpectedTracks
             || state.Expected.Any(recording => recording.Id == Guid.Empty)

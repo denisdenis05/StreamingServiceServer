@@ -11,6 +11,8 @@ public sealed record AudioImportPublication(Guid RecordingIdentifier, string Sou
 public interface IAudioImportFiles
 {
     bool IsPublished(AudioImportPublication publication);
+    bool MatchesRecording(AudioImportPublication publication, RecordingResponse recording);
+    Task QuarantineAsync(AudioImportPublication publication, CancellationToken cancellationToken);
     Task<AudioImportPublication> PublishAsync(RecordingResponse recording, string sourcePath, CancellationToken cancellationToken);
     Task RemoveSourceAsync(AudioImportPublication publication, CancellationToken cancellationToken);
 }
@@ -38,6 +40,22 @@ public sealed class AudioImportFiles : IAudioImportFiles
             && information.LastWriteTimeUtc.Ticks == publication.ModifiedTicks && publication.Bytes > 0;
     }
 
+    public bool MatchesRecording(AudioImportPublication publication, RecordingResponse recording) =>
+        StreamingServiceDownloader.Helpers.AudioMatchPolicy.TrackScore(recording, Path.GetFileName(publication.SourcePath),
+            StreamingServiceDownloader.Helpers.AudioMetadataHelper.GetAudioMetadata(ContainedPath(publication.DestinationPath))) > 0;
+
+    public Task QuarantineAsync(AudioImportPublication publication, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsPublished(publication)) return Task.CompletedTask;
+        var original = ContainedPath(publication.DestinationPath);
+        var rejected = ContainedPath(Path.Combine(".audio-import-rejected", publication.RecordingIdentifier + "-" + Guid.NewGuid().ToString("N") + Path.GetExtension(original)));
+        Directory.CreateDirectory(Path.GetDirectoryName(rejected)!);
+        RequireOrdinaryDirectories(Path.GetDirectoryName(rejected)!);
+        File.Move(original, rejected);
+        return Task.CompletedTask;
+    }
+
     public async Task RemoveSourceAsync(AudioImportPublication publication, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -60,7 +78,9 @@ public sealed class AudioImportFiles : IAudioImportFiles
             throw new InvalidDataException("Import source must be a nonempty regular audio file.");
         var sourceBytes = sourceInformation.Length;
         var sourceModified = sourceInformation.LastWriteTimeUtc;
-        var relativeFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recording);
+        string relativeFolder;
+        try { relativeFolder = MusicLocationHelper.GetRelativeFolderPathForRecording(recording); }
+        catch (InvalidOperationException failure) { throw new InvalidDataException("Import destination is outside music storage.", failure); }
         var relativeDestination = Path.Combine(relativeFolder, recording.Id + sourceInformation.Extension.ToLowerInvariant());
         var destination = ContainedPath(relativeDestination);
         var directory = Path.GetDirectoryName(destination)!;
@@ -156,8 +176,10 @@ public sealed class AudioImportJournal(string musicRoot, Guid albumIdentifier, s
         if (!information.Exists) return null;
         if (information.LinkTarget is not null || information.Length > MaximumJournalBytes) throw new InvalidDataException("Audio import journal is invalid.");
         await using var input = File.OpenRead(JournalPath);
-        return await JsonSerializer.DeserializeAsync<AudioImportState>(input, cancellationToken: cancellationToken)
+        var state = await JsonSerializer.DeserializeAsync<AudioImportState>(input, cancellationToken: cancellationToken)
             ?? throw new InvalidDataException("Audio import journal is empty.");
+        if (state.LastProgressAt == default) state.LastProgressAt = information.LastWriteTimeUtc;
+        return state;
     }
 
     public async Task WriteAsync(AudioImportState state, CancellationToken cancellationToken)

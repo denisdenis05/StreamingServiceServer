@@ -101,10 +101,16 @@ public class PendingDownloadChecker : BackgroundService
                 var journal = CreateImportJournal(item);
                 if (await journal.ReadAsync(cancellationToken) is not null)
                 {
-                    await ImportAlbumAsync(item, item.SavePath ?? string.Empty, dbContext, metadataService,
+                    var resumed = await ImportAlbumAsync(item, item.SavePath ?? string.Empty, dbContext, metadataService,
                         externalMusicSearchService, imageService,
                         providerEntry.provider is null ? () => CleanUpTorrentAndFilesAsync(item.SourceName)
                             : () => CleanUpCompletedDownloadAsync(providerEntry.provider, item), cancellationToken);
+                    if (resumed.Stalled && providerEntry.provider is not null)
+                    {
+                        var recovery = _stallTrackers.GetOrAdd(item.Id, _ => new StallTracker { ImportIdentifier = item.ImportIdentifier });
+                        Console.WriteLine($"[PendingDownloadChecker] Incomplete import for {item.Id} needs a replacement source ({resumed.PublishedTracks}/{resumed.ExpectedTracks} verified tracks).");
+                        await HandleStalledDownloadAsync(item, recovery, providerEntry.provider, dbContext, cancellationToken);
+                    }
                     continue;
                 }
                 if (providerEntry.provider == null)
@@ -272,7 +278,7 @@ public class PendingDownloadChecker : BackgroundService
             && current.ImportIdentifier == item.ImportIdentifier && current.SourceName == item.SourceName, cancellationToken)) return;
         tracker.RetryCount++;
 
-        try { await provider.CleanUpAsync(GetProviderSource(item), false); } catch { }
+        // Retain source files and transfer evidence while selecting a replacement.
 
         if (tracker.RetryCount > MaxStallRetries)
         {
@@ -348,7 +354,7 @@ public class PendingDownloadChecker : BackgroundService
     private AudioImportJournal CreateImportJournal(StreamingServiceServer.Data.Models.PendingDownload item) =>
         new(_musicLocation, item.Id, System.Text.Json.JsonSerializer.Serialize(new[] { item.ProviderName ?? "Torrent", item.SourceName, item.ImportIdentifier.ToString() }));
 
-    private async Task ImportAlbumAsync(StreamingServiceServer.Data.Models.PendingDownload item, string sourceDirectory,
+    private async Task<AudioImportResult> ImportAlbumAsync(StreamingServiceServer.Data.Models.PendingDownload item, string sourceDirectory,
         StreamingDbContext database, IMetadataService metadataService, IExternalMusicSearchService metadataSource,
         IImageService images, Func<Task> cleanup, CancellationToken cancellationToken)
     {
@@ -378,6 +384,7 @@ public class PendingDownloadChecker : BackgroundService
             token => RemoveAlbumFromDatabaseQueues(item, database, token), cancellationToken, RequireCurrent);
         if (result.Complete) _stallTrackers.TryRemove(item.Id, out _);
         else Console.WriteLine($"[PendingDownloadChecker] {result.PublishedTracks}/{result.ExpectedTracks} tracks published for {item.Id}; source and queue retained.");
+        return result;
     }
 
     private List<(string fileName, string fullPath)> GetMusicFilesInSavePath(string savePath)

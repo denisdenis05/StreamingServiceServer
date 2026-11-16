@@ -9,6 +9,7 @@ using Microsoft.OpenApi.Models;
 using StreamingServiceDownloader.BackgroundServices;
 using StreamingServiceServer.Data;
 using StreamingServiceServer.Business.Services.Images.Assets;
+using StreamingServiceServer.Business.Services.MusicSearch.Requests;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +20,8 @@ builder.Services.RegisterHelpers();
 builder.Services.AddHostedService<MusicDownloader>();
 builder.Services.AddHostedService<PendingDownloadChecker>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IMusicBrainzQueueClock, MusicBrainzQueueClock>();
+builder.Services.AddSingleton<IMusicBrainzRequestQueue, MusicBrainzRequestQueue>();
 builder.Services.AddLocalAudioAnalysis(builder.Configuration, builder.Environment);
 builder.Services.AddAudioRecommendations();
 builder.Services.AddOptions<CoverAssetOptions>().Bind(builder.Configuration.GetSection(CoverAssetOptions.Section))
@@ -40,7 +43,7 @@ builder.Services.AddSingleton<ICoverImageRenderer, FfmpegCoverImageRenderer>();
 builder.Services.AddSingleton<ICoverArchiveFallback>(services => new CoverArchiveFallback(
     () => services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CoverAssetStore)),
     new Uri(builder.Configuration["Music:External:MusicBrainz:BaseUrl"] ?? "https://musicbrainz.org/ws/2/"),
-    services.GetRequiredService<TimeProvider>()));
+    services.GetRequiredService<TimeProvider>(), services.GetRequiredService<IMusicBrainzRequestQueue>()));
 builder.Services.AddSingleton<ICoverAssetStore>(services => new CoverAssetStore(
     () => services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CoverAssetStore)),
     services.GetRequiredService<ICoverImageRenderer>(), services.GetRequiredService<Microsoft.Extensions.Options.IOptions<CoverAssetOptions>>(),
@@ -59,7 +62,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient(nameof(CoverAssetStore), client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
-    client.DefaultRequestHeaders.Add("User-Agent", builder.Configuration["Music:External:MusicBrainz:User-Agent"] ?? "StreamingService/1.0");
+    client.DefaultRequestHeaders.Add("User-Agent", builder.Configuration["Music:External:MusicBrainz:User-Agent"] ?? MusicBrainzRequestQueue.DefaultUserAgent);
 });
 builder.Services.AddHttpClient("unsafeHttp", client =>
     {

@@ -19,6 +19,32 @@ public sealed class SoulseekDownloadRetryTests
     private static readonly DateTimeOffset StartTime = DateTimeOffset.UnixEpoch;
 
     [Fact]
+    public async Task RejectedTrackRetryDoesNotPreventAlbumStallEvaluation()
+    {
+        using var fixture = new TransferFixture();
+        fixture.EnqueueStatus = HttpStatusCode.InternalServerError;
+        Assert.False(await fixture.Helper.TryRetryMissingFileAsync(Source(), new SoulseekFileRetrySchedule(), default));
+    }
+
+    [Fact]
+    public async Task UnavailableTransferSnapshotDoesNotPreventAlbumStallEvaluation()
+    {
+        using var fixture = new TransferFixture();
+        fixture.SnapshotStatus = HttpStatusCode.ServiceUnavailable;
+        Assert.False(await fixture.Helper.TryRetryMissingFileAsync(Source(), new SoulseekFileRetrySchedule(), default));
+    }
+
+    [Fact]
+    public async Task BestEffortTrackRetryPreservesCallerCancellation()
+    {
+        using var fixture = new TransferFixture();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Helper.TryRetryMissingFileAsync(
+            Source(), new SoulseekFileRetrySchedule(), cancellation.Token));
+    }
+
+    [Fact]
     public async Task PartialAlbumEnqueueRetainsSelectedManifestForBackgroundRecovery()
     {
         using var fixture = new TransferFixture();

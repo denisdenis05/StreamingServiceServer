@@ -358,6 +358,18 @@ public class SlskdHelper
         }
     }
 
+    public async Task<bool> TryRetryMissingFileAsync(SlskdSourceIdentity source,
+        SoulseekFileRetrySchedule schedule, CancellationToken cancellationToken)
+    {
+        try { return await RetryMissingFileAsync(source, schedule, cancellationToken); }
+        catch (Exception failure) when (failure is HttpRequestException or IOException or OperationCanceledException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            Console.WriteLine($"[Soulseek] Track retry deferred; album stall detection remains active: {failure.Message}");
+            return false;
+        }
+    }
+
     public async Task<bool> RetryMissingFileAsync(SlskdSourceIdentity source,
         SoulseekFileRetrySchedule schedule, CancellationToken cancellationToken)
     {

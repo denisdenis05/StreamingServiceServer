@@ -46,6 +46,9 @@ builder.Services.AddSingleton<ICoverAssetStore>(services => new CoverAssetStore(
     services.GetRequiredService<ICoverImageRenderer>(), services.GetRequiredService<Microsoft.Extensions.Options.IOptions<CoverAssetOptions>>(),
     services.GetRequiredService<TimeProvider>(), services.GetRequiredService<ILogger<CoverAssetStore>>(), services.GetRequiredService<ICoverArchiveFallback>()));
 builder.Services.AddScoped<CoverJobInterceptor>();
+builder.Services.AddSingleton<IAlbumCoverFallback>(services => new DeezerCoverFallback(
+    () => services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CoverAssetStore)),
+    services.GetRequiredService<TimeProvider>()));
 builder.Services.AddScoped<StreamingServiceServer.Business.Services.Images.Progress.CoverDownloadProgress>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetJobService>();
 builder.Services.AddHostedService<StreamingServiceServer.Background.CoverAssetMaintenanceService>();

@@ -6,7 +6,7 @@ using StreamingServiceServer.Business.Models.MusicSearch;
 namespace StreamingServiceDownloader.Importing;
 
 public sealed record AudioImportPublication(Guid RecordingIdentifier, string SourcePath, string DestinationPath,
-    long Bytes, long ModifiedTicks, string Checksum);
+    long Bytes, long ModifiedTicks, string Checksum, bool RetainSource = false);
 
 public interface IAudioImportFiles
 {
@@ -60,6 +60,7 @@ public sealed class AudioImportFiles : IAudioImportFiles
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!IsPublished(publication)) throw new IOException("Published audio changed before source removal.");
+        if (publication.RetainSource) return;
         if (Path.GetFullPath(publication.SourcePath) == ContainedPath(publication.DestinationPath)) return;
         var source = new FileInfo(publication.SourcePath);
         if (!source.Exists) return;
@@ -107,7 +108,8 @@ public sealed class AudioImportFiles : IAudioImportFiles
             File.Move(staged, destination, overwrite: true);
             var published = new FileInfo(destination);
             return new AudioImportPublication(recording.Id, Path.GetFullPath(sourcePath),
-                Path.GetRelativePath(musicRoot, destination), published.Length, published.LastWriteTimeUtc.Ticks, stagedChecksum);
+                Path.GetRelativePath(musicRoot, destination), published.Length, published.LastWriteTimeUtc.Ticks, stagedChecksum,
+                Path.GetDirectoryName(Path.GetFullPath(sourcePath)) == Path.Combine(musicRoot, ".audio-import-rejected"));
         }
         finally { if (File.Exists(staged)) File.Delete(staged); }
     }
@@ -155,8 +157,16 @@ public interface IAudioImportJournal
 public sealed class AudioImportJournal(string musicRoot, Guid albumIdentifier, string sourceIdentity) : IAudioImportJournal
 {
     private const int MaximumJournalBytes = 4194304;
-    private string JournalPath => Path.Combine(musicRoot, ".audio-import-state", albumIdentifier + "-"
-        + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sourceIdentity))) + ".json");
+    private string? existingFilename;
+    private string JournalPath => Path.Combine(musicRoot, ".audio-import-state", existingFilename ?? (albumIdentifier + "-"
+        + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sourceIdentity))) + ".json"));
+
+    public static AudioImportJournal OpenExisting(string musicRoot, Guid albumIdentifier, string filename)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(filename, "^" + albumIdentifier + "-[A-Fa-f0-9]{64}\\.json$"))
+            throw new InvalidDataException("Existing import journal does not belong to this album.");
+        return new AudioImportJournal(musicRoot, albumIdentifier, string.Empty) { existingFilename = filename };
+    }
 
     public Task<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken)
     {

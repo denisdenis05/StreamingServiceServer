@@ -25,8 +25,8 @@ public static class AudioMatchPolicy
     public static bool SameTitle(string? expected, string? actual)
     {
         if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual)) return false;
-        var target = Normalize(expected);
-        var candidate = Normalize(actual);
+        var target = Normalize(WithoutFeaturedCredit(expected));
+        var candidate = Normalize(WithoutFeaturedCredit(actual));
         if (target.Length == 0 || candidate.Length == 0) return expected.Trim().Equals(actual.Trim(), StringComparison.OrdinalIgnoreCase);
         return target == candidate || (target.Length >= 10 && candidate.Length >= 10 && Fuzz.Ratio(target, candidate) >= 92);
     }
@@ -59,4 +59,8 @@ public static class AudioMatchPolicy
     private static bool ArtistMatches(string expected, string actual) =>
         Regex.Split(actual, @";|\s+(?:feat\.?|ft\.?|featuring)\s+", RegexOptions.IgnoreCase)
             .Any(credit => SameTitle(expected, credit));
+
+    private static string WithoutFeaturedCredit(string value) => Regex.Replace(value,
+        @"\s*[\[(]\s*(?:feat\.?|ft\.?|featuring)\s+[^\])]+[\])]|\s+(?:feat\.?|ft\.?|featuring)\s+.+$",
+        string.Empty, RegexOptions.IgnoreCase).Trim();
 }

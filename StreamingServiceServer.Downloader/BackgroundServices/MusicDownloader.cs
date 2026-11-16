@@ -59,6 +59,20 @@ public class MusicDownloader : BackgroundService
 
         foreach (var album in albumsToDownload)
         {
+            try
+            {
+                var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+                var recovery = new QueuedAudioRecovery(configuration["Music:Path"] ?? "./Music", dbContext,
+                    scope.ServiceProvider.GetRequiredService<StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService>(),
+                    scope.ServiceProvider.GetRequiredService<StreamingServiceServer.Business.Services.MusicSearch.IMetadataService>(),
+                    scope.ServiceProvider.GetRequiredService<StreamingServiceServer.Business.Services.Images.IImageService>());
+                if (await recovery.TryCompleteAsync(album, cancellationToken)) continue;
+            }
+            catch (Exception failure) when (failure is IOException or HttpRequestException && !cancellationToken.IsCancellationRequested)
+            {
+                Console.WriteLine($"[MusicDownloader] Local recovery deferred for {album.Id}: {failure.Message}");
+                continue;
+            }
             IAsyncDisposable ownership;
             try
             {
@@ -74,6 +88,7 @@ public class MusicDownloader : BackgroundService
                 && !dbContext.PendingDownloads.Any(pending => pending.Id == release.Id)
                 && !dbContext.FailedDownloads.Any(failed => failed.Id == release.Id), cancellationToken)) continue;
             bool downloadStarted = false;
+            bool providerUnavailable = false;
 
             foreach (var (provider, config) in providers)
             {
@@ -108,10 +123,11 @@ public class MusicDownloader : BackgroundService
                 catch (Exception exception)
                 {
                     Console.WriteLine($"[MusicDownloader] {provider.ProviderName} failed: {exception.Message}");
+                    providerUnavailable = true;
                 }
             }
 
-            if (!downloadStarted)
+            if (!downloadStarted && !providerUnavailable)
             {
                 Console.WriteLine($"[MusicDownloader] All providers failed for '{album.Artist} - {album.Title}'. Marking as failed.");
 

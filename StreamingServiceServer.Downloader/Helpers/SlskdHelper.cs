@@ -5,7 +5,7 @@ using StreamingServiceDownloader.Models.Slskd;
 
 namespace StreamingServiceDownloader.Helpers;
 
-public class SlskdHelper
+public class SlskdHelper : ISoulseekAlbumSearchClient
 {
     private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
@@ -118,6 +118,46 @@ public class SlskdHelper
         return clone;
     }
 
+
+    private const int MissingPathSeparatorIndex = -1;
+    private const string PeerDirectoryEndpointPath = "/api/v0/users/{0}/directory";
+    private const char UnixPathSeparator = '/';
+    private const char SoulseekPathSeparator = '\\';
+    private static readonly char[] RemotePathSeparators = [UnixPathSeparator, SoulseekPathSeparator];
+    private const string JsonMediaType = "application/json";
+    private static readonly JsonSerializerOptions DirectorySerializationOptions = new() { PropertyNameCaseInsensitive = true };
+
+    public async Task<List<SlskdFile>> GetDirectoryFilesAsync(string username, string directoryPath,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post,
+            _baseUrl + string.Format(PeerDirectoryEndpointPath, Uri.EscapeDataString(username)))
+        {
+            Content = new StringContent(JsonSerializer.Serialize(new { directory = directoryPath }),
+                Encoding.UTF8, JsonMediaType)
+        };
+        using var response = await SendAuthenticatedAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var directories = JsonSerializer.Deserialize<List<SlskdDirectory>>(
+            await response.Content.ReadAsStringAsync(cancellationToken), DirectorySerializationOptions) ?? [];
+        return directories.Where(directory => !string.IsNullOrWhiteSpace(directory.Name)
+                && SlskdSourceIdentity.NormalizePath(directory.Name)
+                == SlskdSourceIdentity.NormalizePath(directoryPath))
+            .SelectMany(directory => directory.Files ?? [])
+            .Where(file => !string.IsNullOrWhiteSpace(file.Filename))
+            .Select(file => new SlskdFile
+            {
+                Filename = file.Filename!.IndexOfAny(RemotePathSeparators) == MissingPathSeparatorIndex
+                    ? directoryPath.TrimEnd(RemotePathSeparators)
+                        + (directoryPath.Contains(SoulseekPathSeparator) ? SoulseekPathSeparator : UnixPathSeparator)
+                        + file.Filename : file.Filename,
+                Size = file.Size, BitRate = file.BitRate, BitDepth = file.BitDepth,
+                SampleRate = file.SampleRate, Extension = file.Extension, IsLocked = file.IsLocked
+            })
+            .Where(file => SlskdSourceIdentity.DirectoryOf(file.Filename!)
+                == SlskdSourceIdentity.NormalizePath(directoryPath))
+            .DistinctBy(file => file.Filename, StringComparer.Ordinal).ToList();
+    }
 
     public async Task<Guid?> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
@@ -519,9 +559,14 @@ public class SlskdHelper
     {
         try
         {
-            var request = new HttpRequestMessage(HttpMethod.Delete, $"{_baseUrl}/api/v0/searches/{searchId}");
-            AddAuthHeaders(request);
+            using var request = new HttpRequestMessage(HttpMethod.Delete, $"{_baseUrl}/api/v0/searches/{searchId}");
+            using var response = await SendAuthenticatedAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
         }
-        catch { }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            Console.WriteLine($"[Soulseek] Search cleanup failed for '{searchId}': {failure.Message}");
+        }
     }
 }

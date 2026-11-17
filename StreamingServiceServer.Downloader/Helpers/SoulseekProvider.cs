@@ -13,6 +13,8 @@ namespace StreamingServiceDownloader.Helpers;
 public class SoulseekProvider : IDownloadProvider
 {
     private readonly SlskdHelper _slskdHelper;
+    private readonly ISoulseekAlbumSearchClient _searchClient;
+    private readonly Func<CancellationToken, Task> _waitForSearchSlot;
     private string[] _artistAliases = [];
     private int _expectedTrackCount;
     private readonly StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService? _metadataSource;
@@ -21,6 +23,7 @@ public class SoulseekProvider : IDownloadProvider
     private static DateTime _lastSearchTime = DateTime.MinValue;
     private static readonly TimeSpan MinInterSearchDelay = TimeSpan.FromSeconds(6);
 
+    private const int NoSearchFiles = 0;
     private const long MinAudioFileSizeBytes = 500 * 1024;        
     private const long MaxAudioFileSizeBytes = 200 * 1024 * 1024; 
 
@@ -34,10 +37,13 @@ public class SoulseekProvider : IDownloadProvider
 
     public string ProviderName => "Soulseek";
 
-    public SoulseekProvider(SlskdHelper slskdHelper, StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService? metadataSource = null)
+    public SoulseekProvider(SlskdHelper slskdHelper, StreamingServiceServer.Business.Services.MusicSearch.IExternalMusicSearchService? metadataSource = null,
+        ISoulseekAlbumSearchClient? searchClient = null, Func<CancellationToken, Task>? waitForSearchSlot = null)
     {
         _slskdHelper = slskdHelper;
         _metadataSource = metadataSource;
+        _searchClient = searchClient ?? slskdHelper;
+        _waitForSearchSlot = waitForSearchSlot ?? ThrottleSearchAsync;
     }
 
     public void ApplyConfig(DownloadProviderConfig config)
@@ -60,6 +66,8 @@ public class SoulseekProvider : IDownloadProvider
             throw new HttpRequestException("Album metadata is unavailable; source selection will be retried.");
         var queries = GenerateSearchQueries(release);
 
+        var receivedNormalSearchFiles = false;
+        var normalSearchUnavailable = false;
         foreach (var queryOption in queries)
         {
             if (string.IsNullOrWhiteSpace(queryOption.Query)) continue;
@@ -67,23 +75,29 @@ public class SoulseekProvider : IDownloadProvider
             Console.WriteLine($"[Soulseek] Initiating search query (ContainsArtist={queryOption.ContainsArtist}): '{queryOption.Query}'");
 
 
-            await ThrottleSearchAsync(cancellationToken);
+            await _waitForSearchSlot(cancellationToken);
 
 
-            var searchId = await _slskdHelper.SearchAsync(queryOption.Query, cancellationToken);
-            if (searchId == null) continue;
+            var searchId = await _searchClient.SearchAsync(queryOption.Query, cancellationToken);
+            if (searchId == null)
+            {
+                normalSearchUnavailable = true;
+                continue;
+            }
 
             bool downloadEnqueued = false;
             try
             {
 
-                var searchResult = await _slskdHelper.WaitForSearchResultsAsync(searchId.Value, 90, cancellationToken);
+                var searchResult = await _searchClient.WaitForSearchResultsAsync(searchId.Value, ISoulseekAlbumSearchClient.SearchTimeoutSeconds, cancellationToken);
+                normalSearchUnavailable |= searchResult is null;
                 if (searchResult?.Responses == null || searchResult.Responses.Count == 0)
                 {
                     Console.WriteLine($"[Soulseek] No search responses for query '{queryOption.Query}', trying next tier...");
                     continue;
                 }
 
+                receivedNormalSearchFiles |= searchResult.Responses.Any(response => response.Files?.Count > NoSearchFiles);
                 Console.WriteLine($"[Soulseek] Received {searchResult.Responses.Count} responses for query '{queryOption.Query}'.");
 
 
@@ -101,7 +115,7 @@ public class SoulseekProvider : IDownloadProvider
                             candidate.DirectoryPath, candidate.Files);
                         try
                         {
-                            await _slskdHelper.StartAlbumDownloadAsync(selectedSource, cancellationToken);
+                            await _searchClient.StartAlbumDownloadAsync(selectedSource, cancellationToken);
                             downloadEnqueued = true;
                             return new DownloadSearchResult
                             {
@@ -122,8 +136,20 @@ public class SoulseekProvider : IDownloadProvider
             finally
             {
                 if (!downloadEnqueued)
-                    await _slskdHelper.DeleteSearchAsync(searchId.Value, cancellationToken);
+                    await _searchClient.DeleteSearchAsync(searchId.Value, cancellationToken);
             }
+        }
+
+        if (!receivedNormalSearchFiles && !normalSearchUnavailable)
+        {
+            var fallback = new SoulseekTrackSearchFallback(_searchClient, _waitForSearchSlot,
+                (responses, formats, requiredTrackCount) => formats
+                    .Where(FormatExtensions.ContainsKey)
+                    .SelectMany(format => RankCandidateDirectories(release, false, responses,
+                        FormatExtensions[format], requiredTrackCount)).ToList(),
+                title => CleanSearchQuery(RemoveDiacriticsAndNormalizeSymbols(title)));
+            var fallbackResult = await fallback.SearchAndEnqueueAsync(release, expected, formatOrder, cancellationToken);
+            if (fallbackResult is not null) return fallbackResult;
         }
 
         Console.WriteLine($"[Soulseek] All queries exhausted for '{release.Artist} - {release.Title}'. No suitable download found.");
@@ -276,6 +302,14 @@ public class SoulseekProvider : IDownloadProvider
         bool queryContainsArtist,
         List<SlskdSearchResponse> responses,
         HashSet<string> allowedExtensions)
+        => RankCandidateDirectories(release, queryContainsArtist, responses, allowedExtensions, _expectedTrackCount);
+
+    private List<CandidateDirectory> RankCandidateDirectories(
+        ReleaseToDownload release,
+        bool queryContainsArtist,
+        List<SlskdSearchResponse> responses,
+        HashSet<string> allowedExtensions,
+        int requiredTrackCount)
     {
         var candidates = new List<CandidateDirectory>();
 
@@ -318,7 +352,7 @@ public class SoulseekProvider : IDownloadProvider
                     .Select(f => new SlskdFileDownloadRequest { Filename = f.Filename!, Size = f.Size })
                     .ToList();
 
-                if (validAudioFiles.Count < _expectedTrackCount) continue;
+                if (validAudioFiles.Count < requiredTrackCount) continue;
                 if (validAudioFiles.Count == 0)
                 {
                     var rejectedFiles = allFilesInGroup.Where(f => f.Filename != null).Take(3)

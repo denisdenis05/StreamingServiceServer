@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using StreamingServiceServer.API.Lyrics;
 using StreamingServiceServer.API.Recommendations;
 using StreamingServiceServer.API.AudioAnalysis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -20,6 +21,7 @@ builder.Services.RegisterHelpers();
 builder.Services.AddHostedService<MusicDownloader>();
 builder.Services.AddHostedService<PendingDownloadChecker>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddLyricsDownloads(builder.Configuration);
 builder.Services.AddSingleton<IMusicBrainzQueueClock, MusicBrainzQueueClock>();
 builder.Services.AddSingleton<IMusicBrainzRequestQueue, MusicBrainzRequestQueue>();
 builder.Services.AddLocalAudioAnalysis(builder.Configuration, builder.Environment);

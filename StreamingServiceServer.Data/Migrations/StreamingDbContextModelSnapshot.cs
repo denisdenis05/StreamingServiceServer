@@ -773,6 +773,22 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("Listens");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.LyricsQueueState", b =>
+                {
+                    b.Property<string>("Provider")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("NextRequestAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Provider");
+
+                    b.ToTable("LyricsQueueStates");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.PendingDownload", b =>
                 {
                     b.Property<Guid>("Id")
@@ -996,6 +1012,57 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasIndex("Profile", "AnalyzedAt");
 
                     b.ToTable("RecordingAudioAnalyses");
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecordingLyrics", b =>
+                {
+                    b.Property<Guid>("RecordingIdentifier")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("LastFailure")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Lyricsfile")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PlainLyrics")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("ProviderIdentifier")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SourceRevision")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("State")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SyncedLyrics")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("RecordingIdentifier");
+
+                    b.HasIndex("NextAttemptAt", "RecordingIdentifier");
+
+                    b.ToTable("RecordingLyrics");
                 });
 
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Release", b =>
@@ -1226,6 +1293,15 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasOne("StreamingServiceServer.Data.Models.Recording", null)
                         .WithOne()
                         .HasForeignKey("StreamingServiceServer.Data.Models.RecordingAudioAnalysis", "RecordingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecordingLyrics", b =>
+                {
+                    b.HasOne("StreamingServiceServer.Data.Models.Recording", null)
+                        .WithOne()
+                        .HasForeignKey("StreamingServiceServer.Data.Models.RecordingLyrics", "RecordingIdentifier")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

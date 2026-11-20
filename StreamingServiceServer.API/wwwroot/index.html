@@ -214,6 +214,40 @@
           <button id="cover-progress-next" class="btn-secondary" disabled>Next</button>
         </div>
       </section>
+      <section class="cover-progress-panel" aria-labelledby="lyrics-queue-heading">
+        <div class="cover-progress-heading">
+          <div>
+            <h2 id="lyrics-queue-heading">lyrics downloads</h2>
+            <p>Stored locally for offline use. Tracks flagged with name or artist mismatches in audio analysis are skipped.</p>
+          </div>
+          <strong id="lyrics-queue-summary" aria-live="polite">—</strong>
+        </div>
+        <div class="cover-progress-controls">
+          <label>Show
+            <select id="lyrics-queue-filter" class="form-input">
+              <option value="All">All tracks</option>
+              <option value="Pending">Queued</option>
+              <option value="Downloaded">Downloaded</option>
+              <option value="Skipped">Skipped</option>
+              <option value="Failed">Retrying</option>
+              <option value="NotFound">No lyrics found</option>
+              <option value="Instrumental">Instrumental</option>
+            </select>
+          </label>
+        </div>
+        <div class="cover-progress-table">
+          <table class="table-view">
+            <thead><tr><th>Track</th><th>Artist</th><th>Lyrics status</th></tr></thead>
+            <tbody id="lyrics-queue-rows"></tbody>
+          </table>
+        </div>
+        <p id="lyrics-queue-message" role="status"></p>
+        <div class="cover-progress-pagination">
+          <button id="lyrics-queue-previous" class="btn-secondary" disabled>Previous</button>
+          <span id="lyrics-queue-page"></span>
+          <button id="lyrics-queue-next" class="btn-secondary" disabled>Next</button>
+        </div>
+      </section>
       <h2 class="section-title">audio downloads</h2>
 
       <table class="table-view">
@@ -785,10 +819,11 @@
   </section>
 
   <script src="/js/browser-player.js?v=20261115-manual-source"></script>
+  <script src="/js/lyrics-queue.js?v=20261120-lyrics"></script>
   <script src="/js/cover-progress.js?v=20261115-manual-source"></script>
   <script src="/js/dashboard-polling.js?v=20261115-manual-source"></script>
   <script src="/js/musicbrainz-search.js?v=20261115-manual-source"></script>
   <script src="/js/audio-analysis-settings.js?v=20261110-local-analysis"></script>
-  <script src="/js/dashboard.js?v=20261115-manual-source"></script>
+  <script src="/js/dashboard.js?v=20261120-lyrics"></script>
 </body>
 </html>

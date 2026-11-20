@@ -5,6 +5,7 @@
 
 const API_BASE = '/api/dashboard';
 let coverDownloadProgress = null;
+let lyricsDownloadQueue = null;
 let browserPlayer = null;
 let audioAnalysisSettings = null;
 let dashboardPolling = null;
@@ -49,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initApp() {
   browserPlayer = DashboardBrowserPlayer.createController({ document, request: authFetch, authentication: () => state.authToken,
     clearSession: () => fetch('/Stream/browser-session', { method: 'DELETE' }) });
+  lyricsDownloadQueue = LyricsDownloadQueue.createController({ document, request: authFetch, isAuthorized: isAdmin, escapeHtml });
   coverDownloadProgress = CoverDownloadProgress.createController({ document, request: authFetch, isAuthorized: isAdmin, escapeHtml,
     onAlbumSelected(identifier) { window.location.hash = '#album?id=' + encodeURIComponent(identifier); } });
   audioAnalysisSettings = AudioAnalysisSettings.createController({ document, request: authFetch, isAuthorized: isAdmin, endpointBase: API_BASE });
@@ -296,6 +298,7 @@ function setupDashboardPolling() {
     if (!response.ok) throw new Error(`Could not load ${resource.name}`);
     return response.json();
   } }));
+  resources.push({ name: 'lyrics', views: ['queue'], load: () => lyricsDownloadQueue.refresh(), publish() {} });
   resources.push({ name: 'covers', views: ['queue'], load: () => coverDownloadProgress.refresh(), publish() {} });
   dashboardPolling = DashboardPolling.createController({ resources });
 }
@@ -305,10 +308,12 @@ function synchronizeDashboardPolling() {
   const view = getCurrentView();
   if (pollingAuthenticationIdentity !== state.authToken) {
     coverDownloadProgress?.setActive(false);
+    lyricsDownloadQueue?.setActive(false);
     pollingAuthenticationIdentity = state.authToken;
     downloadedSearch = '';
   }
   coverDownloadProgress?.setActive(visible && view === 'queue');
+  lyricsDownloadQueue?.setActive(visible && view === 'queue');
   dashboardPolling?.setContext({ view, visible, authorized: isAdmin(), identity: state.authToken + ':' + downloadedSearch });
 }
 

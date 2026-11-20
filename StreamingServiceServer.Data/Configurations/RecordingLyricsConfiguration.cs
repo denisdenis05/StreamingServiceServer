@@ -11,6 +11,8 @@ public sealed class RecordingLyricsConfiguration : IEntityTypeConfiguration<Reco
         builder.HasKey(lyrics => lyrics.RecordingIdentifier);
         builder.HasOne<Recording>().WithOne().HasForeignKey<RecordingLyrics>(lyrics => lyrics.RecordingIdentifier).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(lyrics => new { lyrics.NextAttemptAt, lyrics.RecordingIdentifier });
+        builder.HasIndex(lyrics => new { lyrics.LookupVersion, lyrics.State, lyrics.LastFailure, lyrics.NextAttemptAt });
+        builder.Property(lyrics => lyrics.LookupVersion).HasDefaultValue(LyricsLookupVersions.Original);
         builder.Property(lyrics => lyrics.LeaseToken).IsConcurrencyToken();
     }
 }

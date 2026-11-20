@@ -20,6 +20,7 @@ public static class LyricsRegistration
         services.AddScoped<ILyricsJobStore, LyricsJobStore>();
         services.AddScoped<LyricsReader>();
         services.AddScoped<LyricsTrackMatchStore>();
+        services.AddTransient<ILyricsRequestDelay, LyricsRequestDelay>();
         services.AddHttpClient<ILyricsProvider, LrclibLyricsProvider>(client =>
         {
             client.BaseAddress = new Uri(LyricsProtocol.BaseAddress);

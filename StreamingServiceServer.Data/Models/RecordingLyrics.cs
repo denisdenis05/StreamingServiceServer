@@ -2,6 +2,12 @@ namespace StreamingServiceServer.Data.Models;
 
 public enum LyricsDownloadState { Pending, Downloaded, Instrumental, NotFound, Skipped, Failed }
 
+public static class LyricsLookupVersions
+{
+    public const int Original = 0;
+    public const int Current = 1;
+}
+
 public sealed class RecordingLyrics
 {
     public Guid RecordingIdentifier { get; set; }
@@ -14,6 +20,7 @@ public sealed class RecordingLyrics
     public Guid? LeaseToken { get; set; }
     public DateTimeOffset? LeaseUntil { get; set; }
     public int Attempts { get; set; }
+    public int LookupVersion { get; set; }
     public DateTimeOffset NextAttemptAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string LastFailure { get; set; } = string.Empty;

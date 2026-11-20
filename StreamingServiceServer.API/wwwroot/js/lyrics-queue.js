@@ -10,7 +10,7 @@
     Pending: 'Queued', Downloaded: 'Downloaded', Instrumental: 'Instrumental',
     NotFound: 'No lyrics found', Skipped: 'Skipped', Failed: 'Retrying',
     naming_issue: 'Audio analysis: name or artist mismatch', invalid_metadata: 'Incomplete recording metadata',
-    unmatched_recording: 'No confident recording match', lyrics_not_found: 'No lyrics found',
+    unmatched_recording: 'No confident recording match', ambiguous_recording: 'Multiple conflicting recording matches', lyrics_not_found: 'No lyrics found',
     provider_failure: 'Lyrics service unavailable', provider_timeout: 'Lyrics service timed out',
     metadata_changed: 'Recording changed; queued again', invalid_response: 'Invalid lyrics response',
     loading: 'Loading lyrics downloads…', unauthorized: 'Sign in as an administrator to view lyrics downloads.',
@@ -52,7 +52,7 @@
         const reason = Object.hasOwn(Labels, job.lastFailure) ? Labels[job.lastFailure] : Policy.emptyText;
         const status = job.isDownloading && job.state === Policy.pendingState ? Labels.downloading : state;
         return '<tr><td>' + escapeHtml(job.title) + '</td><td>' + escapeHtml(job.artist)
-          + '</td><td>' + escapeHtml(status) + (reason ? Labels.reasonSeparator + escapeHtml(reason) : Policy.emptyText) + '</td></tr>';
+          + '</td><td>' + escapeHtml(status) + (reason && reason !== status ? Labels.reasonSeparator + escapeHtml(reason) : Policy.emptyText) + '</td></tr>';
       }).join(Policy.emptyText);
       const lastPage = Math.max(Policy.firstPage, Math.ceil(data.filteredJobs / data.pageSize));
       elements.page.textContent = Labels.pagePrefix + page + Labels.pageSeparator + lastPage;

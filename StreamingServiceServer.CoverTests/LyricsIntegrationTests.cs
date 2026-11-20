@@ -56,7 +56,7 @@ public sealed class LyricsIntegrationTests
         await store.DiscoverAsync(LyricsTestData.TwoCalls, CancellationToken.None);
         var lease = await store.ClaimAsync(new LyricsOptions().LeaseLifetime, CancellationToken.None);
         var retryAt = fixture.Clock.GetUtcNow() + LyricsTestData.ProviderCooldown;
-        await store.FailAsync(lease!, LyricsProtocol.ProviderFailure, retryAt, CancellationToken.None);
+        await store.FailAsync(lease!, LyricsProtocol.ProviderFailure, retryAt, retryAt, CancellationToken.None);
         await store.ReleaseAsync(lease!, retryAt, CancellationToken.None);
         var failed = await database.RecordingLyrics.AsNoTracking().SingleAsync(job => job.RecordingIdentifier == lease!.Job.RecordingIdentifier);
         Assert.Equal(LyricsTestData.OneCall, failed.Attempts);
@@ -197,6 +197,23 @@ public sealed class LyricsIntegrationTests
     }
 
     [PostgresFact]
+    public async Task RepeatedArtistCreditsDoNotCorruptTheLookupArtist()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        using var scope = fixture.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        await SeedAsync(database);
+        database.RecordingArtistCredits.AddRange(
+            new RecordingArtistCredit { Id = LyricsTestData.CreditIdentifier, RecordingId = LyricsTestData.RecordingIdentifier,
+                Name = LyricsTestData.Artist, ArtistId = LyricsTestData.ArtistIdentifier },
+            new RecordingArtistCredit { Id = LyricsRegressionData.SecondaryCreditIdentifier, RecordingId = LyricsTestData.RecordingIdentifier,
+                Name = LyricsRegressionData.SpacedUppercaseArtist, ArtistId = LyricsTestData.ArtistIdentifier });
+        await database.SaveChangesAsync();
+        var actual = await new LyricsCatalog(database).ReadAsync(LyricsTestData.RecordingIdentifier, CancellationToken.None);
+        Assert.Equal(LyricsTestData.Artist, actual!.Artist);
+    }
+
+    [PostgresFact]
     public async Task RecordingCreditsOverrideTheAlbumArtistAndMissingDurationIsSkipped()
     {
         await using var fixture = await DatabaseFixture.CreateAsync();
@@ -211,6 +228,53 @@ public sealed class LyricsIntegrationTests
         await database.Recordings.ExecuteUpdateAsync(update => update.SetProperty(recording => recording.Length, (int?)null));
         var response = await new LyricsReader(database, catalog).ReadAsync(LyricsTestData.RecordingIdentifier, CancellationToken.None);
         Assert.Equal(LyricsProtocol.InvalidMetadata, response!.Reason);
+    }
+
+    [PostgresFact]
+    public async Task DuplicatePrimaryAndFeaturedCreditsKeepPrimaryAndFenceCreditChanges()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        using var scope = fixture.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        await SeedAsync(database);
+        database.RecordingArtistCredits.AddRange(
+            new RecordingArtistCredit { Id = LyricsTestData.CreditIdentifier, RecordingId = LyricsTestData.RecordingIdentifier,
+                Name = LyricsTestData.OtherArtist },
+            new RecordingArtistCredit { Id = LyricsRegressionData.SecondaryCreditIdentifier, RecordingId = LyricsTestData.RecordingIdentifier,
+                Name = LyricsTestData.Artist, ArtistId = LyricsTestData.ArtistIdentifier },
+            new RecordingArtistCredit { Id = LyricsRegressionData.FeaturedCreditIdentifier, RecordingId = LyricsTestData.RecordingIdentifier,
+                Name = LyricsRegressionData.SpacedUppercaseArtist, ArtistId = LyricsTestData.ArtistIdentifier });
+        await database.SaveChangesAsync();
+        var catalog = new LyricsCatalog(database);
+        var original = (await catalog.ReadAsync(LyricsTestData.RecordingIdentifier, CancellationToken.None))!;
+        Assert.Equal(LyricsTestData.Artist, original.Artist);
+        Assert.NotNull(original.ArtistCreditRevision);
+        await database.RecordingArtistCredits.Where(credit => credit.Id == LyricsTestData.CreditIdentifier).ExecuteDeleteAsync();
+        database.RecordingArtistCredits.Add(new RecordingArtistCredit { Id = LyricsRegressionData.ReorderedCreditIdentifier,
+            RecordingId = LyricsTestData.RecordingIdentifier, Name = LyricsTestData.OtherArtist });
+        await database.SaveChangesAsync();
+        Assert.Equal(original.Revision, (await catalog.ReadAsync(LyricsTestData.RecordingIdentifier, CancellationToken.None))!.Revision);
+        await database.RecordingArtistCredits.Where(credit => credit.Name == LyricsTestData.OtherArtist).ExecuteDeleteAsync();
+        var withoutFeaturedArtist = (await catalog.ReadAsync(LyricsTestData.RecordingIdentifier, CancellationToken.None))!;
+        Assert.Equal(original.Artist, withoutFeaturedArtist.Artist);
+        Assert.NotEqual(original.Revision, withoutFeaturedArtist.Revision);
+        Assert.Null(withoutFeaturedArtist.ArtistCreditRevision);
+    }
+
+    [PostgresFact]
+    public async Task BlankCreditNameUsesItsLinkedArtistRatherThanAlbumArtist()
+    {
+        await using var fixture = await DatabaseFixture.CreateAsync();
+        using var scope = fixture.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<StreamingDbContext>();
+        await SeedAsync(database);
+        database.RecordingArtistCredits.Add(new RecordingArtistCredit { Id = LyricsTestData.CreditIdentifier,
+            RecordingId = LyricsTestData.RecordingIdentifier, Name = string.Empty,
+            Artist = new Artist { Id = LyricsRegressionData.FeaturedArtistIdentifier, Name = LyricsTestData.OtherArtist,
+                SortName = LyricsTestData.OtherArtist } });
+        await database.SaveChangesAsync();
+        Assert.Equal(LyricsTestData.OtherArtist, (await new LyricsCatalog(database)
+            .ReadAsync(LyricsTestData.RecordingIdentifier, CancellationToken.None))!.Artist);
     }
 
     [PostgresFact]

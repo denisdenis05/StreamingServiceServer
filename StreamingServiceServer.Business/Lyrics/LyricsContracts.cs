@@ -34,10 +34,22 @@ public static class LyricsProtocol
     public const int MaximumNameLength = 500;
     public const int FirstPage = 1;
     public const int DefaultPageSize = 50;
+    public const int MinimumPageSize = 1;
     public const int MaximumPageSize = 200;
     public const int MaximumPage = 100000;
     public const int MaximumSearchLength = 200;
     public const string JsonMediaType = "application/json";
+}
+
+public static class LyricsTrackMatchProtocol
+{
+    public const string RecordingIdentifierProperty = "recordingId";
+    public const string IssuesProperty = "issues";
+    public const string IssueTypeProperty = "Type";
+    public const string CamelCaseIssueTypeProperty = "type";
+    public const string TitleMismatch = "name_mismatch";
+    public const string ArtistMismatch = "artist_mismatch";
+    public const string EmptyIssues = "[]";
 }
 
 public sealed class LyricsOptions

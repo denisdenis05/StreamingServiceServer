@@ -1,3 +1,4 @@
+using static StreamingServiceServer.Business.Lyrics.LyricsTrackMatchProtocol;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StreamingServiceServer.Data;
@@ -7,12 +8,6 @@ namespace StreamingServiceServer.Business.Lyrics;
 public sealed class LyricsCatalog(StreamingDbContext database) : ILyricsCatalog
 {
     private const int NoArtistCredits = 0;
-    private const string RecordingIdentifierProperty = "recordingId";
-    private const string IssuesProperty = "issues";
-    private const string IssueTypeProperty = "Type";
-    private const string CamelCaseIssueTypeProperty = "type";
-    private const string TitleMismatch = "name_mismatch";
-    private const string ArtistMismatch = "artist_mismatch";
     private const string ArtistSeparator = " & ";
 
     public async Task<LyricsTrack?> ReadAsync(Guid recordingIdentifier, CancellationToken cancellationToken)

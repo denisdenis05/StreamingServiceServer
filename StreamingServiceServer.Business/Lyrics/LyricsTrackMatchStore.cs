@@ -1,3 +1,4 @@
+using static StreamingServiceServer.Business.Lyrics.LyricsTrackMatchProtocol;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StreamingServiceServer.Data;
@@ -7,9 +8,6 @@ namespace StreamingServiceServer.Business.Lyrics;
 
 public sealed class LyricsTrackMatchStore(StreamingDbContext database, TimeProvider clock)
 {
-    private const string RecordingIdentifierProperty = "recordingId";
-    private const string IssuesProperty = "issues";
-    private const string EmptyIssues = "[]";
 
     public async Task SaveAsync(Guid albumIdentifier, IReadOnlyCollection<Guid> evaluatedRecordingIdentifiers,
         string issuesJson, CancellationToken cancellationToken)

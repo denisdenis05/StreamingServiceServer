@@ -43,7 +43,7 @@ The isolated PostgreSQL cluster uses `/tmp/streaming-lyrics-postgres.5ttnt3jl/so
 
 Final checks on the completed source:
 
-- `COVER_TEST_POSTGRES='Host=/tmp/streaming-lyrics-postgres.5ttnt3jl/socket;Port=56441;Database=postgres;Username=denis' dotnet test StreamingServiceServer.CoverTests --no-build --no-restore --filter FullyQualifiedName~Lyrics --verbosity quiet`: 65 passed, none failed or skipped.
+- `COVER_TEST_POSTGRES='Host=/tmp/streaming-lyrics-postgres.5ttnt3jl/socket;Port=56441;Database=postgres;Username=denis' dotnet test StreamingServiceServer.CoverTests --no-restore --filter FullyQualifiedName~Lyrics --verbosity quiet`: 65 passed, none failed or skipped.
 - `node --test tools/*.test.cjs`: 81 passed, including 10 new lyrics panel tests and existing dashboard, cover and browser-player tests.
 - `dotnet publish StreamingServiceServer.API --configuration Release --no-restore --output /tmp/streaming-lyrics-publish --verbosity quiet`: exit 0. Existing nullable and dependency-version warnings remain; no warnings refer to the new lyrics sources.
 - `dotnet ef migrations has-pending-model-changes --no-build --project StreamingServiceServer.Data --startup-project StreamingServiceServer.Data`: exit 0, no pending model changes.
@@ -61,4 +61,4 @@ Host tests and static dashboard checks do not establish a deployed migration, re
 
 ## Delivery
 
-The implementation and final checks are complete. The current environment cannot authenticate an HTTPS GitHub push: `git push --dry-run origin HEAD` fails with `could not read Username`. A local chapter commit is ready for publication; pushing and creating the PR require GitHub authentication. No deployment or merge is authorized.
+Implementation commit: `ae51dae`. The final validation commit centralizes the dashboard mismatch field names and records the checks. The user supplied GitHub authentication through a private credential card after the initial HTTPS push reported missing credentials. Publish `feat/local-lyrics-download-queue` and create its PR against `master`; no deployment or merge is authorized. The disposable PostgreSQL instance was stopped after validation. Phone-side lyrics remain separate work.

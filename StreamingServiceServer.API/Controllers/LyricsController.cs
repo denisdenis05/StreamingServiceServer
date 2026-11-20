@@ -61,7 +61,7 @@ public sealed class LyricsQueueController(StreamingDbContext database, TimeProvi
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery, Range(LyricsProtocol.FirstPage, LyricsProtocol.MaximumPage)] int page = LyricsProtocol.FirstPage,
-        [FromQuery, Range(LyricsProtocol.FirstPage, LyricsProtocol.MaximumPageSize)] int pageSize = LyricsProtocol.DefaultPageSize,
+        [FromQuery, Range(LyricsProtocol.MinimumPageSize, LyricsProtocol.MaximumPageSize)] int pageSize = LyricsProtocol.DefaultPageSize,
         [FromQuery] LyricsDownloadState? state = null,
         [FromQuery, StringLength(LyricsProtocol.MaximumSearchLength)] string? search = null,
         CancellationToken cancellationToken = default)

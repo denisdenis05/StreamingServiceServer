@@ -69,7 +69,8 @@ public sealed class LyricsDownloadJobService(IServiceScopeFactory scopes, IOptio
                 var current = await catalog.ReadAsync(track.RecordingIdentifier, operation.Token);
                 if (current?.Revision != track.Revision)
                 {
-                    await store.FailAsync(lease, LyricsProtocol.ChangedMetadata, clock.GetUtcNow(), operation.Token);
+                    nextRequestAt = clock.GetUtcNow() + configuration.Value.RequestInterval;
+                    await store.FailAsync(lease, LyricsProtocol.ChangedMetadata, clock.GetUtcNow(), nextRequestAt, operation.Token);
                     return true;
                 }
                 var state = content is null ? LyricsDownloadState.NotFound
@@ -79,7 +80,7 @@ public sealed class LyricsDownloadJobService(IServiceScopeFactory scopes, IOptio
                         : configuration.Value.MetadataRecheckInterval), operation.Token);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (LyricsProviderException failure) when (failure.FailureCode == LyricsProtocol.UnmatchedRecording)
+            catch (LyricsProviderException failure) when (failure.FailureCode is LyricsProtocol.UnmatchedRecording or LyricsProtocol.AmbiguousRecording)
             {
                 var track = await scope.ServiceProvider.GetRequiredService<ILyricsCatalog>().ReadAsync(lease.Job.RecordingIdentifier, cancellationToken);
                 if (track is not null) await store.CompleteAsync(lease, track, LyricsDownloadState.Skipped, null, failure.FailureCode,
@@ -89,10 +90,13 @@ public sealed class LyricsDownloadJobService(IServiceScopeFactory scopes, IOptio
             {
                 var delay = RetryDelay(lease.Job.Attempts, configuration.Value);
                 if (failure is LyricsProviderException { RetryAfter: { } retryAfter } && retryAfter > delay) delay = retryAfter;
-                nextRequestAt = clock.GetUtcNow() + delay;
+                var providerDelay = failure is LyricsProviderException { RetryAfter: { } cooldown }
+                    ? cooldown : failure is HttpRequestException ? configuration.Value.InitialRetryDelay : configuration.Value.RequestInterval;
+                if (providerDelay < configuration.Value.RequestInterval) providerDelay = configuration.Value.RequestInterval;
+                nextRequestAt = clock.GetUtcNow() + providerDelay;
                 var code = failure is LyricsProviderException providerFailure ? providerFailure.FailureCode
                     : deadline.IsCancellationRequested ? LyricsProtocol.ProviderTimeout : LyricsProtocol.ProviderFailure;
-                await store.FailAsync(lease, code, nextRequestAt, cancellationToken);
+                await store.FailAsync(lease, code, clock.GetUtcNow() + delay, nextRequestAt, cancellationToken);
             }
             finally
             {

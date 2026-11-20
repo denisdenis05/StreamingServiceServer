@@ -12,7 +12,9 @@ const Fixture = Object.freeze({
   maliciousArtist: '<script>attack</script>', unsafeMarkup: /<img|<script>/, escapedMarkup: /&lt;img/,
   offline: 'offline', changeEvent: 'change', clickEvent: 'click', stateQuery: /state=Skipped/, secondPageQuery: /page=2/,
   status: 'Downloaded', authorizationMessage: /administrator/, refreshMessage: /retrying automatically/i,
-  initialMessage: /library is scanned/,
+  initialMessage: /library is scanned/, notFoundState: 'NotFound', notFoundReason: 'lyrics_not_found',
+  notFoundText: 'No lyrics found', expectedMissingStatus: '<td>No lyrics found</td>',
+  ambiguousReason: 'ambiguous_recording', ambiguousText: 'Multiple conflicting recording matches',
 });
 function deferred() {
   let resolve;
@@ -152,4 +154,25 @@ test('a library not yet discovered explains why its queue is empty', async () =>
   await flush();
   await scenario.complete(Fixture.firstIndex, scenario.page({ totalJobs: Fixture.noCalls, counts: [], jobs: [] }));
   assertion.match(scenario.elements.get(Fixture.message).textContent, Fixture.initialMessage);
+});
+
+test('missing lyrics status is shown once rather than repeated as its own reason', async () => {
+  const scenario = environment();
+  scenario.controller.setActive(true);
+  await flush();
+  await scenario.complete(Fixture.firstIndex, scenario.page({ jobs: [{ title: Fixture.title, artist: Fixture.artist,
+    state: Fixture.notFoundState, lastFailure: Fixture.notFoundReason }] }));
+  const rendered = scenario.elements.get(Fixture.rows).innerHTML;
+  assertion.ok(rendered.includes(Fixture.expectedMissingStatus));
+  assertion.equal(rendered.split(Fixture.notFoundText).length - Fixture.oneCall, Fixture.oneCall);
+});
+
+test('conflicting matches explain why lyrics were skipped', async () => {
+  const scenario = environment();
+  scenario.controller.setActive(true);
+  await flush();
+  await scenario.complete(Fixture.firstIndex, scenario.page({ jobs: [{
+    title: Fixture.title, artist: Fixture.artist, state: Fixture.skipped, lastFailure: Fixture.ambiguousReason,
+  }] }));
+  assertion.ok(scenario.elements.get(Fixture.rows).innerHTML.includes(Fixture.ambiguousText));
 });

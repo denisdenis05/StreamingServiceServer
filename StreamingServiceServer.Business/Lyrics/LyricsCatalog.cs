@@ -7,23 +7,21 @@ namespace StreamingServiceServer.Business.Lyrics;
 
 public sealed class LyricsCatalog(StreamingDbContext database) : ILyricsCatalog
 {
-    private const int NoArtistCredits = 0;
-    private const string ArtistSeparator = " & ";
-
     public async Task<LyricsTrack?> ReadAsync(Guid recordingIdentifier, CancellationToken cancellationToken)
     {
         var recording = await database.Recordings.AsNoTracking().Where(recording => recording.Id == recordingIdentifier)
             .Select(recording => new { recording.Title, recording.Length, Album = recording.Release.Title,
                 AlbumArtist = recording.Release.Artist.Name, AlbumIdentifier = recording.Release.Id,
-                Artists = recording.ArtistCredit.OrderBy(credit => credit.Id).Select(credit => credit.Name ?? credit.Artist!.Name).ToArray() })
+                Artists = recording.ArtistCredit.OrderBy(credit => credit.Id).Select(credit => string.IsNullOrWhiteSpace(credit.Name)
+                    ? credit.Artist == null ? null : credit.Artist.Name : credit.Name).ToArray() })
             .SingleOrDefaultAsync(cancellationToken);
         if (recording is null) return null;
         var issues = await database.AlbumAnalysisResults.AsNoTracking().Where(analysis => analysis.AlbumId == recording.AlbumIdentifier)
             .Select(analysis => analysis.TrackMatchIssuesJson).SingleOrDefaultAsync(cancellationToken);
-        var artist = recording.Artists.Length == NoArtistCredits ? recording.AlbumArtist
-            : string.Join(ArtistSeparator, recording.Artists);
+        var credits = LyricsArtistPolicy.Credits(recording.Artists);
+        var artist = LyricsArtistPolicy.Primary(recording.AlbumArtist, credits);
         return new LyricsTrack(recordingIdentifier, recording.Title, artist ?? string.Empty, recording.Album ?? string.Empty,
-            recording.Length, HasNamingIssue(issues, recordingIdentifier));
+            recording.Length, HasNamingIssue(issues, recordingIdentifier)) { ArtistCreditRevision = LyricsArtistPolicy.Revision(credits) };
     }
 
     public static bool HasNamingIssue(string? issues, Guid recordingIdentifier)

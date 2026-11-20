@@ -62,3 +62,64 @@ Host tests and static dashboard checks do not establish a deployed migration, re
 ## Delivery
 
 Implementation commit: `ae51dae`. The final validation commit centralizes the dashboard mismatch field names and records the checks. The user supplied GitHub authentication through a private credential card after the initial HTTPS push reported missing credentials. Publish `feat/local-lyrics-download-queue` and create its PR against `master`; no deployment or merge is authorized. The disposable PostgreSQL instance was stopped after validation. Phone-side lyrics remain separate work.
+
+
+## Correction chapter: catalog artist credits and lookup recovery
+
+Branch `fix/lyrics-search-fallback` starts from freshly fetched `origin/master` at `6ee9245`, after PR #10 was merged. The original tests and one Coldplay smoke check missed duplicated credits in the actual catalog. They did not establish that the six user-reported recordings worked.
+
+A read-only production catalog query showed repeated credits, including `Nelly Furtado & Nelly Furtado` and `Ty Dolla $ign & 2 Chainz & 2 Chainz & Ty Dolla $ign`. Those values were sent to LRCLIB and caused the not-found results. The dashboard displayed the release artist instead, hiding the discrepancy. No production rows were changed during this diagnosis.
+
+Before the fix, the dedicated catalog regression `RepeatedArtistCreditsDoNotCorruptTheLookupArtist` failed, as did the dashboard regression `missing lyrics status is shown once rather than repeated as its own reason`. Logs are `/tmp/lyrics-credit-regression-before.log` and `/tmp/lyrics-display-regression-before.log`.
+
+Three independent council reviewers examined matching, queue safety and validation. Their initial reviews found inadequate coverage and additional recovery/concurrency gaps. The corrections cover canonical credits, a bounded paced search fallback, conservative candidate selection, a versioned retry upgrade, atomic failure/cooldown persistence and duplicate status rendering. Final scores and completed verification are recorded below after the checks finish.
+
+### Live catalog/provider verification
+
+An external scratch console loaded each of the six actual catalog recordings through `LyricsCatalog` in an explicitly read-only database transaction, rolled it back, then called the registered LRCLIB adapter. It did not start the background worker or write production results. It logged metadata, result kind, provider identifier and request count; it did not print or save lyric text or credentials.
+
+| Recording | Corrected lookup artist | Actual provider outcome | HTTP requests |
+| --- | --- | --- | --- |
+| Girl’s Best Friend | 2 Chainz | Synchronized lyrics, provider 2527493 | 1 |
+| No Hay Igual | Nelly Furtado | Synchronized lyrics, provider 88762 | 1 |
+| Little Homies | Vince Staples | Synchronized lyrics, provider 11099139 | 1 |
+| He’s Got the Whole World in His Hands | Nina Simone | Synchronized lyrics, provider 23216871 | 1 |
+| Kisser | Unknown Artist | Skipped: invalid metadata | 0 |
+| Acrid Avid Jam Shred | Aphex Twin | Instrumental, provider 18706779 | 1 |
+
+Command: `dotnet run --project /tmp/streaming-lyrics-catalog-review/Review.csproj --verbosity quiet`. Evidence: `/tmp/lyrics-corrected-live-catalog.log`. These are live lookup outcomes, not deployment or persistent-queue execution evidence. The local routes and persistence are verified independently with the disposable PostgreSQL fixture.
+
+### Correction feature-to-test mapping
+
+| Behavior | Dedicated regression coverage |
+| --- | --- |
+| Duplicate credits, primary/featured identity, stable ordering, credit revision changes | `LyricsArtistPolicyTests`, `LyricsIntegrationTests.RepeatedArtistCreditsDoNotCorruptTheLookupArtist`, `DuplicatePrimaryAndFeaturedCreditsKeepPrimaryAndFenceCreditChanges` |
+| Empty credited name uses linked artist | `LyricsIntegrationTests.BlankCreditNameUsesItsLinkedArtistRatherThanAlbumArtist` |
+| Legacy single-artist revision compatibility | `LyricsArtistPolicyTests.SingleArtistRevisionRetainsLegacySerializedIdentity` |
+| Exact response mismatch requires bounded search | `LyricsProviderTests.MismatchedExactResponseRequiresSearchConfirmation`, `MissingExactResultSearchesAndAcceptsAnUnambiguousAlternateAlbum`, `MatchingExactResultNeverSearchesOrWaits` |
+| Search album preference, conflicting text/timing/classification, richer consistent text | `LyricsProviderTests.SearchPrefersMatchingAlbumOverConflictingOtherAlbum`, `ConflictingViableSearchLyricsAreRejected`, `ConflictingInstrumentalClassificationIsRejected`, `EquivalentPlainAndSyncedCandidatesPreferAvailableTiming` |
+| Artist, title/version, duration, apostrophes and unknown identity | `LyricsProviderTests.SearchNeverRelaxesArtistTitleVersionOrDuration`, `SearchDoesNotCrossPerformanceVersionAlbumLabels`, `FeaturedArtistAloneCannotReplaceTheKnownPrimaryArtist`, `TypographicApostrophesMatchStraightApostrophesAndSearchUsesStraightForm`, `UnknownArtistMetadataNeverContactsProvider` |
+| Pacing, injected clock, cancellation, no fallback on error, bounded JSON and oversized-response classification | `LyricsRequestDelayTests`, `LyricsProviderTests.CancellationDuringRequestSpacingPreventsSearch`, `ExactProviderFailureNeverTriggersSearch`, `InvalidExactJsonNeverTriggersSearch`, `NullSearchEntriesAndOversizedCandidateListsAreRejected`, `HtmlAndOversizedResponsesAreNotAccepted`, `RateLimitWithoutRetryHeaderStillRequestsASharedCooldown` |
+| Existing failed jobs retry once, good/excluded jobs preserved, crash recovery, stale failure fencing | `LyricsQueueRegressionTests.OldMissingAndUnmatchedResultsRetryOnceWithoutWaitingForTheirPreviousSchedule`, `UpgradeDoesNotRescheduleGoodResultsNamingExclusionsInvalidMetadataOrTransientFailures`, `CrashedUpgradeClaimRecoversAtLeaseExpiryAndRejectsTheOldOwnersFailure` |
+| Atomic failure/cooldown, rollback, unrelated recording backoff | `LyricsQueueRegressionTests.FailurePersistsSharedCooldownBeforeReleaseAndOldReleaseCannotShortenIt`, `FailedRecordingUpdateRollsBackTheProviderCooldownInTheSameTransaction`, `PerRecordingBackoffAllowsOtherDueSongsAfterTheProviderRequestInterval` |
+| Populated previous schema migration retains content and admits old misses | `LyricsQueueRegressionTests.MigrationUpgradesPopulatedPreviousSchemaWithoutDiscardingLyricsAndDiscoveryStillWorks` |
+| Status reason displayed once and ambiguity explained | `tools/lyrics-queue.test.cjs`: `missing lyrics status is shown once rather than repeated as its own reason`, `conflicting matches explain why lyrics were skipped` |
+
+### Final correction verification
+
+- Disposable PostgreSQL remains the socket/port above; all database cases ran, with no skipped tests.
+- `COVER_TEST_POSTGRES='Host=/tmp/streaming-lyrics-postgres.5ttnt3jl/socket;Port=56441;Database=postgres;Username=denis' dotnet test StreamingServiceServer.CoverTests --no-restore --filter FullyQualifiedName~Lyrics --verbosity quiet`: **112 passed, zero failed/skipped**, after the final oversized-response classification correction. Evidence: `/tmp/lyrics-correction-feature-tests.log`. That specific strengthened regression failed before the correction in `/tmp/lyrics-oversized-regression-before.log`.
+- `node --test tools/*.test.cjs`: **83 passed, zero failed/skipped**, including 12 lyrics dashboard tests. Evidence: `/tmp/lyrics-correction-browser-tests.log`.
+- `dotnet publish StreamingServiceServer.API --configuration Release --no-restore --output /tmp/streaming-lyrics-correction-publish --verbosity quiet`: exit 0. Existing unrelated nullable/dependency warnings remain. Evidence: `/tmp/lyrics-correction-release-publish.log`.
+- `dotnet ef migrations has-pending-model-changes --no-build --project StreamingServiceServer.Data --startup-project StreamingServiceServer.Data`: no pending changes. The new migration is additive generated EF metadata; generated schema literals/comments remain within the framework boundary described above.
+- `node --check StreamingServiceServer.API/wwwroot/js/lyrics-queue.js` and `git diff --check`: passed.
+- Final broad run: `COVER_TEST_POSTGRES='Host=/tmp/streaming-lyrics-postgres.5ttnt3jl/socket;Port=56441;Database=postgres;Username=denis' dotnet test StreamingServiceServer.CoverTests --no-restore --logger 'console;verbosity=normal' --logger 'trx;LogFileName=/tmp/lyrics-correction-final-full-suite.trx'`: **613 passed, zero failed/skipped**. Evidence: `/tmp/lyrics-correction-final-full-suite.log`. An earlier broad run during this correction had 609 passing/one failing test at the unchanged `AudioRecommendationLogicTests.ConcurrentDailyRegenerationHasOneWinnerAndConcurrentSaveCreatesOnePlaylist` assertion, the same intermittent failure recorded in the original chapter. The final passing run does not establish that unrelated concurrency test is consistently reliable.
+- Final council reviews: matching **9/10**, queue **9/10**, independent validation **9/10**; no blocking findings remained. Reviewers were asked for candid scores and findings without being told a target score.
+
+No live migration, deployed worker recovery, actual browser rendering, mobile playback or phone-side offline storage was verified. No deployment or merge was performed. User-owned settings/recommendation changes remain unstaged.
+
+The final review also caught a provider admission race when metadata changed during a lookup: atomic failure persistence used the pre-lookup admission deadline. The worker now calculates the next provider admission from the post-lookup clock. `ChangedTitleDuringDownloadDiscardsTheResponse` advances injected time during lookup and checks the atomic failure deadline separately from final lease release. This strengthened test failed before the fix (`/tmp/lyrics-metadata-pacing-regression-before.log`); the final 613-test full run and Release publish include the correction. The queue council re-reviewed it and retained 9/10 with no blocking findings.
+
+### Correction delivery status
+
+Implementation and validation commit: `fd94f36` on `fix/lyrics-search-fallback`. The initial private GitHub credential request timed out. The user requested another credential card and supplied authentication privately; publishing can now proceed. The PR title/body are prepared in `/tmp/streaming-lyrics-correction-pr.json`; the publishing helper is `/tmp/publish_streaming_lyrics_correction.py`. Neither file contains credentials. Push the branch and create a PR against `master`, then immediately link its full URL to this thread. The linked PR is the delivery record. No further implementation work is outstanding. The disposable PostgreSQL cluster is stopped.

@@ -1033,6 +1033,11 @@ namespace StreamingServiceServer.Data.Migrations
                     b.Property<DateTimeOffset?>("LeaseUntil")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("LookupVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("Lyricsfile")
                         .HasColumnType("text");
 
@@ -1061,6 +1066,8 @@ namespace StreamingServiceServer.Data.Migrations
                     b.HasKey("RecordingIdentifier");
 
                     b.HasIndex("NextAttemptAt", "RecordingIdentifier");
+
+                    b.HasIndex("LookupVersion", "State", "LastFailure", "NextAttemptAt");
 
                     b.ToTable("RecordingLyrics");
                 });

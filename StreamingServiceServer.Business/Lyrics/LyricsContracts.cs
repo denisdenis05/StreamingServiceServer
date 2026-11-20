@@ -8,9 +8,12 @@ public static class LyricsProtocol
     public const string BaseAddress = "https://lrclib.net/";
     public const string UserAgent = "StreamingServiceServer/1.0 (https://github.com/denisdenis05/StreamingServiceServer)";
     public const string GetRoute = "api/get";
+    public const string SearchRoute = "api/search";
+    public const int MaximumProviderSearchResults = 100;
     public const string InvalidMetadata = "invalid_metadata";
     public const string NamingIssue = "naming_issue";
     public const string UnmatchedRecording = "unmatched_recording";
+    public const string AmbiguousRecording = "ambiguous_recording";
     public const string MissingLyrics = "lyrics_not_found";
     public const string ProviderFailure = "provider_failure";
     public const string ProviderTimeout = "provider_timeout";
@@ -72,6 +75,8 @@ public sealed class LyricsOptions
 public sealed record LyricsTrack(Guid RecordingIdentifier, string Title, string Artist, string Album,
     int? DurationMilliseconds, bool HasNamingIssue)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ArtistCreditRevision { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public string Revision => System.Text.Json.JsonSerializer.Serialize(this);
     public double DurationSeconds => (DurationMilliseconds ?? LyricsProtocol.UnknownDurationMilliseconds) / (double)LyricsProtocol.MillisecondsPerSecond;
@@ -91,6 +96,11 @@ public interface ILyricsProvider
     Task<LyricsContent?> DownloadAsync(LyricsTrack track, CancellationToken cancellationToken);
 }
 
+public interface ILyricsRequestDelay
+{
+    Task WaitAsync(CancellationToken cancellationToken);
+}
+
 public interface ILyricsCatalog
 {
     Task<LyricsTrack?> ReadAsync(Guid recordingIdentifier, CancellationToken cancellationToken);
@@ -107,6 +117,6 @@ public interface ILyricsJobStore
     Task<LyricsLease?> ClaimAsync(TimeSpan leaseLifetime, CancellationToken cancellationToken);
     Task CompleteAsync(LyricsLease lease, LyricsTrack track, LyricsDownloadState state, LyricsContent? content,
         string failureCode, DateTimeOffset nextAttemptAt, CancellationToken cancellationToken);
-    Task FailAsync(LyricsLease lease, string failureCode, DateTimeOffset nextAttemptAt, CancellationToken cancellationToken);
+    Task FailAsync(LyricsLease lease, string failureCode, DateTimeOffset nextAttemptAt, DateTimeOffset nextRequestAt, CancellationToken cancellationToken);
     Task ReleaseAsync(LyricsLease lease, DateTimeOffset nextRequestAt, CancellationToken cancellationToken);
 }

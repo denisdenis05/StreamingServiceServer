@@ -91,10 +91,15 @@ public sealed class LyricsWorkerTests
     public async Task ChangedTitleDuringDownloadDiscardsTheResponse()
     {
         using var fixture = new WorkerFixture();
-        fixture.Provider.BeforeReturn = () => fixture.Catalog.Track = LyricsTestData.Track with { Title = LyricsTestData.OtherTitle };
+        fixture.Provider.BeforeReturn = () =>
+        {
+            fixture.Clock.Advance(fixture.Options.RequestInterval);
+            fixture.Catalog.Track = LyricsTestData.Track with { Title = LyricsTestData.OtherTitle };
+        };
         await fixture.Worker.ProcessNextAsync(CancellationToken.None);
         Assert.Null(fixture.Store.CompletedState);
         Assert.Equal(LyricsProtocol.ChangedMetadata, fixture.Store.FailureCode);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.RequestInterval, fixture.Store.FailureNextRequestAt);
     }
 
     [Fact]
@@ -127,6 +132,18 @@ public sealed class LyricsWorkerTests
     }
 
     [Fact]
+    public async Task AmbiguousRecordingIsSkippedWithoutTransientFailureBackoff()
+    {
+        using var fixture = new WorkerFixture();
+        fixture.Provider.Failure = new LyricsProviderException(LyricsProtocol.AmbiguousRecording);
+        await fixture.Worker.ProcessNextAsync(CancellationToken.None);
+        Assert.Equal(LyricsDownloadState.Skipped, fixture.Store.CompletedState);
+        Assert.Equal(LyricsProtocol.AmbiguousRecording, fixture.Store.FailureCode);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.MetadataRecheckInterval, fixture.Store.NextAttemptAt);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.RequestInterval, fixture.Store.NextRequestAt);
+    }
+
+    [Fact]
     public async Task TransportFailureStoresOnlyASafeCodeAndBackoff()
     {
         using var fixture = new WorkerFixture();
@@ -148,6 +165,28 @@ public sealed class LyricsWorkerTests
     }
 
     [Fact]
+    public async Task InvalidResponseBackoffDoesNotPauseOtherRecordingsForTheSameExponentialDelay()
+    {
+        using var fixture = new WorkerFixture();
+        fixture.Store.Job.Attempts = LyricsTestData.ManyAttempts;
+        fixture.Provider.Failure = new LyricsProviderException(LyricsProtocol.InvalidResponse);
+        await fixture.Worker.ProcessNextAsync(CancellationToken.None);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.MaximumRetryDelay, fixture.Store.NextAttemptAt);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.RequestInterval, fixture.Store.NextRequestAt);
+    }
+
+    [Fact]
+    public async Task RepeatedTransportFailureUsesShortProviderCooldownAndKeepsLongPerRecordingBackoff()
+    {
+        using var fixture = new WorkerFixture();
+        fixture.Store.Job.Attempts = LyricsTestData.ManyAttempts;
+        fixture.Provider.Failure = new HttpRequestException(LyricsTestData.PrivateFailure);
+        await fixture.Worker.ProcessNextAsync(CancellationToken.None);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.MaximumRetryDelay, fixture.Store.NextAttemptAt);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.InitialRetryDelay, fixture.Store.NextRequestAt);
+    }
+
+    [Fact]
     public async Task ShutdownCancelsDownloadAndReleasesItsLeaseWithoutAStoredFailure()
     {
         using var fixture = new WorkerFixture();
@@ -165,7 +204,8 @@ public sealed class LyricsWorkerTests
         fixture.Provider.BeforeReturn = () => fixture.Clock.Advance(fixture.Options.OperationTimeout);
         await fixture.Worker.ProcessNextAsync(CancellationToken.None);
         Assert.Equal(LyricsProtocol.ProviderTimeout, fixture.Store.FailureCode);
-        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.InitialRetryDelay, fixture.Store.NextRequestAt);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.InitialRetryDelay, fixture.Store.NextAttemptAt);
+        Assert.Equal(fixture.Clock.GetUtcNow() + fixture.Options.RequestInterval, fixture.Store.NextRequestAt);
     }
 
     [Fact]
@@ -319,6 +359,7 @@ public sealed class LyricsWorkerTests
         public string? FailureCode { get; private set; }
         public DateTimeOffset NextAttemptAt { get; private set; }
         public DateTimeOffset NextRequestAt { get; private set; }
+        public DateTimeOffset FailureNextRequestAt { get; private set; }
         public Task DiscoverAsync(int batchSize, CancellationToken cancellationToken) { DiscoverCalls += LyricsTestData.OneCall; return Task.CompletedTask; }
         public Task<LyricsLease?> ClaimAsync(TimeSpan leaseLifetime, CancellationToken cancellationToken) =>
             Task.FromResult(Available ? new LyricsLease(Job, LyricsTestData.FirstToken) : null);
@@ -328,8 +369,8 @@ public sealed class LyricsWorkerTests
             Available = false; CompletedState = state; Content = content; FailureCode = failureCode; NextAttemptAt = nextAttemptAt;
             return Task.CompletedTask;
         }
-        public Task FailAsync(LyricsLease lease, string failureCode, DateTimeOffset nextAttemptAt, CancellationToken cancellationToken)
-        { FailureCode = failureCode; NextAttemptAt = nextAttemptAt; return Task.CompletedTask; }
+        public Task FailAsync(LyricsLease lease, string failureCode, DateTimeOffset nextAttemptAt, DateTimeOffset nextRequestAt, CancellationToken cancellationToken)
+        { FailureCode = failureCode; NextAttemptAt = nextAttemptAt; NextRequestAt = nextRequestAt; FailureNextRequestAt = nextRequestAt; return Task.CompletedTask; }
         public Task ReleaseAsync(LyricsLease lease, DateTimeOffset nextRequestAt, CancellationToken cancellationToken)
         { ReleaseCalls += LyricsTestData.OneCall; NextRequestAt = nextRequestAt; return Task.CompletedTask; }
     }

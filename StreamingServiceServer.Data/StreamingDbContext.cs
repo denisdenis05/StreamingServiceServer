@@ -25,6 +25,8 @@ public class StreamingDbContext : DbContext
     public DbSet<CoverMetadataRefresh> CoverMetadataRefreshes { get; set; }
 
     public DbSet<CoverAssetJob> CoverAssetJobs { get; set; }
+    public DbSet<RecordingLyrics> RecordingLyrics { get; set; }
+    public DbSet<LyricsQueueState> LyricsQueueStates { get; set; }
 
     public DbSet<Artist> Artists { get; set; }
     public DbSet<Recording> Recordings { get; set; }

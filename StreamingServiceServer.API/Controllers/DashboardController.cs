@@ -2318,7 +2318,8 @@ public partial class DashboardController : ControllerBase
 
     [Authorize(Roles = "Admin")]
     [HttpPost("album/{id:guid}/check-track-matches")]
-    public async Task<IActionResult> CheckAlbumTrackMatches(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> CheckAlbumTrackMatches(Guid id, CancellationToken cancellationToken,
+        [FromServices] StreamingServiceServer.Business.Lyrics.LyricsTrackMatchStore matchResults)
     {
         var release = await _dbContext.Releases
             .Include(r => r.Artist)
@@ -2346,6 +2347,8 @@ public partial class DashboardController : ControllerBase
         }
 
         var tracks = new List<object>();
+        var persistedIssues = new List<object>();
+        var evaluatedRecordingIdentifiers = new List<Guid>();
         int issueCount = 0;
         int checkedFiles = 0;
 
@@ -2361,13 +2364,15 @@ public partial class DashboardController : ControllerBase
 
             checkedFiles++;
             var meta = StreamingServiceDownloader.Helpers.AudioMetadataHelper.GetAudioMetadata(filePath!);
+            if (!string.IsNullOrWhiteSpace(meta?.Title) && !string.IsNullOrWhiteSpace(meta.Artist))
+                evaluatedRecordingIdentifiers.Add(recording.Id);
             var issues = new List<TrackIssue>();
             foreach (var (_, fn) in _trackCheckers)
                 issues.AddRange(fn(filePath!, recording, release, meta));
 
             if (issues.Count > 0) issueCount++;
 
-            tracks.Add(new
+            var trackResult = new
             {
                 recordingId = recording.Id,
                 title       = recording.Title,
@@ -2376,8 +2381,12 @@ public partial class DashboardController : ControllerBase
                 hasMetadata = meta != null,
                 hasIssues   = issues.Count > 0,
                 issues      = issues.Select(i => new { i.Type, i.Severity, i.Detail }).ToList()
-            });
+            };
+            tracks.Add(trackResult);
+            if (issues.Count > 0) persistedIssues.Add(trackResult);
         }
+
+        await matchResults.SaveAsync(id, evaluatedRecordingIdentifiers, System.Text.Json.JsonSerializer.Serialize(persistedIssues), cancellationToken);
 
         return Ok(new
         {
@@ -2390,7 +2399,8 @@ public partial class DashboardController : ControllerBase
 
     [Authorize(Roles = "Admin")]
     [HttpPost("analysis/check-mismatches")]
-    public async Task<IActionResult> CheckAllMismatches(CancellationToken cancellationToken)
+    public async Task<IActionResult> CheckAllMismatches(CancellationToken cancellationToken,
+        [FromServices] StreamingServiceServer.Business.Lyrics.LyricsTrackMatchStore matchResults)
     {
         var releases = await _dbContext.Releases
             .Include(r => r.Artist)
@@ -2421,12 +2431,15 @@ public partial class DashboardController : ControllerBase
 
             int mismatchCount = 0;
             var trackIssuesList = new List<object>();
+            var evaluatedRecordingIdentifiers = new List<Guid>();
 
             foreach (var recording in release.Recordings.OrderBy(r => r.PositionInAlbum))
             {
                 if (!filesByRecId.TryGetValue(recording.Id, out var filePath)) continue;
 
                 var meta = StreamingServiceDownloader.Helpers.AudioMetadataHelper.GetAudioMetadata(filePath);
+                if (!string.IsNullOrWhiteSpace(meta?.Title) && !string.IsNullOrWhiteSpace(meta.Artist))
+                    evaluatedRecordingIdentifiers.Add(recording.Id);
                 var issues = new List<TrackIssue>();
                 foreach (var (_, fn) in _trackCheckers)
                     issues.AddRange(fn(filePath, recording, release, meta));
@@ -2445,15 +2458,8 @@ public partial class DashboardController : ControllerBase
                 }
             }
 
-            var analysis = await _dbContext.AlbumAnalysisResults.FirstOrDefaultAsync(a => a.AlbumId == release.Id, cancellationToken);
-            if (analysis == null)
-            {
-                analysis = new AlbumAnalysisResult { AlbumId = release.Id };
-                _dbContext.AlbumAnalysisResults.Add(analysis);
-            }
-            analysis.MismatchedTracksCount  = mismatchCount;
-            analysis.TrackMatchIssuesJson   = System.Text.Json.JsonSerializer.Serialize(trackIssuesList);
-            analysis.LastMismatchCheckedAt  = DateTime.UtcNow;
+            await matchResults.SaveAsync(release.Id, evaluatedRecordingIdentifiers,
+                System.Text.Json.JsonSerializer.Serialize(trackIssuesList), cancellationToken);
 
             if (mismatchCount > 0) albumsWithIssues++;
         }

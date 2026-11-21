@@ -236,8 +236,22 @@ public sealed class AudioRecommendationLogicTests
     [Fact]
     public async Task MissingIdentityIsRejectedBeforeRecommendationServicesAreCalled()
     {
-        var controller = new AudioRecommendationsController(null!, null!) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+        var controller = new AudioRecommendationsController(null!, null!, null!) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         Assert.IsType<UnauthorizedObjectResult>(await controller.Overview(CancellationToken.None));
+    }
+
+    [PostgresFact]
+    public async Task StaleTrackedDailyMixCannotCreateASecondSavedPlaylist()
+    {
+        await using var fixture = await RecommendationFixture.CreateAsync();
+        var mix = await fixture.Service.DailyAsync(fixture.Owner.Id, null, CancellationToken.None);
+        using var otherScope = fixture.Scopes.CreateScope();
+        var other = fixture.ServiceFor(otherScope.ServiceProvider.GetRequiredService<StreamingDbContext>());
+        var request = new SaveRecommendationPlaylist(TestName, mix.Tracks.Select(track => track.Id).ToArray(), mix.Version);
+        var first = await other.SaveAsync(fixture.Owner.Id, request, CancellationToken.None);
+        var repeated = await fixture.Service.SaveAsync(fixture.Owner.Id, request, CancellationToken.None);
+        Assert.Equal(first.Id, repeated.Id);
+        Assert.Single(await fixture.Database.Playlists.AsNoTracking().Where(playlist => playlist.OwnerId == fixture.Owner.Id).ToArrayAsync());
     }
 
     [PostgresFact]

@@ -19,15 +19,17 @@ public class LibraryService : ILibraryService
     private readonly IImageService? _images;
     private readonly IPlaylistArtworkService? _playlistArtwork;
     private readonly PlaylistArtworkQueue? _artworkQueue;
+    private readonly TimeProvider _timeProvider;
     const string DefaultPlaylistName = "New Playlist";
 
-    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService? images = null, IPlaylistArtworkService? playlistArtwork = null, PlaylistArtworkQueue? artworkQueue = null)
+    public LibraryService(StreamingDbContext dbContext, IExternalMusicSearchService externalMusicSearchService, IImageService? images = null, IPlaylistArtworkService? playlistArtwork = null, PlaylistArtworkQueue? artworkQueue = null, TimeProvider? timeProvider = null)
     {
         _dbContext = dbContext;
         _externalMusicSearchService = externalMusicSearchService;
         _images = images;
         _playlistArtwork = playlistArtwork;
         _artworkQueue = artworkQueue;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     private async Task<string> RefreshArtworkAsync(Guid userId, Guid playlistId, CancellationToken cancellationToken)
@@ -114,6 +116,7 @@ public class LibraryService : ILibraryService
                 PlaylistId = playlist.Id,
                 RecordingId = recording.Id,
                 Order = order++,
+                KnownAddedAt = _timeProvider.GetUtcNow().UtcDateTime,
                 AddedById = ownerId
             });
         }
@@ -147,55 +150,49 @@ public class LibraryService : ILibraryService
             .Select(p => p.IsSystem)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var query = from pr in _dbContext.PlaylistRecordings
-                    where pr.PlaylistId == playlistId
-                    join r in _dbContext.Recordings on pr.RecordingId equals r.Id into rGroup
-                    from r in rGroup.DefaultIfEmpty()
-                    join s in _dbContext.Recordings on pr.SuggestedRecordingId equals s.Id into sGroup
-                    from s in sGroup.DefaultIfEmpty()
-                    select new { pr, r, s };
-
-        if (isSystemPlaylist)
-        {
-            query = query.OrderByDescending(x => x.pr.Order);
-        }
-        else
-        {
-            query = query.OrderBy(x => x.pr.Order);
-        }
+        var orderedRecordings = PlaylistRecordingOrdering.Apply(
+            _dbContext.PlaylistRecordings.Where(recording => recording.PlaylistId == playlistId), isSystemPlaylist);
+        var query = from playlistRecording in orderedRecordings
+                    join recording in _dbContext.Recordings on playlistRecording.RecordingId equals recording.Id into originalRecordings
+                    from recording in originalRecordings.DefaultIfEmpty()
+                    join suggestion in _dbContext.Recordings on playlistRecording.SuggestedRecordingId equals suggestion.Id into suggestedRecordings
+                    from suggestion in suggestedRecordings.DefaultIfEmpty()
+                    select new { PlaylistRecording = playlistRecording, Recording = recording, Suggestion = suggestion };
 
         var recordings = await query
-            .Skip((page - 1) * pageSize)
+            .Skip(PlaylistRecordingOrdering.PageOffset(page, pageSize))
             .Take(pageSize)
             .Select(playlistRow => new
             {
                 Response = new RecordingResponse
                 {
-                    Id = playlistRow.pr.RecordingId,
-                    ReleaseId = playlistRow.r != null ? playlistRow.r.Release.Id : (Guid?)null,
-                    Title = playlistRow.pr.Title,
-                    ArtistName = playlistRow.pr.Artist,
-                    ReleaseTitle = playlistRow.pr.Album,
-                    PositionInAlbum = playlistRow.pr.Order,
+                    Id = playlistRow.PlaylistRecording.RecordingId,
+                    ReleaseId = playlistRow.Recording != null ? playlistRow.Recording.Release.Id : (Guid?)null,
+                    Title = playlistRow.PlaylistRecording.Title,
+                    ArtistName = playlistRow.PlaylistRecording.Artist,
+                    ReleaseTitle = playlistRow.PlaylistRecording.Album,
+                    PositionInAlbum = playlistRow.PlaylistRecording.Order,
                     IsLiked = false,
-                    SuggestedRecordingId = playlistRow.pr.SuggestedRecordingId,
-                    SuggestedTitle = playlistRow.s != null ? playlistRow.s.Title : null,
-                    SuggestedArtist = playlistRow.s != null ? playlistRow.s.ArtistCredit.Select(credit => credit.Name ?? credit.Artist.Name).FirstOrDefault() : null,
-                    SuggestedAlbum = playlistRow.s != null ? playlistRow.s.Release.Title : null
+                    SuggestedRecordingId = playlistRow.PlaylistRecording.SuggestedRecordingId,
+                    SuggestedTitle = playlistRow.Suggestion != null ? playlistRow.Suggestion.Title : null,
+                    SuggestedArtist = playlistRow.Suggestion != null ? playlistRow.Suggestion.ArtistCredit.Select(credit => credit.Name ?? credit.Artist.Name).FirstOrDefault() : null,
+                    SuggestedAlbum = playlistRow.Suggestion != null ? playlistRow.Suggestion.Release.Title : null
                 },
-                Original = playlistRow.r != null && playlistRow.r.Cover != null && playlistRow.r.Cover != string.Empty ? playlistRow.r.Cover : playlistRow.pr.Cover,
-                Small = playlistRow.r != null ? playlistRow.r.SmallCover : null,
-                Thumbnail = playlistRow.r != null ? playlistRow.r.VerySmallCover : null,
-                Local = playlistRow.r != null ? playlistRow.r.LocalCover : null,
-                LocalSmall = playlistRow.r != null ? playlistRow.r.LocalSmallCover : null,
-                LocalThumbnail = playlistRow.r != null ? playlistRow.r.LocalVerySmallCover : null,
-                Optimized = playlistRow.r != null ? playlistRow.r.OptimizedCover : null,
-                OptimizedSmall = playlistRow.r != null ? playlistRow.r.OptimizedSmallCover : null,
-                OptimizedThumbnail = playlistRow.r != null ? playlistRow.r.OptimizedVerySmallCover : null
+                Original = playlistRow.Recording != null && playlistRow.Recording.Cover != null && playlistRow.Recording.Cover != string.Empty ? playlistRow.Recording.Cover : playlistRow.PlaylistRecording.Cover,
+                Small = playlistRow.Recording != null ? playlistRow.Recording.SmallCover : null,
+                Thumbnail = playlistRow.Recording != null ? playlistRow.Recording.VerySmallCover : null,
+                Local = playlistRow.Recording != null ? playlistRow.Recording.LocalCover : null,
+                LocalSmall = playlistRow.Recording != null ? playlistRow.Recording.LocalSmallCover : null,
+                LocalThumbnail = playlistRow.Recording != null ? playlistRow.Recording.LocalVerySmallCover : null,
+                Optimized = playlistRow.Recording != null ? playlistRow.Recording.OptimizedCover : null,
+                OptimizedSmall = playlistRow.Recording != null ? playlistRow.Recording.OptimizedSmallCover : null,
+                OptimizedThumbnail = playlistRow.Recording != null ? playlistRow.Recording.OptimizedVerySmallCover : null
             }).ToListAsync(cancellationToken);
         var likedRecordingIds = await GetLikedRecordingIdsAsync(userId, recordings.Select(recording => recording.Response.Id).ToArray(), cancellationToken);
+        var displayPosition = PlaylistRecordingOrdering.PageOffset(page, pageSize);
         foreach (var recording in recordings)
         {
+            recording.Response.PositionInAlbum = ++displayPosition;
             recording.Response.IsLiked = likedRecordingIds.Contains(recording.Response.Id);
             recording.Response.Cover = SelectCover(recording.Local, recording.Optimized, recording.Original);
             recording.Response.SmallCover = SelectCover(recording.LocalSmall, recording.OptimizedSmall, recording.Small);
@@ -334,6 +331,7 @@ public class LibraryService : ILibraryService
                 Album = song.Album,
                 Cover = song.Cover,
                 Order = ++currentMaxOrder,
+                KnownAddedAt = _timeProvider.GetUtcNow().UtcDateTime,
                 AddedById = userId
             });
         }
@@ -383,6 +381,7 @@ public class LibraryService : ILibraryService
                 Album = songDetails.Album,
                 Cover = songDetails.Cover,
                 Order = maxOrder + LikedSongsPlaylistPolicy.OrderIncrement,
+                KnownAddedAt = _timeProvider.GetUtcNow().UtcDateTime,
                 AddedById = userId
             });
         }
@@ -436,6 +435,7 @@ public class LibraryService : ILibraryService
                     Album = album,
                     Cover = cover,
                     Order = ++currentMaxOrder,
+                    KnownAddedAt = _timeProvider.GetUtcNow().UtcDateTime,
                     AddedById = userId
                 });
             }
@@ -521,6 +521,7 @@ public class LibraryService : ILibraryService
                 Album = useMatchedRecording ? album : track.ReleaseName,
                 Cover = useMatchedRecording ? cover : string.Empty,
                 Order = ++currentMaxOrder,
+                KnownAddedAt = track.AddedAt?.UtcDateTime,
                 AddedById = userId,
                 SuggestedRecordingId = (!useMatchedRecording && found && !isExact) ? recordingId : null
             };
@@ -578,7 +579,9 @@ public class LibraryService : ILibraryService
             Album = newSong.Album,
             Cover = newSong.Cover,
             Order = order,
-            AddedById = userId
+            AddedAt = entry.AddedAt,
+            KnownAddedAt = entry.KnownAddedAt,
+            AddedById = entry.AddedById
         });
         await _dbContext.SaveChangesAsync(cancellationToken);
     }

@@ -590,7 +590,7 @@
       <h2 style="margin-bottom: 0.4rem;">import <i>playlist</i></h2>
       <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
         paste a JSON array of tracks. each item needs <code>name</code>, <code>artistName</code>, and <code>releaseName</code>.
-        spotify exports look like: <code>[{"name":"HUMBLE.","artistName":"Kendrick Lamar","releaseName":"DAMN."}]</code>
+        optional <code>addedAt</code> or <code>added_at</code> dates sort Liked songs newest first; tracks without dates keep import order. spotify exports look like: <code>[{"name":"HUMBLE.","artistName":"Kendrick Lamar","releaseName":"DAMN."}]</code>
       </p>
 
       <!-- Step 1: Name + JSON -->
@@ -824,6 +824,6 @@
   <script src="/js/dashboard-polling.js?v=20261115-manual-source"></script>
   <script src="/js/musicbrainz-search.js?v=20261115-manual-source"></script>
   <script src="/js/audio-analysis-settings.js?v=20261110-local-analysis"></script>
-  <script src="/js/dashboard.js?v=20261120-lyrics"></script>
+  <script src="/js/dashboard.js?v=20261121-liked-order"></script>
 </body>
 </html>

@@ -2156,6 +2156,17 @@ function showImportStep1() {
   if (step1) step1.style.display = 'block';
 }
 
+const PlaylistImportFields = Object.freeze({ emptyText: '' });
+
+function playlistImportTrack(track) {
+  return {
+    name: track.name ?? track.track ?? track.title ?? PlaylistImportFields.emptyText,
+    artistName: track.artistName ?? (Array.isArray(track.artists) ? track.artists[0]?.name : track.artist) ?? PlaylistImportFields.emptyText,
+    releaseName: track.releaseName ?? track.album?.name ?? track.album ?? PlaylistImportFields.emptyText,
+    addedAt: track.addedAt ?? track.added_at ?? null,
+  };
+}
+
 async function startImport() {
   const errEl = document.getElementById('import-parse-error');
   errEl.style.display = 'none';
@@ -2172,11 +2183,7 @@ async function startImport() {
     return;
   }
 
-  const tracks = parsed.map(item => ({
-    name:        item.name        ?? item.track   ?? item.title   ?? '',
-    artistName:  item.artistName  ?? (Array.isArray(item.artists) ? item.artists[0]?.name : item.artist) ?? '',
-    releaseName: item.releaseName ?? item.album?.name ?? item.album ?? '',
-  })).filter(t => t.name);
+  const tracks = parsed.map(playlistImportTrack).filter(track => track.name);
 
   const shouldReverse = document.getElementById('import-reverse-checkbox')?.checked;
   if (shouldReverse) {

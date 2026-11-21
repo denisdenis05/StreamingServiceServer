@@ -652,6 +652,9 @@ namespace StreamingServiceServer.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("KnownAddedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Order")
                         .HasColumnType("integer");
 

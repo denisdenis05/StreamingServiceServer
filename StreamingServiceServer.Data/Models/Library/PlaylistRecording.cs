@@ -12,6 +12,7 @@ public class PlaylistRecording
     public string Cover { get; set; } = string.Empty;
 
     public int Order { get; set; } 
+    public DateTime? KnownAddedAt { get; set; }
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;
     public Guid AddedById { get; set; }
     public Guid? SuggestedRecordingId { get; set; }

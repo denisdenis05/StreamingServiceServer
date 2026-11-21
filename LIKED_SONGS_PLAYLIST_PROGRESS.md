@@ -126,7 +126,12 @@ Migration test SQL uses the actual schema identifiers required by PostgreSQL.
 
 No production database, deployment, mobile package or physical-device scenario
 was exercised. Existing appsettings, recommendation documentation, `.idea` and
-source-database design edits remain outside this chapter. Publishing requires
-GitHub authentication: the initial HTTPS dry-run push failed because no username
-or credential helper was available, and the temporary GitHub CLI has no login.
-After authentication, push this branch and create a PR targeting `master`.
+source-database design edits remain outside this chapter. The initial HTTPS
+dry-run push failed because no GitHub credentials were configured. After a
+credential was supplied through the secure prompt, the branch was pushed and
+[PR #12](https://github.com/denisdenis05/StreamingServiceServer/pull/12) was opened
+against `master`. Implementation commit: `25e2c39`.
+
+Implementation and validation are complete. Review and merge the PR separately;
+apply the migration before deploying the updated server. No merge or deployment
+is authorized by this chapter.

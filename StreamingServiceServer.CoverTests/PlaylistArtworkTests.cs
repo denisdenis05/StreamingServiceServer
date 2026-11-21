@@ -157,6 +157,37 @@ public sealed class PlaylistArtworkTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task UnsavedSelectionsReuseThePlaylistRendererAndCacheWithoutDatabaseWrites()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString())).FullName;
+        try
+        {
+            var paths = new List<string>();
+            for (var index = 0; index <= SourceCount; index++)
+            {
+                var path = Path.Combine(root, index + SourceExtension);
+                await File.WriteAllBytesAsync(path, AssetFixture.Image);
+                paths.Add(path);
+            }
+            var renderer = new RecordingRenderer();
+            var service = new PlaylistArtworkService(null!, renderer,
+                Options.Create(new CoverAssetOptions { Path = root, Domain = Domain, MinimumFreeBytes = 0 }), TimeProvider.System);
+            var covers = paths.Select(path => Domain + "/" + Path.GetFileName(path)).ToArray();
+            var first = await service.PreviewAsync(covers, CancellationToken.None);
+            Assert.Contains(PlaylistCollageRenderer.GeneratedPrefix, first);
+            Assert.Equal(paths.Take(SourceCount), renderer.Sources);
+            Assert.Equal(first, await service.PreviewAsync(covers, CancellationToken.None));
+            Assert.Equal(1, renderer.Calls);
+            Assert.NotEqual(first, await service.PreviewAsync(covers.Reverse().ToArray(), CancellationToken.None));
+            Assert.Equal(paths.AsEnumerable().Reverse().Take(SourceCount), renderer.Sources);
+            Assert.Equal(2, renderer.Calls);
+            Assert.Equal(string.Empty, await service.PreviewAsync([], CancellationToken.None));
+            Assert.Equal(string.Empty, await service.PreviewAsync([Domain + "/missing.jpg"], CancellationToken.None));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [PostgresFact]
     public async Task ArtworkInvalidationChangesVersionAndClearsAConcurrentCoverPublish()
     {

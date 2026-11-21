@@ -54,6 +54,8 @@ public sealed record RecommendationSession(Guid UserId, RecommendationRequest Re
 public sealed record SaveRecommendationPlaylist(string Name, Guid[] RecordingIds, Guid? DailyVersion = null);
 public sealed record DailyMixResponse(Guid Version, DateOnly Day, IReadOnlyList<RecordingResponse> Tracks, Guid? SavedPlaylistId);
 public sealed record RegenerateDailyMix(Guid ExpectedVersion);
+public sealed record RecommendationPlaylistPreview(RecommendationRequest Request, RecommendationPage Page, string Cover,
+    Guid? DailyVersion, Guid? SavedPlaylistId);
 public sealed record AudioRecommendationFeature(Guid RecordingId, Guid ReleaseId, Guid ArtistId, string ContentHash,
     string Cohort, float[] Vector, IReadOnlyDictionary<string, double> Descriptors, double Tempo, double Energy);
 public sealed record AudioRecommendationSnapshot(string Generation, IReadOnlyList<AudioRecommendationFeature> Features);

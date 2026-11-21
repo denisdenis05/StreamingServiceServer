@@ -10,6 +10,7 @@ namespace StreamingServiceServer.Business.Services.Images.Playlists;
 public interface IPlaylistArtworkService
 {
     Task<string> RefreshAsync(Guid userId, Guid playlistId, CancellationToken cancellationToken);
+    Task<string> PreviewAsync(IReadOnlyList<string?> covers, CancellationToken cancellationToken);
 }
 
 public sealed class PlaylistArtworkService(StreamingDbContext database, IPlaylistCollageRenderer renderer,
@@ -40,6 +41,30 @@ public sealed class PlaylistArtworkService(StreamingDbContext database, IPlaylis
         var fingerprint = PlaylistCollageRenderer.PolicyVersion.ToString() + playlist.ArtworkVersion + playlistId + string.Join(string.Empty, rows.Select(row => row.RecordingId.ToString()))
             + string.Join(string.Empty, sources.Select(source => Path.GetFileName(source) + new FileInfo(source).Length + File.GetLastWriteTimeUtc(source).Ticks));
         var identity = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint)));
+        var address = await RenderAsync(sources, identity, cancellationToken);
+        if (address.Length == 0) return string.Empty;
+        var currentIds = await database.PlaylistRecordings.AsNoTracking().Where(entry => entry.PlaylistId == playlistId)
+            .OrderBy(entry => entry.Order).ThenBy(entry => entry.RecordingId).Select(entry => entry.RecordingId).Take(PlaylistCollageRenderer.TileCount).ToArrayAsync(cancellationToken);
+        if (!currentIds.SequenceEqual(rows.Select(row => row.RecordingId))) return await CurrentCoverAsync(userId, playlistId, cancellationToken);
+        var changed = await database.Playlists.Where(current => current.Id == playlistId && current.OwnerId == userId && current.Cover == playlist.Cover && current.ArtworkVersion == playlist.ArtworkVersion)
+            .ExecuteUpdateAsync(update => update.SetProperty(current => current.Cover, address), cancellationToken);
+        if (changed == 0) return await CurrentCoverAsync(userId, playlistId, cancellationToken);
+        await PruneAsync(cancellationToken);
+        return address;
+    }
+
+    public async Task<string> PreviewAsync(IReadOnlyList<string?> covers, CancellationToken cancellationToken)
+    {
+        var sources = covers.Take(PlaylistCollageRenderer.TileCount).Select(Resolve).Where(path => path is not null).Cast<string>().ToArray();
+        if (sources.Length == 0) return string.Empty;
+        var fingerprint = PlaylistCollageRenderer.PolicyVersion + string.Join(string.Empty,
+            sources.Select(source => Path.GetFileName(source) + new FileInfo(source).Length + File.GetLastWriteTimeUtc(source).Ticks));
+        var identity = "preview-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprint)));
+        return await RenderAsync(sources, identity, cancellationToken);
+    }
+
+    private async Task<string> RenderAsync(IReadOnlyList<string> sources, string identity, CancellationToken cancellationToken)
+    {
         var filename = PlaylistCollageRenderer.GeneratedPrefix + identity + PlaylistCollageRenderer.ImageExtension;
         var output = Path.Combine(options.Value.Path, filename);
         Directory.CreateDirectory(options.Value.Path);
@@ -54,15 +79,7 @@ public sealed class PlaylistArtworkService(StreamingDbContext database, IPlaylis
             }
             finally { File.Delete(temporary); }
         }
-        var currentIds = await database.PlaylistRecordings.AsNoTracking().Where(entry => entry.PlaylistId == playlistId)
-            .OrderBy(entry => entry.Order).ThenBy(entry => entry.RecordingId).Select(entry => entry.RecordingId).Take(PlaylistCollageRenderer.TileCount).ToArrayAsync(cancellationToken);
-        if (!currentIds.SequenceEqual(rows.Select(row => row.RecordingId))) return await CurrentCoverAsync(userId, playlistId, cancellationToken);
-        var address = options.Value.Domain.TrimEnd('/') + "/" + options.Value.DomainExtension.Trim('/') + "/" + filename;
-        var changed = await database.Playlists.Where(current => current.Id == playlistId && current.OwnerId == userId && current.Cover == playlist.Cover && current.ArtworkVersion == playlist.ArtworkVersion)
-            .ExecuteUpdateAsync(update => update.SetProperty(current => current.Cover, address), cancellationToken);
-        if (changed == 0) return await CurrentCoverAsync(userId, playlistId, cancellationToken);
-        await PruneAsync(cancellationToken);
-        return address;
+        return options.Value.Domain.TrimEnd('/') + "/" + options.Value.DomainExtension.Trim('/') + "/" + filename;
     }
 
     private async Task<string> CurrentCoverAsync(Guid userId, Guid playlistId, CancellationToken cancellationToken) =>

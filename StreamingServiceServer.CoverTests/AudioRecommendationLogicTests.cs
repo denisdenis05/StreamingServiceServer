@@ -236,7 +236,7 @@ public sealed class AudioRecommendationLogicTests
     [Fact]
     public async Task MissingIdentityIsRejectedBeforeRecommendationServicesAreCalled()
     {
-        var controller = new AudioRecommendationsController(null!) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+        var controller = new AudioRecommendationsController(null!, null!) { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         Assert.IsType<UnauthorizedObjectResult>(await controller.Overview(CancellationToken.None));
     }
 

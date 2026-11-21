@@ -9,7 +9,8 @@ namespace StreamingServiceServer.API.Controllers;
 [ApiController]
 [Authorize(AuthenticationSchemes = "Bearer", Roles = "User,Admin")]
 [Route(RecommendationPolicy.Route)]
-public sealed class AudioRecommendationsController(IAudioRecommendations recommendations, IPlaylistArtworkService artwork) : ControllerBase
+public sealed class AudioRecommendationsController(IAudioRecommendations recommendations, IPlaylistArtworkService artwork,
+    IRecommendationPreviewCache cache) : ControllerBase
 {
     private const string InvalidAccount = "Sign in again to use recommendations.";
     [HttpGet("overview")]
@@ -17,9 +18,8 @@ public sealed class AudioRecommendationsController(IAudioRecommendations recomme
     [HttpGet("collections")]
     public Task<IActionResult> Collections(CancellationToken cancellationToken) => RunAsync(async userId =>
     {
-        var overview = await recommendations.OverviewAsync(cancellationToken);
         var cards = new List<object>();
-        foreach (var card in overview.Cards)
+        foreach (var card in RecommendationPlaylistCatalog.Cards)
         {
             var preview = await PreviewAsync(userId, new RecommendationRequest(card.Mode), cancellationToken);
             cards.Add(new { id = card.Mode, title = card.Title, artistName = card.Description,
@@ -28,8 +28,8 @@ public sealed class AudioRecommendationsController(IAudioRecommendations recomme
         return cards;
     });
     [HttpPost("preview")]
-    public Task<IActionResult> Preview(RecommendationRequest request, CancellationToken cancellationToken) =>
-        RunAsync(async userId => await PreviewAsync(userId, request, cancellationToken));
+    public Task<IActionResult> Preview(RecommendationRequest request, CancellationToken cancellationToken, [FromQuery] bool refresh = false) =>
+        RunAsync(async userId => await PreviewAsync(userId, request, cancellationToken, refresh));
     [HttpPost("generate")]
     public Task<IActionResult> Generate(RecommendationRequest request, CancellationToken cancellationToken) =>
         RunAsync(async userId => await recommendations.GenerateAsync(userId, request, cancellationToken));
@@ -37,11 +37,18 @@ public sealed class AudioRecommendationsController(IAudioRecommendations recomme
     public Task<IActionResult> Daily(CancellationToken cancellationToken) => RunAsync(async userId => await recommendations.DailyAsync(userId, null, cancellationToken));
     [HttpPost("daily/regenerate")]
     public Task<IActionResult> Regenerate(RegenerateDailyMix request, CancellationToken cancellationToken) =>
-        RunAsync(async userId => await recommendations.DailyAsync(userId, request.ExpectedVersion, cancellationToken));
+        RunAsync(async userId =>
+        {
+            var daily = await recommendations.DailyAsync(userId, request.ExpectedVersion, cancellationToken);
+            await cache.InvalidateDailyAsync(userId, cancellationToken);
+            return daily;
+        });
     [HttpPost("playlists")]
     public Task<IActionResult> Save(SaveRecommendationPlaylist request, CancellationToken cancellationToken) =>
         RunAsync(async userId => await recommendations.SaveAsync(userId, request, cancellationToken));
-    private async Task<RecommendationPlaylistPreview> PreviewAsync(Guid userId, RecommendationRequest request, CancellationToken cancellationToken)
+    private Task<RecommendationPlaylistPreview> PreviewAsync(Guid userId, RecommendationRequest request, CancellationToken cancellationToken, bool refresh = false) =>
+        cache.GetAsync(userId, request, token => GeneratePreviewAsync(userId, request, token), refresh, cancellationToken);
+    private async Task<RecommendationPlaylistPreview> GeneratePreviewAsync(Guid userId, RecommendationRequest request, CancellationToken cancellationToken)
     {
         DailyMixResponse? daily = request.Mode == RecommendationPolicy.Daily
             ? await recommendations.DailyAsync(userId, null, cancellationToken) : null;

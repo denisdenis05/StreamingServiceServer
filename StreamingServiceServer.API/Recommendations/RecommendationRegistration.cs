@@ -12,6 +12,7 @@ public static class RecommendationRegistration
         services.AddSingleton<IRecommendationEntropy, SystemRecommendationEntropy>();
         services.AddSingleton<IRecommendationCursorCodec, RecommendationCursorCodec>();
         services.AddScoped<IAudioRecommendations, AudioRecommendations>();
+        services.AddScoped<IRecommendationPreviewCache, RecommendationPreviewCache>();
         services.AddSingleton<IPlaylistCollageRenderer, PlaylistCollageRenderer>();
         services.AddScoped<IPlaylistArtworkService, PlaylistArtworkService>();
         services.AddScoped<PlaylistArtworkInterceptor>();

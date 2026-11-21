@@ -13,6 +13,7 @@ public class StreamingDbContext : DbContext
     }
 
     public DbSet<RecommendationDailyMix> RecommendationDailyMixes { get; set; }
+    public DbSet<RecommendationPlaylistCache> RecommendationPlaylistCaches { get; set; }
 
     public DbSet<AudioAnalysisSettings> AudioAnalysisSettings { get; set; }
     public DbSet<AudioAnalysisJob> AudioAnalysisJobs { get; set; }

@@ -23,17 +23,8 @@ public sealed class AudioRecommendations(StreamingDbContext database, IAudioReco
     private const string Explanation = "Similar sound with a varied selection of artists and albums.";
     private const string FallbackExplanation = "A varied selection from available music.";
     private const int MaximumNameLength = 160;
-    private static readonly RecommendationCard[] Cards =
-    [
-        new(RecommendationPolicy.Daily, "Today's playlist", "A daily selection shaped by your likes and listening."),
-        new(RecommendationPolicy.SmartShuffle, "Smart shuffle", "A random starting point with a varied musical flow."),
-        new(RecommendationPolicy.Calm, "Take it easy", "Calmer sounds from your library."),
-        new(RecommendationPolicy.Energy, "Pick up the pace", "A more energetic selection."),
-        new(RecommendationPolicy.Instrumental, "Mostly instrumental", "Tracks with stronger instrumental descriptors.")
-    ];
-
     public async Task<RecommendationOverview> OverviewAsync(CancellationToken cancellationToken) =>
-        new((await features.GetAsync(cancellationToken)).Features.Count, Cards);
+        new((await features.GetAsync(cancellationToken)).Features.Count, RecommendationPlaylistCatalog.Cards);
 
     public async Task<RecommendationPage> GenerateAsync(Guid userId, RecommendationRequest request, CancellationToken cancellationToken)
     {
@@ -148,7 +139,7 @@ public sealed class AudioRecommendations(StreamingDbContext database, IAudioReco
             var locked = await database.RecommendationDailyMixes.Where(mix => mix.UserId == userId && mix.Day == day && mix.Version == version)
                 .ExecuteUpdateAsync(update => update.SetProperty(mix => mix.Version, version), cancellationToken);
             if (locked == 0) throw new RecommendationConflictException();
-            daily = await database.RecommendationDailyMixes.SingleAsync(mix => mix.UserId == userId && mix.Day == day, cancellationToken);
+            daily = await database.RecommendationDailyMixes.AsNoTracking().SingleAsync(mix => mix.UserId == userId && mix.Day == day, cancellationToken);
             if (daily.SavedPlaylistId is { } savedId)
             {
                 var saved = await database.Playlists.AsNoTracking().SingleOrDefaultAsync(playlist => playlist.Id == savedId && playlist.OwnerId == userId, cancellationToken);
@@ -159,7 +150,9 @@ public sealed class AudioRecommendations(StreamingDbContext database, IAudioReco
         if (await database.Recordings.AsNoTracking().CountAsync(recording => identifiers.Contains(recording.Id), cancellationToken) != identifiers.Length)
             throw new RecommendationInputException("Some tracks are no longer available. Refresh this selection before saving.");
         var created = await library.CreatePlaylistAsync(userId, new CreatePlaylistRequest { Name = request.Name.Trim(), RecordingIds = identifiers.ToList() }, cancellationToken);
-        if (daily is not null) { daily.SavedPlaylistId = created.Id; await database.SaveChangesAsync(cancellationToken); }
+        if (daily is not null)
+            await database.RecommendationDailyMixes.Where(mix => mix.UserId == userId && mix.Day == daily.Day && mix.Version == daily.Version)
+                .ExecuteUpdateAsync(update => update.SetProperty(mix => mix.SavedPlaylistId, (Guid?)created.Id), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new PlaylistResponse { Id = created.Id, Name = created.Name, Cover = created.Cover, CreatedAt = created.CreatedAt, RecordingCount = identifiers.Length };
     }

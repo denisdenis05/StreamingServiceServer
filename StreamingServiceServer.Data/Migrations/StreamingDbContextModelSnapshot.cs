@@ -848,6 +848,34 @@ namespace StreamingServiceServer.Data.Migrations
                     b.ToTable("RecommendationDailyMixes");
                 });
 
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecommendationPlaylistCache", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CacheKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("UserId", "CacheKey");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("RecommendationPlaylistCaches");
+                });
+
             modelBuilder.Entity("StreamingServiceServer.Data.Models.Recording", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1264,6 +1292,15 @@ namespace StreamingServiceServer.Data.Migrations
                         .HasForeignKey("SavedPlaylistId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("SocialMedia.Data.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("StreamingServiceServer.Data.Models.RecommendationPlaylistCache", b =>
+                {
                     b.HasOne("SocialMedia.Data.Models.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
